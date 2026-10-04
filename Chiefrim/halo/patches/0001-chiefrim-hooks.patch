@@ -1,0 +1,109 @@
+diff --git a/source/game/game.c b/source/game/game.c
+index 0549cc04..8a62a182 100644
+--- a/source/game/game.c
++++ b/source/game/game.c
+@@ -179,6 +179,7 @@ struct game_options;
+ #include "structures/structures.h"
+ #include "units/units.h"
+ #include "units/vehicles.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* network_game_globals.c's */
+ boolean network_game_distributed_client(void);
+@@ -323,7 +324,7 @@ void game_tick(
+ 	/* (the host's actors drive the host's units, which a client of the
+ 	distributed netcode has from the host: its own would fight the host's
+ 	positions, and could place objects of their own) */
+-	if (!network_game_distributed_client())
++	if (!network_game_distributed_client() && !chiefrim_active()) /* CHIEFRIM: no level AI */
+ 		ai_update();
+ 	players_update_before_game();
+ 
+@@ -337,7 +338,8 @@ void game_tick(
+ 	unlock_global_random_seed();
+ 	game_engine_update();
+ 	editor_update();
+-	hs_update();
++	if (!chiefrim_active()) /* CHIEFRIM: no level scripts or cutscenes */
++		hs_update();
+ 	recorded_animations_update();
+ 	objects_update();
+ 	players_update_after_game();
+diff --git a/source/main/main.c b/source/main/main.c
+index e35691e1..a1b87c1a 100644
+--- a/source/main/main.c
++++ b/source/main/main.c
+@@ -388,6 +388,7 @@ symbols in this file:
+ #include "text/draw_string.h"
+ #include "text/font_group.h"
+ #include "tag_files/files.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -3082,6 +3083,7 @@ void main_loop(
+ 	main_globals.switch_to_structure_bsp_index = NONE;
+ 	main_globals.halt_time_scale = TRUE;
+ 
++	chiefrim_initialize(); /* CHIEFRIM: before init.txt loads a map */
+ 	console_initialize();
+ 	debug_keys_initialize();
+ 	game_initialize();
+@@ -3266,6 +3268,7 @@ void main_loop(
+ 					collision_log_continue_period(1);
+ 					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+ 					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
++					chiefrim_frame(); /* CHIEFRIM */
+ 					collision_log_end_period();
+ 					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+ 				}
+diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
+index 265149a3..c3387cee 100644
+--- a/source/scenario/scenario.c
++++ b/source/scenario/scenario.c
+@@ -194,6 +194,7 @@ symbols in this file:
+ #include "sound/sound_manager.h"
+ #include "structures/structure_bsp_definitions.h"
+ #include "units/units.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -409,6 +410,17 @@ struct collision_bsp *global_collision_bsp_get(
+ 	return global_collision_bsp;
+ }
+ 
++/* CHIEFRIM: replaces the collision of the loaded structure BSP (the
++structure BSP itself stays: clusters, rendering, sound). */
++void scenario_override_collision_bsp(
++	struct collision_bsp *collision_bsp)
++{
++	global_collision_bsp = collision_bsp;
++	global_bsp3d = &collision_bsp->bsp3d;
++
++	return;
++}
++
+ struct bsp3d *global_bsp3d_get(
+ 	void)
+ {
+@@ -1039,6 +1051,7 @@ boolean scenario_switch_structure_bsp(
+ 				struct collision_bsp);
+ 			scenario_globals->structure_bsp_index = structure_bsp_index;
+ 			global_structure_bsp_index = structure_bsp_index;
++			chiefrim_structure_bsp_loaded(); /* CHIEFRIM */
+ 
+ 			if (had_old_structure_bsp)
+ 			{
+diff --git a/source/scenario/scenario.h b/source/scenario/scenario.h
+index 73088440..9e12c2f7 100644
+--- a/source/scenario/scenario.h
++++ b/source/scenario/scenario.h
+@@ -100,6 +100,7 @@ struct scenario *global_scenario_try_and_get(void);
+ struct structure_bsp *global_structure_bsp_get(void);
+ struct collision_bsp *global_collision_bsp_get(void);
+ struct bsp3d *global_bsp3d_get(void);
++void scenario_override_collision_bsp(struct collision_bsp *collision_bsp); /* CHIEFRIM */
+ struct game_globals *scenario_get_game_globals(void);
+ long global_structure_bsp_tag_index_get(void);
+ void scenario_location_award_bonus(struct location *location);

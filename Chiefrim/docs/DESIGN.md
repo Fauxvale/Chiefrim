@@ -3,7 +3,7 @@
 > Play Skyrim as Master Chief: Halo: Combat Evolved's movement, shields, weapons, grenades, HUD
 > and first-person view, running in the real Skyrim world and fighting Skyrim's NPCs.
 
-Status: draft v0.1 · 2026-10-04
+Status: draft v0.2 · 2026-10-04 (Phase 0 findings folded in)
 
 The approach follows [SkyCraft](https://github.com/chasmlol/SkyCraft) (Skyrim + Minecraft). Its
 `docs/DESIGN.md` is the reference for anything this doc does not change.
@@ -64,7 +64,7 @@ spare message types (§10).
 ┌──── SkyrimSE.exe (Proton, Win x64) ────────────────┐        ┌──── halo (native Linux, i386, hidden window) ────────────────┐
 │  chiefrim.dll  (SKSE plugin, CommonLibSSE-NG)       │        │  Chiefrim engine hooks (in the decomp fork)                  │
 │                                                     │        │                                                              │
-│  WorldExporter   ─ Skyrim collision near player ────┼──────▶ │  CollisionField  → added to Halo collision queries           │
+│  WorldExporter   ─ Skyrim collision near player ────┼──────▶ │  CollisionField  → runtime collision BSP, swapped in         │
 │  ActorMirror     ─ nearby NPCs (pos, box, state) ───┼──────▶ │  proxy bipeds (invisible, hittable)                          │
 │  InputBridge     ─ raw keyboard/mouse ──────────────┼──────▶ │  replaces SDL input for player 1                             │
 │  HitBridge       ─ "NPC hit player for X" ──────────┼──────▶ │  object_cause_damage() on Chief (shields first)              │
@@ -111,29 +111,49 @@ level's structure BSP. A point outside the BSP gets no cluster, and the object i
 `_object_outside_of_map_bit` (`source/objects/objects.c:1797`). It then leaves the PVS, stops
 rendering, and stops colliding with other objects.
 
-The fix comes in two steps:
+**The fix (proved in Phase 0): Chiefrim supplies the level's collision BSP.**
 
-| Stage | Method |
-|---|---|
-| **A: Phase 0 shortcut** | Load a small real map. Hook `scenario_location_from_point` (`source/scenario/scenario.c:791`) so that while Chiefrim is active, every point resolves to one valid cluster and leaf. Turn off structure collision (§5.2) so the map's own geometry is never touched. Skip structure and sky rendering (§9). |
-| **B: final** | Build a **synthetic structure BSP and collision BSP in memory** at map load: one cluster and one leaf, bounds that cover the worldspace, no surfaces, no lightmaps, no pathfinding data. The tag structs are all in the source (`structures/structure_bsp_definitions.h`, `physics/collision_bsp_definitions.h`). |
+- The host map's structure BSP stays loaded: its clusters, sky, fog and sound environments.
+- Chiefrim builds a **collision BSP in memory** and makes it the global one through
+  `scenario_override_collision_bsp`. The hook is at the swap point, `scenario/scenario.c` (where a
+  structure BSP becomes the global one).
+- Every point above Chiefrim's surfaces falls in **leaf 0**, which maps to one of the host map's
+  clusters. So nothing is ever outside the map, and nothing in Halo needs to know it isn't in its
+  own level.
+- The BSP's plane list **starts with a copy of the host map's planes**, because the structure
+  BSP's cluster portals index it (`structure_clusters_in_sphere`). Chiefrim's own planes come after
+  them. Phase 0 found this the hard way: a one-plane BSP crashed the first time a light connected
+  to the map.
 
-Halo's own **AI pathfinding is not needed in v1**, so the synthetic BSP carries no path data.
-This is the main reason the Covenant stretch goal is a separate decision.
+Halo's own **AI pathfinding is not needed in v1**, so the BSP carries no path data. This is the
+main reason the Covenant stretch goal is a separate decision.
 
 ### 5.2 CollisionField: how Skyrim's shape reaches Halo physics
 
-Halo's biped and projectile physics ask for collision through a few entry points in
-`source/physics/collisions.c`:
+The first plan was to hook Halo's collision entry points (`collision_get_features_in_sphere`,
+`collision_test_vector` and the rest) and add loose triangles to their results. **Phase 0 ruled
+that out.** Halo's biped movement keeps the **index of the BSP surface it stands on and walks
+that surface's edges** (`units/bipeds.c`: support surfaces, `biped_find_ground_surface`, the
+"stick to surface" pass after `collision_move_pill`). Loose triangles have no surface or edge
+indices.
 
-- `collision_get_features_in_sphere` (`:750`): gathers spheres, cylinders and **prisms**
-  (triangles) near a body. Biped movement (`collision_move_pill` and friends) is built on it.
-- `collision_test_vector` (`:291`): ray tests, used by projectiles, aim and the camera.
-- `collision_test_point`, `collision_test_sphere`, `collision_test_pill`.
+**So Skyrim's shape reaches Halo as a real collision BSP**, built by Chiefrim and swapped in as in
+§5.1. Halo's own code then runs unchanged against it: biped movement with step-up, sliding, slope
+limits, jumping and fall damage, plus projectiles, decals and the camera, all with no hooks in the
+collision code.
 
-A Chiefrim hook in each one **adds results from the CollisionField**: a triangle soup of Skyrim
-collision near the player, kept in a spatial hash in Halo units. Halo's own collision response then
-runs unchanged against it: step-up, sliding, slope limits, jumping and fall damage.
+- **Phase 0:** a hand-built BSP of one flat square at the Skyrim player's ground height. It has one
+  node, one leaf, one surface, four edges and four vertices.
+- **Phase 1:** a **runtime BSP compiler**. It takes Skyrim's collision triangles near the player
+  (from the WorldExporter), builds the 3D BSP, leaves, 2D BSPs, surfaces and winged edges on a
+  worker thread, and swaps the result in between ticks as the player moves. Skyrim's triangle soup
+  isn't sealed, so open edges have no surface on their other side, as the Phase 0 floor's do.
+
+**Winding:** a surface's edges run **counter-clockwise in its 2D projection**. That is the winding
+the ray query (`collision_surface_test_point`) and the sphere query (`collision_surface_test_sphere`)
+treat as inside. `collision_surface_test_point2d`, used only by AI pathfinding, has the opposite
+sign. That may be a decompilation slip, and is to be reported upstream. The floor's self-test
+checks the winding with the sphere query before any BSP is installed.
 
 This is **better than SkyCraft**. Minecraft needs axis-aligned boxes, so SkyCraft voxelised
 Skyrim at 1/8 block. Halo collides against triangles, so Skyrim's geometry goes in as it is: slopes
@@ -153,14 +173,18 @@ effects) are mapped from Skyrim's Havok material IDs: stone, dirt, snow, wood, m
 ### 5.3 Tag source
 
 Halo loads **one cache `.map` at a time**, and every biped, weapon, projectile, effect and HUD
-definition comes from that map. Chiefrim loads one **host map**. Phase 0 includes a small tool
-that lists each map's bipeds and weapons, and we pick from that list:
+definition comes from that map. Chiefrim loads one **host map**.
 
-- A multiplayer map (for example `bloodgulch`) loads quickly and has the multiplayer weapon set
-  and the multiplayer Chief biped.
-- A campaign map has the campaign Chief and more effects, but fewer weapons per map.
-
-Merging tags from several maps is later work.
+- **It must be a campaign level.** Loaded with `map_name`, a multiplayer map starts no game and
+  spawns nobody. The port's own profile-training script skips them for the same reason.
+- **Phase 0 uses `b30`** (The Silent Cartographer), the decomp's own default campaign level.
+- **In Chiefrim mode the level's logic is off:** `game_tick` skips `hs_update` (scripts and
+  cutscenes) and `ai_update`, and Chiefrim erases the level's actors once Chief exists. What is
+  left is Halo's engine with Chief in it.
+- Chief first spawns at the level's own starting location, on the level's own collision. When
+  Skyrim's world context arrives, Chiefrim installs its collision and moves him (§6).
+- A small tool that lists each map's bipeds and weapons is still to come. It will pick the host
+  map for weapon coverage. Merging tags from several maps is later work.
 
 ## 6. The player
 
@@ -302,8 +326,9 @@ events (SkyCraft's `Local\SkyCraft_v1`) are not visible across that boundary.
   - Halo creates it and maps it with `mmap(MAP_SHARED)`.
   - The plugin opens it as `Z:\dev\shm\chiefrim_v1` and maps it with `CreateFileMapping` +
     `MapViewOfFile`. Wine backs that with a shared mmap of the same file.
-  - **Phase 0 verifies** that writes are coherent both ways, and that pressure-vessel shares
-    `/dev/shm` with the Proton container.
+  - **Verified in Phase 0** (`tools/linktest/`): a Windows x64 peer under Proton Experimental,
+    inside Steam Linux Runtime 4, against a native i386 peer. 100,000 ring round trips averaged
+    0.38 µs (max 65 µs), with no torn slot reads in about 2.8 million reads either way.
 - **No named events.** Both sides poll seqlock slots and ring heads, each once per frame or tick,
   with a short spin around the frame lockstep.
 - **Fallback transport:** build Halo for Windows and run it inside Skyrim's Proton prefix. Then
@@ -354,8 +379,13 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
 - **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
   stamina and the crosshair, because Halo's HUD replaces them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.
-- **Launching (v1):** the user starts Halo with `tools/launch_halo.sh` (hidden, Chiefrim mode, host
-  map). The plugin connects when it sees a heartbeat. Auto-launch from inside Proton runs into
+- **Launching (v1):** the user starts Halo with a launch script (Chiefrim mode, host map; Phase 0
+  has `tools/run_phase0.sh` for the test stand).
+- **Hidden window:** the port's own hidden-window mode (`HALO_HIDDEN_WINDOW`) crashes the GL
+  driver within seconds in the lens-flare occlusion query (`rasterizer_lens_flares_submit_occlusion_tests`).
+  This also happens on stock b30 without Chiefrim, so it's an upstream bug. The Phase 0 test stand
+  runs Halo in a headless gamescope instead. Phase 2 renders offscreen and skips Halo's lens
+  flares (Skyrim draws the sky), which removes the problem for Chiefrim. The plugin connects when it sees a heartbeat. Auto-launch from inside Proton runs into
   Steam's runtime container, where Halo's 32-bit SDL3 and GL libraries may be missing, so it is
   later work.
 
@@ -365,11 +395,11 @@ Each phase ends in something you can play.
 
 | # | Phase | "Done" when |
 |---|---|---|
-| 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs hidden on the host map with the stage-A location hook and a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` and `tools/fake_halo.py` stand in for either side. |
-| 1 | **Walk Skyrim as Chief** | CollisionField stage A, CameraDriver, InputBridge. You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
+| 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status (2026-10-04):** everything on the Halo side is done and tested against `fake_skyrim.py`: the link across Proton, the protocol, the floor BSP, Chief placed and walking, and player state published. Still to do: the SKSE plugin (toolchain, link, PlayerPuppet). |
+| 1 | **Walk Skyrim as Chief** | CollisionField stage A through the runtime BSP compiler (§5.2), CameraDriver, InputBridge. You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
-| 4 | **Full world** | CollisionField stage C, interiors and load doors, synthetic BSP (stage B), the deep-water decision, furniture and scene hand-off. |
+| 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |
 | 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
@@ -382,8 +412,10 @@ Proposed. Each one needs the user's call before the phase that depends on it.
    values. (§8)
 2. **Weapon acquisition** (Phase 3): starting loadout + a debug spawn command for v1. (§8.4)
 3. **Deep water** (Phase 4): walk on the bottom, or hand over to Skyrim's swimming. (§6)
-4. **Host map** (Phase 0): chosen from the tag-listing tool's output. (§5.3)
-5. **Decomp management** (Phase 0): see §14.
+4. **Host map:** a campaign level, `b30` for now. Final choice from the tag-listing tool's output.
+   (§5.3)
+5. **Decomp management:** settled in Phase 0: pinned upstream commit, patches and our own
+   sources, no fork. (§14)
 6. **Covenant enemies:** deferred, stretch goal.
 
 ## 14. Repo layout
@@ -395,30 +427,39 @@ Chiefrim/
   skse/                          SKSE plugin (CMake, vcpkg, CommonLibSSE-NG, C++23,
                                  clang-cl cross toolchain file)
   halo/                          Halo-side changes (see below)
-  tools/                         launch_halo.sh, fake_skyrim.py, fake_halo.py, tag lister,
-                                 deploy-to-Vortex script
+  tools/                         setup_halo.py, run_phase0.sh, fake_skyrim.py, test_protocol.sh,
+                                 linktest/, later: tag lister, deploy-to-Vortex script
+  build/                         (git-ignored) test builds, Halo test data root, screenshots
 ```
 
-**Halo-side changes (proposed):** a fork of halo-ce-universal on a `chiefrim` branch, added as a
-git submodule at `Chiefrim/halo/`.
+**Halo-side changes (settled in Phase 0):** no fork. `halo/` holds:
 
-- New code lives under `port/chiefrim/`: the link, CollisionField, proxies, layer rendering and
-  input source.
-- Upstream files only get small hook calls marked `/* CHIEFRIM */`. That keeps rebasing onto
-  upstream manageable.
-- The decomp repo contains no game data. Its own `.gitignore` already excludes `assets/` and
-  extracted maps.
+- `UPSTREAM`: the pinned halo-ce-universal commit.
+- `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (about 20 lines in
+  `main.c`, `game.c`, `scenario.c` and `scenario.h`).
+- `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`).
+
+`tools/setup_halo.py` clones upstream into `halo/.work` (git-ignored), checks out the pin, applies
+the patches, copies `src/` and the protocol header into `source/chiefrim/` (the game's build
+compiles every `.c` file under `source/` by itself), and builds. `tools/save_halo_patch.sh` writes
+hook edits made in `.work` back to `patches/`. Updating upstream means moving the pin and
+refreshing the patches.
+
+The decomp repo contains no game data. Its own `.gitignore` already excludes `assets/` and
+extracted maps. The test data root (`build/halo-data`) holds only a link to the user's `maps/`.
 
 ## 15. Risks
 
 | Risk | Mitigation |
 |---|---|
-| `/dev/shm` sharing across the Proton container fails or isn't coherent | First test in Phase 0. Fallback: Windows Halo build inside the Proton prefix (§10) |
+| ~~`/dev/shm` sharing across the Proton container~~ | **Resolved in Phase 0:** works, 0.38 µs round trips (§10) |
 | Cross-compiling CommonLibSSE-NG with clang-cl on Linux | First task in Phase 0. Fallback: build in a Windows VM, or MSVC under Wine |
-| Halo depends on the BSP in more places than §5.1 covers (decals, lighting, sound environments, PVS) | The stage-A hook surfaces them in Phase 0. Each one is fixed at its source or stubbed |
+| Halo depends on the BSP in more places than §5.1 covers (decals, lighting, sound environments, PVS) | Partly resolved: keeping the host map's structure BSP and its plane list covers clusters, portals and lights. More dependencies may show once Skyrim's real geometry replaces the floor |
+| The runtime BSP compiler (§5.2) is the largest new piece | Start from the hand-built floor's format and self-tests. Build on a worker thread, swap between ticks. Keep regions small (a ring of cells around the player) |
+| The port's hidden-window mode crashes in the lens-flare query (upstream) | Test stand uses headless gamescope. Phase 2 renders offscreen without lens flares (§11) |
 | CPU readback of three layers costs too much | Only redraw the HUD layer when it changes. Lower resolution for the world layer. GPU interop later |
 | SSE Display Tweaks' swap-chain and frame-limiter hooks interfere with compositing or the lockstep | Test with it from Phase 2. If it conflicts, adjust its settings or hook at a point it doesn't touch. A shader replacer (Community Shaders, ENB) added later is a separate compatibility task |
 | Halo's 30 Hz tick against Skyrim's frame rate | The port already interpolates (`render_interpolation.c`). Skyrim follows the interpolated pose |
 | Proxy hitboxes are wrong for non-humanoid creatures | Scaled biped for v1. Built-in-memory collision model in Phase 5 |
-| Upstream decomp moves quickly | Pin the submodule commit. Keep hooks small and marked |
+| Upstream decomp moves quickly | Pinned commit (`halo/UPSTREAM`). Hooks small and marked |
 | Legal | Fan project. Nothing from either game is distributed, and the user supplies both games. Whether releases may include a built Halo executable is decided before any public release |
