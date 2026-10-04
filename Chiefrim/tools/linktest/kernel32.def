@@ -1,0 +1,13 @@
+LIBRARY kernel32.dll
+EXPORTS
+CreateFileW
+CreateFileMappingW
+MapViewOfFile
+UnmapViewOfFile
+CloseHandle
+GetCurrentProcessId
+GetTickCount64
+QueryPerformanceCounter
+QueryPerformanceFrequency
+Sleep
+ExitProcess
