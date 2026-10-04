@@ -54,7 +54,7 @@ spare message types (§10).
 | Skyrim | **SE/AE 1.6.1170**, Steam, Proton Experimental | SKSE64 1.6.1170 and Address Library are installed. SkyCraft used 1.7.104; CommonLibSSE-NG covers both. |
 | Mod manager | Vortex | A heavy mod list (~250 files in `SKSE/Plugins`). No shader or ENB replacer is installed; Community Shaders has been removed. **SSE Display Tweaks** hooks the swap chain (§9, §15) |
 | Display | 1920x1080 borderless, VSync on | Set by SSE Display Tweaks (`FramerateLimit = 300`) |
-| SKSE plugin | C++23, CommonLibSSE-NG, CMake + vcpkg | **Cross-compiled on Linux** to a Windows x64 DLL: clang-cl + lld-link + an xwin MSVC SDK. This is proved in Phase 0. |
+| SKSE plugin | C++23, CommonLibSSE-NG (git submodule), CMake | **Cross-compiled on Linux** to a Windows x64 DLL: clang-cl + lld-link against the MSVC CRT and Windows SDK fetched by xwin (`tools/setup_skse.sh`). Proved in Phase 0. CommonLib's dependencies come through CMake FetchContent instead of vcpkg (spdlog, rapidcsv, and DirectXTK's SimpleMath only, which avoids its shader compiler). CMake runs from a bracket-free link (`~/.cache/chiefrim/root`), because `file(GLOB)` reads the `[ ]` in the project path as a pattern. |
 | Halo | halo-ce-universal, **Linux 32-bit (i386) build**, OpenGL 4.5, SDL3 | `python configure.py && ninja linux`. 32-bit because the tag and cache data contain 32-bit pointers. |
 | Halo data | `maps/` extracted from the user's Xbox ISO | The game loads one `.map` (cache file) at a time (§5.3) |
 
@@ -395,7 +395,7 @@ Each phase ends in something you can play.
 
 | # | Phase | "Done" when |
 |---|---|---|
-| 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status (2026-10-04):** everything on the Halo side is done and tested against `fake_skyrim.py`: the link across Proton, the protocol, the floor BSP, Chief placed and walking, and player state published. Still to do: the SKSE plugin (toolchain, link, PlayerPuppet). |
+| 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status (2026-10-04):** everything is built. Halo side: tested against `fake_skyrim.py` (link across Proton, protocol, floor BSP, Chief placed and walking, player state published). SKSE side: the plugin cross-compiles, loads under Proton with every import resolved, and has the link, world context and teleport, and PlayerPuppet. **Still to do: the first in-game test with Skyrim.** |
 | 1 | **Walk Skyrim as Chief** | CollisionField stage A through the runtime BSP compiler (§5.2), CameraDriver, InputBridge. You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
@@ -424,11 +424,12 @@ Proposed. Each one needs the user's call before the phase that depends on it.
 Chiefrim/
   docs/DESIGN.md
   protocol/chiefrim_protocol.h   shared C header + layout static_asserts
-  skse/                          SKSE plugin (CMake, vcpkg, CommonLibSSE-NG, C++23,
-                                 clang-cl cross toolchain file)
+  skse/                          SKSE plugin (CMake, CommonLibSSE-NG submodule, C++23,
+                                 cmake/clang-cl-xwin.cmake cross toolchain)
   halo/                          Halo-side changes (see below)
-  tools/                         setup_halo.py, run_phase0.sh, fake_skyrim.py, test_protocol.sh,
-                                 linktest/, later: tag lister, deploy-to-Vortex script
+  tools/                         setup_halo.py, setup_skse.sh, package_skse.sh, launch_halo.sh,
+                                 run_phase0.sh, fake_skyrim.py, test_protocol.sh, linktest/;
+                                 later: tag lister
   build/                         (git-ignored) test builds, Halo test data root, screenshots
 ```
 
@@ -453,7 +454,8 @@ extracted maps. The test data root (`build/halo-data`) holds only a link to the 
 | Risk | Mitigation |
 |---|---|
 | ~~`/dev/shm` sharing across the Proton container~~ | **Resolved in Phase 0:** works, 0.38 µs round trips (§10) |
-| Cross-compiling CommonLibSSE-NG with clang-cl on Linux | First task in Phase 0. Fallback: build in a Windows VM, or MSVC under Wine |
+| ~~Cross-compiling CommonLibSSE-NG with clang-cl on Linux~~ | **Resolved in Phase 0:** builds with clang-cl + xwin; the DLL loads under Proton |
+| CommonLibSSE-NG is **GPL-3.0-or-later** since v7.5.0 (it was MIT). A plugin that links it must itself be GPL-compatible when distributed | Decide before any release: license Chiefrim's plugin GPL-3.0-or-later (the Halo decomp is CC0, so it's compatible), or pin a pre-v7.5.0 MIT CommonLib. Local builds are unaffected |
 | Halo depends on the BSP in more places than §5.1 covers (decals, lighting, sound environments, PVS) | Partly resolved: keeping the host map's structure BSP and its plane list covers clusters, portals and lights. More dependencies may show once Skyrim's real geometry replaces the floor |
 | The runtime BSP compiler (§5.2) is the largest new piece | Start from the hand-built floor's format and self-tests. Build on a worker thread, swap between ticks. Keep regions small (a ring of cells around the player) |
 | The port's hidden-window mode crashes in the lens-flare query (upstream) | Test stand uses headless gamescope. Phase 2 renders offscreen without lens flares (§11) |

@@ -1,0 +1,4 @@
+[submodule "Chiefrim/skse/extern/CommonLibSSE-NG"]
+	path = Chiefrim/skse/extern/CommonLibSSE-NG
+	url = https://github.com/alandtse/CommonLibVR.git
+	branch = ng
