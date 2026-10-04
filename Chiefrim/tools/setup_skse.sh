@@ -8,17 +8,16 @@
 #
 # Usage: tools/setup_skse.sh [--accept-license]
 # Result: build/skse/Chiefrim.dll
-#
-# CMake's file(GLOB) reads [ and ] as a pattern, and the project lives under
-# "Master Chief In Skyrim Project [ Chiefrim ]". So CMake runs from a link
-# without brackets (~/.cache/chiefrim/root -> Chiefrim/), and CMake itself is
-# installed under ~/.cache/chiefrim/venv for the same reason.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 tools="$root/.tools"
-cache="${XDG_CACHE_HOME:-$HOME/.cache}/chiefrim"
-mkdir -p "$cache"
-ln -sfn "$root" "$cache/root"
+case "$root" in
+*[][*?]*)
+	# CMake's file(GLOB) reads these as a pattern: it then finds neither its
+	# own compiler-detection files nor the sources.
+	echo "The path $root contains [ ] * or ?, which CMake can't build in. Move or rename the folder."
+	exit 1 ;;
+esac
 xwin_version=0.10.0
 xwin_name="xwin-$xwin_version-x86_64-unknown-linux-musl"
 mkdir -p "$tools"
@@ -42,18 +41,16 @@ if [ ! -d "$tools/xwin/crt" ]; then
 		splat --output "$tools/xwin"
 fi
 
-cmake="$cache/venv/bin/cmake"
+cmake="$tools/venv/bin/cmake"
 if [ ! -x "$cmake" ]; then
-	python3 -m venv "$cache/venv"
-	"$cache/venv/bin/pip" install -q cmake
+	python3 -m venv "$tools/venv"
+	"$tools/venv/bin/pip" install -q cmake
 fi
 
 git -C "$root/.." submodule update --init Chiefrim/skse/extern/CommonLibSSE-NG
 
-link="$cache/root"
-"$cmake" -S "$link/skse" -B "$link/build/skse" -G Ninja \
-	-DCMAKE_TOOLCHAIN_FILE="$link/skse/cmake/clang-cl-xwin.cmake" \
-	-DXWIN_DIR="$link/.tools/xwin" \
+"$cmake" -S "$root/skse" -B "$root/build/skse" -G Ninja \
+	-DCMAKE_TOOLCHAIN_FILE="$root/skse/cmake/clang-cl-xwin.cmake" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo
-"$cmake" --build "$link/build/skse" --target Chiefrim
+"$cmake" --build "$root/build/skse" --target Chiefrim
 ls -l "$root/build/skse/Chiefrim.dll"
