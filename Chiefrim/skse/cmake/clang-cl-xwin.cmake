@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Cross-compiles Windows x64 binaries on Linux with clang-cl and lld-link,
 # against the MSVC CRT and Windows SDK that xwin downloads (docs/DESIGN.md §2).
 #

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the SKSE plugin on Linux (docs/DESIGN.md §2): clang-cl and lld-link
 # against Microsoft's CRT and Windows SDK, downloaded by xwin.
 #
@@ -48,9 +49,11 @@ if [ ! -x "$cmake" ]; then
 fi
 
 git -C "$root/.." submodule update --init Chiefrim/skse/extern/CommonLibSSE-NG
+python3 "$root/tools/check_licenses.py"  # stays GPL-3.0 compatible (docs/LICENSING.md)
 
 "$cmake" -S "$root/skse" -B "$root/build/skse" -G Ninja \
 	-DCMAKE_TOOLCHAIN_FILE="$root/skse/cmake/clang-cl-xwin.cmake" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo
 "$cmake" --build "$root/build/skse" --target Chiefrim
+python3 "$root/tools/check_licenses.py"  # again, now the dependencies are fetched
 ls -l "$root/build/skse/Chiefrim.dll"

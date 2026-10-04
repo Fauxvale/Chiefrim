@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Builds the Halo side of Chiefrim (docs/DESIGN.md §14).
 
 Chiefrim does not fork halo-ce-universal. It pins an upstream commit, and
@@ -6,9 +7,12 @@ this script makes the work tree halo/.work (git-ignored) from it:
 
 1. clone upstream into halo/.work (first run), or reset it to the pin;
 2. apply halo/patches/*.patch (the small hooks marked CHIEFRIM);
-3. copy halo/src/* and protocol/chiefrim_protocol.h to source/chiefrim/,
+3. copy halo/overrides/** over the tree: whole files Chiefrim replaces,
+   for licensing (docs/LICENSING.md: xiso.c);
+4. copy halo/src/* and protocol/chiefrim_protocol.h to source/chiefrim/,
    where the game's build picks up every .c file by itself;
-4. configure and build with ninja (unless --no-build).
+5. check licenses (tools/check_licenses.py), then configure and build with
+   ninja (unless --no-build).
 
 The result is halo/.work/build/linux/halo. No game data is involved: the
 game asks for the user's own Xbox disc image, or finds maps/ next to it.
@@ -52,12 +56,20 @@ def main():
         for patch in sorted((HALO / "patches").glob("*.patch")):
             run("git", "apply", "--whitespace=nowarn", patch)
 
+    overrides = HALO / "overrides"
+    for source in sorted(overrides.rglob("*")):
+        if source.is_file():
+            destination = WORK / source.relative_to(overrides)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+
     target = WORK / "source" / "chiefrim"
     target.mkdir(exist_ok=True)
     for source in sorted((HALO / "src").iterdir()):
         shutil.copy2(source, target / source.name)
     shutil.copy2(ROOT / "protocol" / "chiefrim_protocol.h", target / "chiefrim_protocol.h")
 
+    run(sys.executable, ROOT / "tools" / "check_licenses.py", "--halo", cwd=ROOT)
     if options.no_build:
         return 0
     configure = [sys.executable, "configure.py", "--pgo=off", "--lto=off"]

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Phase 0 test stand (docs/DESIGN.md §12): runs the Chiefrim Halo build in
 # Chiefrim mode against tools/fake_skyrim.py, then prints both sides' logs.
 #

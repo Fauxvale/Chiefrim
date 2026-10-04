@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Every third-party component that goes into a Chiefrim binary, with its
+# license (an SPDX expression) and how tools/check_licenses.py verifies it.
+# Policy: docs/LICENSING.md. Adding a dependency means adding it here first;
+# the checker fails the build for anything unlisted or not allowed.
+
+[project]
+license = "GPL-3.0-or-later"
+# sha256 of the GNU's own gpl-3.0.txt; LICENSE at the repo root must match it
+license_sha256 = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+
+[policy]
+# Code linked or compiled into Chiefrim's binaries must be under one of these
+# (all GPL-3.0 compatible). An "A OR B" expression passes if either side
+# does; the component's entry then names the license Chiefrim takes.
+code = [
+	"GPL-3.0-or-later", "GPL-3.0-only", "GPL-2.0-or-later",
+	"LGPL-3.0-or-later", "LGPL-3.0-only", "LGPL-2.1-or-later",
+	"MIT", "MIT-0", "X11", "ISC", "0BSD", "BSD-2-Clause", "BSD-3-Clause",
+	"Apache-2.0", "Zlib", "libtiff", "BSL-1.0", "MPL-2.0",
+	"CC0-1.0", "Unlicense",
+]
+# Allowed only for data (fonts, images) shipped or embedded alongside code.
+data = ["OFL-1.1", "CC-BY-4.0", "CC-BY-SA-4.0", "CC0-1.0", "LicenseRef-PublicDomain"]
+# Never, in any form that is distributed with Chiefrim.
+forbidden = [
+	"BSD-4-Clause", "GPL-2.0-only", "LGPL-2.0-only", "AGPL-3.0-only",
+	"SSPL-1.0", "CC-BY-NC-4.0", "CC-BY-ND-4.0", "JSON", "proprietary",
+]
+
+# ---- SKSE plugin (skse/)
+
+[skse.commonlib]
+path = "skse/extern/CommonLibSSE-NG"
+license = "GPL-3.0-or-later WITH LicenseRef-CommonLibSSE-Modding-Exception"
+license_file = "COPYING.txt"
+markers = ["GNU GENERAL PUBLIC LICENSE", "Version 3, 29 June 2007"]
+readme_marker = "GPL-3.0-or-later"
+exceptions_file = "EXCEPTIONS.md"
+
+# One entry per FetchContent_Declare in skse/CMakeLists.txt.
+[[skse.fetchcontent]]
+name = "spdlog"
+license = "MIT"
+license_file = "LICENSE"
+markers = ["MIT License", "Gabi Melman"]
+notice = "Copyright (c) 2016 - present, Gabi Melman and spdlog contributors."
+bundles = "fmt (MIT; Copyright (c) 2012 - present, Victor Zverovich and {fmt} contributors), include/spdlog/fmt/bundled"
+
+[[skse.fetchcontent]]
+name = "rapidcsv"
+license = "BSD-3-Clause"
+license_file = "LICENSE"
+markers = ["BSD 3-Clause License", "Kristofer Berggren"]
+notice = "Copyright (c) 2017, Kristofer Berggren"
+
+[[skse.fetchcontent]]
+name = "directxtk"
+license = "MIT"
+license_file = "LICENSE"
+markers = ["MIT License", "Microsoft Corporation"]
+notice = "Copyright (c) Microsoft Corporation. (SimpleMath only)"
+
+# Linked from the platform, never shipped by Chiefrim: the GPL's system
+# library exception (GPL-3.0 §1), and CommonLib's Modding Exception names
+# Windows and SKSE.
+[[skse.system]]
+name = "MSVC runtime and Windows SDK (incl. DirectXMath)"
+note = "fetched by xwin for building only; the plugin uses the copy in the user's Windows/Proton"
+
+[[skse.system]]
+name = "SKSE64 runtime"
+note = "installed by the user"
+
+# ---- Halo (halo/): the pinned halo-ce-universal plus Chiefrim's files
+
+[halo.upstream]
+license = "CC0-1.0"
+license_file = "LICENSE.md"
+markers = ["CC0 1.0 Universal"]
+
+# One entry per folder in port/third_party of the pinned upstream.
+[[halo.third_party]]
+dir = "expat"
+license = "MIT"
+license_file = "COPYING"
+markers = ["Permission is hereby granted"]
+notice = "Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper; Copyright (c) 2001-2025 Expat maintainers"
+
+[[halo.third_party]]
+dir = "kcp"
+license = "MIT"
+license_file = "LICENSE"
+markers = ["MIT License"]
+notice = "Copyright (c) 2017 Lin Wei (skywind3000 at gmail.com)"
+
+[[halo.third_party]]
+dir = "mbedtls"
+license = "Apache-2.0 OR GPL-2.0-or-later"
+taken = "Apache-2.0"
+license_file = "LICENSE"
+markers = ["Apache-2.0", "GPL-2.0-or-later"]
+notice = "Copyright The Mbed TLS Contributors"
+
+[[halo.third_party]]
+dir = "miniupnpc"
+license = "BSD-3-Clause"
+license_file = "LICENSE"
+markers = ["BSD 3-Clause License"]
+notice = "Copyright (c) 2005-2025, Thomas BERNARD"
+
+[[halo.third_party]]
+dir = "monocypher"
+license = "BSD-2-Clause OR CC0-1.0"
+taken = "CC0-1.0"
+license_file = "LICENCE.md"
+markers = ["CC0"]
+notice = "Copyright (c) 2017-2023, Loup Vaillant"
+
+[[halo.third_party]]
+dir = "musl-math"
+license = "MIT"
+license_file = "COPYRIGHT"
+markers = ["MIT license"]
+notice = "Copyright (c) 2005-2020 Rich Felker, et al."
+
+[[halo.third_party]]
+dir = "stb"
+license = "MIT OR Unlicense"
+taken = "MIT"
+license_file = "LICENSE"
+markers = ["MIT"]
+notice = "Copyright (c) 2017 Sean Barrett"
+
+[[halo.third_party]]
+dir = "tomlc17"
+license = "MIT"
+license_file = "LICENSE"
+markers = ["MIT License"]
+notice = "Copyright (c) 2024-2026, CK Tan"
+
+# 4-clause BSD (advertising clause): GPL-incompatible. Its only user,
+# port/linux/src/xiso.c, is replaced by halo/overrides (docs/LICENSING.md).
+[[halo.third_party]]
+dir = "extract-xiso"
+license = "BSD-4-Clause"
+excluded = true
+replaced_by = "port/linux/src/xiso.c"
+# No compiled file may still carry its notice:
+banned_marker = "in@fishtank.com"
+
+# Inside the decompilation's own source tree.
+[[halo.in_source]]
+dir = "source/memory/zlib"
+license = "Zlib"
+notice = "Copyright (C) 1995-1998 Jean-loup Gailly and Mark Adler"
+
+[[halo.in_source]]
+dir = "source/bitmaps/libtiff"
+license = "libtiff"
+notice = "Copyright (c) 1988-1992 Sam Leffler; Copyright (c) 1991-1992 Silicon Graphics, Inc."
+
+# Fonts embedded in the Halo binary as data (port/assets/fonts).
+[[halo.data]]
+name = "Overpass"
+license = "OFL-1.1"
+notice = "Copyright 2021 The Overpass Project Authors"
+
+[[halo.data]]
+name = "OpenCE (from Newtown)"
+license = "OFL-1.1"
+notice = "Copyright 2026 The OpenCE Project Authors"
+
+[[halo.data]]
+name = "Newtown"
+license = "LicenseRef-PublicDomain"
+notice = "Roger White (1994), released into the public domain"
+
+[[halo.system]]
+name = "SDL3, glibc, Mesa/OpenGL, PipeWire/PulseAudio"
+note = "dynamically linked system libraries of the user's Linux distribution"

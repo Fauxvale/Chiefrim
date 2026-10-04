@@ -430,8 +430,11 @@ Chiefrim/
   tools/                         setup_halo.py, setup_skse.sh, package_skse.sh, launch_halo.sh,
                                  run_phase0.sh, fake_skyrim.py, test_protocol.sh, linktest/;
                                  later: tag lister
+  licenses.toml                  every third-party component and its license (LICENSING.md)
   build/                         (git-ignored) test builds, Halo test data root, screenshots
 ```
+
+At the repo root: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`.
 
 **Halo-side changes (settled in Phase 0):** no fork. `halo/` holds:
 
@@ -439,6 +442,8 @@ Chiefrim/
 - `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (about 20 lines in
   `main.c`, `game.c`, `scenario.c` and `scenario.h`).
 - `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`).
+- `overrides/`: whole upstream files Chiefrim replaces, for licensing (`port/linux/src/xiso.c`;
+  see [LICENSING.md](LICENSING.md)).
 
 `tools/setup_halo.py` clones upstream into `halo/.work` (git-ignored), checks out the pin, applies
 the patches, copies `src/` and the protocol header into `source/chiefrim/` (the game's build
@@ -455,7 +460,7 @@ extracted maps. The test data root (`build/halo-data`) holds only a link to the 
 |---|---|
 | ~~`/dev/shm` sharing across the Proton container~~ | **Resolved in Phase 0:** works, 0.38 µs round trips (§10) |
 | ~~Cross-compiling CommonLibSSE-NG with clang-cl on Linux~~ | **Resolved in Phase 0:** builds with clang-cl + xwin; the DLL loads under Proton |
-| CommonLibSSE-NG is **GPL-3.0-or-later** since v7.5.0 (it was MIT). A plugin that links it must itself be GPL-compatible when distributed | Decide before any release: license Chiefrim's plugin GPL-3.0-or-later (the Halo decomp is CC0, so it's compatible), or pin a pre-v7.5.0 MIT CommonLib. Local builds are unaffected |
+| ~~CommonLibSSE-NG is GPL-3.0-or-later~~ | **Decided (2026-10-04): Chiefrim is GPL-3.0-or-later.** Everything stays GPL-3.0 compatible, checked by `tools/check_licenses.py` against `licenses.toml` ([LICENSING.md](LICENSING.md)). The port's extract-xiso-based disc reader (4-clause BSD) is replaced by a stub |
 | Halo depends on the BSP in more places than §5.1 covers (decals, lighting, sound environments, PVS) | Partly resolved: keeping the host map's structure BSP and its plane list covers clusters, portals and lights. More dependencies may show once Skyrim's real geometry replaces the floor |
 | The runtime BSP compiler (§5.2) is the largest new piece | Start from the hand-built floor's format and self-tests. Build on a worker thread, swap between ticks. Keep regions small (a ring of cells around the player) |
 | The port's hidden-window mode crashes in the lens-flare query (upstream) | Test stand uses headless gamescope. Phase 2 renders offscreen without lens flares (§11) |
@@ -464,4 +469,4 @@ extracted maps. The test data root (`build/halo-data`) holds only a link to the 
 | Halo's 30 Hz tick against Skyrim's frame rate | The port already interpolates (`render_interpolation.c`). Skyrim follows the interpolated pose |
 | Proxy hitboxes are wrong for non-humanoid creatures | Scaled biped for v1. Built-in-memory collision model in Phase 5 |
 | Upstream decomp moves quickly | Pinned commit (`halo/UPSTREAM`). Hooks small and marked |
-| Legal | Fan project. Nothing from either game is distributed, and the user supplies both games. Whether releases may include a built Halo executable is decided before any public release |
+| Legal | Fan project. Nothing from either game is distributed, and the user supplies both games. Code licensing is settled (GPL-3.0-or-later, [LICENSING.md](LICENSING.md)). Whether releases may include a built Halo executable, given that the decompilation is of Microsoft's game, is decided before any public release |

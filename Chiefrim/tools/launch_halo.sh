@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Starts Halo in Chiefrim mode for a session with Skyrim (docs/DESIGN.md §11).
 # Start it before or after Skyrim; the SKSE plugin links when both are up.
 #

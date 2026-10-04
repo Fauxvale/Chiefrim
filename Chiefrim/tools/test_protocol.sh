@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds and runs protocol/test_protocol.c as i386 and x86-64, and checks the
 # header's layout pins against both Windows targets.
 set -eu

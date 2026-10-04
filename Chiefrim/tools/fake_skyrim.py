@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """A stand-in for the Skyrim side of the link (docs/DESIGN.md §12, Phase 0).
 
 It maps /dev/shm/chiefrim_v1 as the SKSE plugin will, says hello, sends a

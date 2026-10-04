@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.25)
 
 # The Skyrim side of Chiefrim (docs/DESIGN.md): an SKSE plugin built with

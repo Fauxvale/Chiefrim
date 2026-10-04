@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the link test: native_peer (Linux i386, like Halo) and wine_peer.exe
 # (Windows x64, like the SKSE plugin). The Windows side needs no SDK: it links
 # against an import library made from kernel32.def.

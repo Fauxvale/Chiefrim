@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Writes the CHIEFRIM hooks in halo/.work back to halo/patches. Only changes to
 # the game's own files go in the patch; source/chiefrim/ is ours and comes
 # from halo/src (tools/setup_halo.py copies it).
