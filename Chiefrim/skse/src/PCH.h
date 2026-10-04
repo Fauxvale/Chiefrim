@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <stop_token>
+#include <thread>
 
 #include <Windows.h>
 

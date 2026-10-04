@@ -9,7 +9,7 @@ namespace chiefrim
 		return link;
 	}
 
-	bool Link::TryOpen()
+	bool Link::TryOpen(ULONGLONG a_now)
 	{
 		file_ = ::CreateFileW(CR_SHM_WINE_PATH, GENERIC_READ | GENERIC_WRITE,
 			FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -52,8 +52,15 @@ namespace chiefrim
 		shm_->skyrim_pid = ::GetCurrentProcessId();
 		CR_STORE_REL(&shm_->skyrim_state, CR_SIDE_READY);
 		lastHaloHeartbeat_ = CR_LOAD_ACQ(&shm_->halo_heartbeat);
-		lastHaloHeartbeatChange_ = ::GetTickCount64();
+		lastHaloHeartbeatChange_ = a_now;  // the caller's clock: no unsigned wrap below
 		loggedWaiting_ = false;
+
+		heartbeat_ = std::jthread([shm = shm_](std::stop_token a_stop) {
+			while (!a_stop.stop_requested()) {
+				CR_STORE_REL(&shm->skyrim_heartbeat, static_cast<std::uint32_t>(::GetTickCount64()));
+				std::this_thread::sleep_for(200ms);
+			}
+		});
 
 		cr_msg_hello hello{};
 		hello.protocol_version = CR_PROTOCOL_VERSION;
@@ -68,6 +75,10 @@ namespace chiefrim
 
 	void Link::Close(const char* a_reason)
 	{
+		if (heartbeat_.joinable()) {
+			heartbeat_.request_stop();
+			heartbeat_.join();
+		}
 		if (shm_) {
 			CR_STORE_REL(&shm_->skyrim_state, CR_SIDE_CLOSING);
 			::UnmapViewOfFile(shm_);
@@ -96,12 +107,10 @@ namespace chiefrim
 				return false;
 			}
 			nextOpenAttempt_ = now + 1000;
-			if (!TryOpen()) {
+			if (!TryOpen(now)) {
 				return false;
 			}
 		}
-
-		CR_STORE_REL(&shm_->skyrim_heartbeat, static_cast<std::uint32_t>(now));
 
 		if (CR_LOAD_ACQ(&shm_->halo_state) == CR_SIDE_CLOSING) {
 			Close("Halo closed");

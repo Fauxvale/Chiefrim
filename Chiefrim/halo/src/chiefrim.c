@@ -88,6 +88,7 @@ static struct
 	cr_world_context world;
 	boolean placement_pending;    /* move Chief once a unit exists */
 	boolean level_cleared;        /* the level's actors are gone */
+	boolean publishing;           /* the player state is going out */
 	cr_vec3 placement_position;   /* Skyrim units */
 	float placement_heading;
 	uint32_t ticks;
@@ -285,6 +286,17 @@ static void chiefrim_install_floor(void)
 		return;
 	}
 	scenario_override_collision_bsp(&chiefrim_floor.bsp);
+
+	/* Bipeds remember the surface they stand on, by its index in the old
+	collision BSP; the new one doesn't have it. The engine forgets these on
+	its own BSP switches (scenario.c's disconnect procs) the same way. */
+	{
+		struct object_iterator iterator;
+
+		object_iterator_new(&iterator, _object_mask_biped, 0);
+		while (object_iterator_next(&iterator))
+			biped_disconnect_from_structure_bsp(iterator.index);
+	}
 	error(_error_silent, "chiefrim: collision is a flat floor at z=%.3f wu", z);
 }
 
@@ -346,7 +358,8 @@ static void chiefrim_apply_world(void)
 
 	if (floor_moved && global_scenario_try_and_get())
 		chiefrim_install_floor();
-	chiefrim.placement_pending = TRUE;
+	/* Placing Chief is the Teleport message's job (Skyrim sends one with each
+	new world), never a side effect of seeing the world again. */
 }
 
 static void chiefrim_log_to_skyrim(char const *text)
@@ -420,7 +433,20 @@ static void chiefrim_publish_player(void)
 	cr_vec3 halo;
 
 	if (unit_index == NONE || !chiefrim.world_valid)
+	{
+		if (chiefrim.publishing)
+		{
+			error(_error_silent, "chiefrim: stopped publishing the player (%s)",
+				unit_index == NONE ? "no unit" : "no world");
+			chiefrim.publishing = FALSE;
+		}
 		return;
+	}
+	if (!chiefrim.publishing)
+	{
+		error(_error_silent, "chiefrim: publishing the player");
+		chiefrim.publishing = TRUE;
+	}
 
 	memset(&state, 0, sizeof(state));
 	state.tick = chiefrim.ticks;
@@ -487,9 +513,10 @@ static void chiefrim_watch_skyrim(void)
 	}
 	else if (chiefrim.linked && now - chiefrim.last_skyrim_heartbeat_change > CR_HEARTBEAT_TIMEOUT_MS)
 	{
+		/* Keep the world and Chief where they are: Skyrim says hello again
+		and sends a new world and Teleport when it comes back. */
 		error(_error_silent, "chiefrim: Skyrim stopped responding; waiting for it to come back");
 		chiefrim.linked = FALSE;
-		chiefrim.world_valid = FALSE;
 	}
 }
 

@@ -118,6 +118,9 @@ def main():
     parser.add_argument("--y", type=float, default=-7400.0)
     parser.add_argument("--z", type=float, default=-3650.0)
     parser.add_argument("--heading", type=float, default=0.0, help="degrees, 0 = north")
+    parser.add_argument("--silence-at", type=float, default=0.0,
+                        help="seconds in: stop the heartbeat, as a Skyrim that hangs (0: never)")
+    parser.add_argument("--silence-for", type=float, default=5.0)
     options = parser.parse_args()
 
     print(f"fake_skyrim: waiting for {PATH}", flush=True)
@@ -159,9 +162,16 @@ def main():
     last_print = 0.0
     last_seq = 0
     last_tick = None
+    started = time.monotonic()
+    silenced = False
     try:
         while time.monotonic() < deadline:
-            link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))
+            quiet = options.silence_at > 0 and 0 <= time.monotonic() - started - options.silence_at < options.silence_for
+            if quiet != silenced:
+                print(f"fake_skyrim: heartbeat {'stopped' if quiet else 'back'}", flush=True)
+                silenced = quiet
+            if not quiet:
+                link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))
             while (message := link.pop(RING_TO_SKYRIM)) is not None:
                 msg_type, body = message
                 if msg_type == MSG_HELLO:

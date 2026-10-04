@@ -21,6 +21,8 @@ namespace chiefrim::Puppet
 			std::optional<RE::NiPoint3> lastPuppetPosition;
 			std::uint32_t lastTick{ 0 };
 			bool haveTick{ false };
+			ULONGLONG lastTickChange{ 0 };
+			bool loggedStale{ false };
 		} s;
 
 		bool GameplayIsRunning()
@@ -72,13 +74,23 @@ namespace chiefrim::Puppet
 				a_id, a_interior ? " (interior)" : "", position.x, position.y, position.z);
 		}
 
+		// Applies Halo's latest state every frame, new or not: between Halo's
+		// frames nothing on Skyrim's side may move the player away from Chief.
 		void Follow(RE::PlayerCharacter* a_player, const cr_player_state& a_state)
 		{
-			if (s.haveTick && a_state.tick == s.lastTick) {
-				return;  // nothing new from Halo this frame
+			const auto now = ::GetTickCount64();
+			if (!s.haveTick || a_state.tick != s.lastTick) {
+				if (s.loggedStale) {
+					logger::info("Halo's player state is updating again");
+					s.loggedStale = false;
+				}
+				s.lastTick = a_state.tick;
+				s.haveTick = true;
+				s.lastTickChange = now;
+			} else if (!s.loggedStale && now - s.lastTickChange > 500) {
+				logger::info("Halo's player state hasn't changed for {} ms (tick {})", now - s.lastTickChange, a_state.tick);
+				s.loggedStale = true;
 			}
-			s.lastTick = a_state.tick;
-			s.haveTick = true;
 
 			const RE::NiPoint3 position{ a_state.position.x, a_state.position.y, a_state.position.z };
 			a_player->SetPosition(position, true);
@@ -117,6 +129,11 @@ namespace chiefrim::Puppet
 			const bool worldChanged = !s.worldSent || id != s.worldId || interior != s.interior;
 			const bool skyrimMoved = s.lastPuppetPosition &&
 				s.lastPuppetPosition->GetDistance(position) > kSkyrimMovedDistance;
+			if (skyrimMoved && !worldChanged) {
+				const auto& from = *s.lastPuppetPosition;
+				logger::info("Skyrim moved the player {:.0f} units by itself, from ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f})",
+					from.GetDistance(position), from.x, from.y, from.z, position.x, position.y, position.z);
+			}
 			if (worldChanged || skyrimMoved) {
 				SendWorld(a_player, id, interior);
 				return;

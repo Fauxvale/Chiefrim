@@ -26,7 +26,7 @@ namespace chiefrim
 		std::optional<cr_player_state> ReadPlayerState();
 
 	private:
-		bool TryOpen();
+		bool TryOpen(ULONGLONG a_now);
 		void Close(const char* a_reason);
 		void Push(std::uint16_t a_type, const void* a_message, std::uint32_t a_size);
 
@@ -37,5 +37,10 @@ namespace chiefrim
 		ULONGLONG lastHaloHeartbeatChange_{ 0 };
 		ULONGLONG nextOpenAttempt_{ 0 };
 		bool loggedWaiting_{ false };
+
+		// Writes Skyrim's heartbeat a few times a second, also while the game
+		// is paused in a menu or a loading screen, when PlayerCharacter::Update
+		// doesn't run. Stopped (and joined) before the view is unmapped.
+		std::jthread heartbeat_;
 	};
 }

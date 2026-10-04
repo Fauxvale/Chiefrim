@@ -11,7 +11,8 @@
 #   Chiefrim; docs/DESIGN.md §15).
 #
 # Extra environment passes through, for example HALO_TEST_INPUT=bot:1 (a
-# scripted player that walks, turns, jumps and fires) and CHIEFRIM_DEBUG=1.
+# scripted player that walks, turns, jumps and fires), CHIEFRIM_DEBUG=1, and
+# FAKE_SKYRIM_ARGS (e.g. "--silence-at 5 --silence-for 4").
 # Halo's data root is build/halo-data: a link to the user's maps/ folder and
 # its own init.txt (the host map), so the user's Halo install and saves are
 # never touched. Set HALO_MAPS to the folder holding the extracted maps/.
@@ -51,7 +52,7 @@ fi
 	echo "halo exit $?" >> "$log/halo.out"
 ) &
 sleep 1
-timeout $((seconds + 20)) "$root/tools/fake_skyrim.py" --seconds $((seconds + 10)) > "$log/fake_skyrim.out" 2>&1 || true
+timeout $((seconds + 20)) "$root/tools/fake_skyrim.py" --seconds $((seconds + 10)) ${FAKE_SKYRIM_ARGS:-} > "$log/fake_skyrim.out" 2>&1 || true
 wait
 
 echo "== fake_skyrim"
