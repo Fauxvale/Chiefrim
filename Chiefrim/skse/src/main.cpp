@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "Camera.h"
 #include "Input.h"
 #include "Puppet.h"
 
@@ -23,6 +24,7 @@ namespace
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			chiefrim::Input::Install();
+			chiefrim::Camera::Install();
 			chiefrim::Puppet::Install();
 		}
 	}
@@ -31,6 +33,7 @@ namespace
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
+	SKSE::AllocTrampoline(1 << 8);  // Camera's call-site hooks
 	SetupLog();
 	logger::info("Chiefrim {} loading (runtime {})", "0.0.1", a_skse->RuntimeVersion().string());
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);

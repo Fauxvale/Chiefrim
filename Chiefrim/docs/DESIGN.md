@@ -197,8 +197,18 @@ definition comes from that map. Chiefrim loads one **host map**.
    and its Havok capsule to that position every frame. The player stays a real Skyrim actor, so
    NPC targeting, detection and stealth, trigger volumes, quest location checks and projectile
    hits all keep working.
-3. **CameraDriver** forces Skyrim into first person, overwrites the camera with Halo's, and
-   converts Halo's vertical FOV to Skyrim's horizontal one. The Skyrim body and arms are hidden.
+3. **CameraDriver** forces Skyrim into first person and overwrites the camera with Halo's:
+   - the first-person camera state's translation is Chief's eye (crouch and jump included);
+   - after every `PlayerCamera::Update` (all its call sites are hooked), the camera root takes
+     Chief's view direction, once a 3-second check has confirmed which columns of Skyrim's
+     camera-root matrix are forward, up and right (until then Skyrim turns it, from the player's
+     angles, which already follow Chief);
+   - FOV: Halo's observer FOV is horizontal for 4:3 and projected with 0.85 of its tangent, so
+     Halo publishes the vertical angle it really renders with (48.1° by default), and Skyrim's
+     setting becomes the horizontal 4:3 equivalent (61.5°). It follows Halo's zoom.
+     `[Camera] bUseHaloFov=0` keeps the player's own Skyrim FOV;
+   - Skyrim's first-person arm and weapon meshes are hidden (only meshes, never nodes), and
+     re-checked about once a second for newly equipped ones.
 
 **Deep water — open decision (§13).** Halo has no swimming. Options:
 
@@ -440,7 +450,7 @@ Each phase ends in something you can play.
 | # | Phase | "Done" when |
 |---|---|---|
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
-| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver, CollisionField stage A through the runtime BSP compiler (§5.2). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
+| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver (§6: **built 2026-10-04, in-game test pending**), CollisionField stage A through the runtime BSP compiler (§5.2). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |

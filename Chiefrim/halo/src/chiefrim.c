@@ -36,6 +36,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "physics/collision_bsp.h"
 #include "physics/collision_bsp_definitions.h"
 #include "physics/collisions.h"
+#include "render/render_cameras.h"
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/bipeds.h"
@@ -495,7 +496,11 @@ static void chiefrim_publish_player(void)
 		state.up.x = camera->up.i;
 		state.up.y = camera->up.j;
 		state.up.z = camera->up.k;
-		state.vertical_fov = camera->field_of_view;
+		/* The observer's field of view is horizontal, for a 4:3 view, and
+		Halo projects with 0.85 of its tangent (main.c, render_cameras.c):
+		send the vertical angle it really renders with. */
+		state.vertical_fov = 2.0f * atan2f(
+			0.75f * render_camera_get_adjusted_field_of_view_tangent(camera->field_of_view), 1.0f);
 	}
 
 	CR_SLOT_WRITE(&chiefrim.shm->player_state, state);

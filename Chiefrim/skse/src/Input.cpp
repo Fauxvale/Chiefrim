@@ -2,6 +2,7 @@
 #include "Input.h"
 
 #include "Link.h"
+#include "Settings.h"
 
 #include <array>
 #include <string>
@@ -57,17 +58,7 @@ namespace chiefrim::Input
 			float  stickLookSpeed{ 3.0f };    // radians per second at full right-stick
 		} config;
 
-		std::wstring IniPath()
-		{
-			HMODULE self = nullptr;
-			::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-				reinterpret_cast<LPCWSTR>(&IniPath), &self);
-			wchar_t path[MAX_PATH]{};
-			::GetModuleFileNameW(self, path, MAX_PATH);
-			std::wstring result(path);
-			const auto slash = result.find_last_of(L"\\/");
-			return result.substr(0, slash + 1) + L"Chiefrim.ini";
-		}
+		std::wstring IniPath() { return Settings::IniPath(); }
 
 		std::string ReadString(const std::wstring& a_path, const wchar_t* a_key, const char* a_default)
 		{

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Puppet.h"
 
+#include "Camera.h"
 #include "Input.h"
 #include "Link.h"
 
@@ -107,6 +108,7 @@ namespace chiefrim::Puppet
 				controller->fallStartHeight = position.z;
 			}
 			s.lastPuppetPosition = position;
+			Camera::Drive(a_player, a_state);
 		}
 
 		void PerFrame(RE::PlayerCharacter* a_player)
@@ -117,6 +119,7 @@ namespace chiefrim::Puppet
 				s.worldSent = false;
 				if (wasConnected) {
 					Input::OnUnlinked();  // Skyrim's own controls back
+					Camera::Release(a_player);
 				}
 				return;
 			}
