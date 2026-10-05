@@ -130,6 +130,8 @@ unsigned long chiefrim_input_keyboard_actions(short controller_index)
 		/* pressed and let go again since the last frame: down for this one */
 		if (chiefrim_input.presses_valid && input.presses[action] != chiefrim_input.presses[action])
 			down = TRUE;
+		if (action == CR_ACTION_JUMP && chiefrim_skyrim_drives())
+			down = FALSE; /* Skyrim's player jumps; Chief follows */
 		if (down)
 			held |= chiefrim_keyboard_bit(action);
 	}
@@ -144,6 +146,13 @@ boolean chiefrim_input_movement(short controller_index, real *forward, real *str
 
 	if (!chiefrim_input_read(controller_index, &input))
 		return FALSE;
+	if (chiefrim_skyrim_drives())
+	{
+		/* Skyrim's player walks; Chief is placed where it is */
+		*forward = 0.f;
+		*strafe = 0.f;
+		return TRUE;
+	}
 	if (input.forward == 0.0f && input.strafe == 0.0f)
 		return FALSE;
 	*forward = PIN(input.forward, -1.f, 1.f);
@@ -163,6 +172,12 @@ boolean chiefrim_input_look(short gamepad_index, real *yaw, real *pitch)
 	{
 		chiefrim_input.look_valid = FALSE;
 		return FALSE;
+	}
+	if (chiefrim_skyrim_drives())
+	{
+		/* Skyrim's camera looks; Chief is aimed along it */
+		chiefrim_input.look_valid = FALSE;
+		return TRUE;
 	}
 	if (!chiefrim_input.look_valid || input.session != chiefrim_input.look_session)
 	{

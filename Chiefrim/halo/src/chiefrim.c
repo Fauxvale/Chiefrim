@@ -501,7 +501,7 @@ static void chiefrim_publish_player(void)
 	{
 		error(_error_silent, "chiefrim: publishing the player");
 		chiefrim.publishing = TRUE;
-		if (chiefrim.lost_unit && chiefrim.have_safe && !chiefrim.placement_pending)
+		if (chiefrim.lost_unit && chiefrim.have_safe && !chiefrim.placement_pending && !chiefrim_skyrim_drives())
 		{
 			/* Halo respawned Chief at the level's own spawn point, which the
 			Skyrim player would follow: back to the ground he last stood on */
@@ -557,7 +557,8 @@ static void chiefrim_publish_player(void)
 			chiefrim.have_safe = TRUE;
 			chiefrim_remember_spot(state.position, state.yaw);
 		}
-		else if (chiefrim.have_safe && !chiefrim.placement_pending && chiefrim_world_below_collision(&origin))
+		else if (chiefrim.have_safe && !chiefrim.placement_pending && !chiefrim_skyrim_drives() &&
+			chiefrim_world_below_collision(&origin))
 		{
 			/* below every triangle loaded around him: he fell through a hole
 			in the collision. Catch him before Halo kills him. */
@@ -765,6 +766,56 @@ void chiefrim_initialize(void)
 	error(_error_silent, "chiefrim: active, %s ready (protocol %u)", CR_SHM_LINUX_PATH, CR_PROTOCOL_VERSION);
 }
 
+/* Skyrim moves the player (docs §7): its latest, if Skyrim says it drives
+and its frames are coming (a stalled Skyrim, and Halo's own rules again). */
+static boolean chiefrim_read_skyrim_player(cr_skyrim_player *player)
+{
+	static uint32_t last_frame, last_change_ms;
+	uint32_t now = chiefrim_now_ms();
+
+	if (!chiefrim.linked || !CR_SLOT_READ(&chiefrim.shm->skyrim_player, player) || !(player->flags & CR_SKYRIM_DRIVES))
+		return FALSE;
+	if (player->frame != last_frame)
+	{
+		last_frame = player->frame;
+		last_change_ms = now;
+	}
+	return now - last_change_ms < 1000;
+}
+
+boolean chiefrim_skyrim_drives(void)
+{
+	cr_skyrim_player player;
+
+	return chiefrim.active && chiefrim_read_skyrim_player(&player);
+}
+
+/* Chief where Skyrim's player is, aimed along its camera, at rest: Halo's
+movement doesn't run (no movement input) and its collision only matters
+for shots. */
+static void chiefrim_follow_skyrim(long unit_index, real_point3d *chief)
+{
+	cr_skyrim_player player;
+	cr_vec3 halo;
+	real_point3d position;
+	real_vector3d forward;
+
+	if (!chiefrim.world_valid || !chiefrim_read_skyrim_player(&player))
+		return;
+	halo = cr_sky_to_halo(player.position, chiefrim.world.origin);
+	position.x = halo.x;
+	position.y = halo.y;
+	position.z = halo.z;
+	chiefrim_move_chief(unit_index, &position, TRUE);
+	*chief = position;
+	forward.i = player.forward.x;
+	forward.j = player.forward.y;
+	forward.k = player.forward.z;
+	if (normalize3d(&forward) > 0.f)
+		player_control_set_facing(0, &forward);
+	chiefrim.last_feet = position;
+}
+
 /* Chief's state, for the log, with the collision around him saved: when
 he seems stuck, or the player says he is (the "mark stuck" hotkey). */
 static void chiefrim_report_stuck(long unit_index, char const *why)
@@ -925,11 +976,14 @@ void chiefrim_frame(void)
 	{
 		long unit_index = chiefrim_local_unit();
 		real_point3d chief;
+		boolean follow = chiefrim_skyrim_drives();
 
 		if (unit_index != NONE)
 			object_get_origin(unit_index, &chief);
 		chiefrim_world_update(unit_index != NONE ? &chief : NULL);
-		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending &&
+		if (follow && unit_index != NONE)
+			chiefrim_follow_skyrim(unit_index, &chief);
+		if (!follow && unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending &&
 			chiefrim_world_crossed_floor(&chiefrim.last_feet, &chief, chiefrim_chief_radius(unit_index)) &&
 			!chiefrim_world_floor_within(&chief, CHIEFRIM_STEP_UNITS / CR_SKY_UNITS_PER_WU))
 		{
@@ -967,9 +1021,9 @@ void chiefrim_frame(void)
 			}
 			chief = back;
 		}
-		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending)
+		if (!follow && unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending)
 			chiefrim_step_assist(unit_index, &chief);
-		if (unit_index != NONE && !chiefrim.world.is_interior && !chiefrim.placement_pending)
+		if (!follow && unit_index != NONE && !chiefrim.world.is_interior && !chiefrim.placement_pending)
 		{
 			/* under the land: Halo squeezed him through it (a rock mesh
 			overlapping a hillside, mostly). The land has no underside to
@@ -1001,7 +1055,7 @@ void chiefrim_frame(void)
 		{
 			real ground_z;
 
-			if (chiefrim_world_settle(&chief, &ground_z))
+			if (!follow && chiefrim_world_settle(&chief, &ground_z))
 			{
 				real lift = ground_z + 0.05f - chief.z;
 
@@ -1040,6 +1094,8 @@ void chiefrim_frame(void)
 	}
 
 	chiefrim_debug_collision();
+	if (chiefrim.placement_pending && chiefrim_skyrim_drives())
+		chiefrim.placement_pending = FALSE; /* placed every frame where Skyrim's player is */
 	if (chiefrim.placement_pending)
 		chiefrim_place_player();
 	chiefrim_publish_player();

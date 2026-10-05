@@ -313,6 +313,16 @@ namespace chiefrim::Input
 			if (!controls) {
 				return {};
 			}
+			if (Settings::SkyrimMoves()) {
+				// Skyrim's player moves itself: Chief takes only the actions that
+				// are Halo's (fire and zoom, reload, grenade, melee)
+				return {
+					nullptr, nullptr, nullptr,
+					controls->readyWeaponHandler, nullptr, nullptr,
+					nullptr, controls->shoutHandler, controls->attackBlockHandler,
+					nullptr, controls->togglePOVHandler
+				};
+			}
 			return {
 				controls->movementHandler, controls->lookHandler, controls->sprintHandler,
 				controls->readyWeaponHandler, controls->autoMoveHandler, controls->toggleRunHandler,
@@ -347,7 +357,8 @@ namespace chiefrim::Input
 				}
 			}
 			s.handlersOff = a_chiefHasThem;
-			logger::info("Skyrim's movement, look, jump, shout, attack, ready weapon and POV handlers {}",
+			logger::info("Skyrim's {} handlers {}",
+				Settings::SkyrimMoves() ? "shout, attack, ready weapon and POV" : "movement, look, jump, shout, attack, ready weapon and POV",
 				a_chiefHasThem ? "off: Chief has them" : "back on");
 		}
 

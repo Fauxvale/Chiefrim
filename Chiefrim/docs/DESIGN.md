@@ -361,6 +361,21 @@ definition comes from that map. Chiefrim loads one **host map**.
 
 ## 7. Input
 
+**Movement (2026-10-05): Skyrim moves, Halo follows.** After two days of making Halo's biped
+physics walk Skyrim's meshes (a runtime BSP builder, then floor guards, step assists, land and fall
+rules), Chief still caught on edges, bounced up small rises (Halo counts a biped supported only on
+ticks its move touches a walkable surface, so on Skyrim's finely bumpy meshes it left the ground
+about once a second) and now and then went through. Skyrim's own character controller is made for
+those meshes, so by default (`[Movement] bSkyrimMoves=1`) it moves the player: Skyrim's movement,
+look, jump, sprint and sneak handlers stay Skyrim's, the plugin sends Halo the player's position,
+facing, camera, velocity and ground/sneak flags each frame (`cr_skyrim_player`, protocol 5), and
+Halo places Chief there each frame, aimed along the camera, with no movement or look input and no
+jump (crouch still follows sneak). The camera is Skyrim's, with Chief's field of view (zoom) and
+his arms hidden. Halo's collision is then for shots, grenades and physics objects. The Halo-driven
+mode (everything below about Chief's movement and the collision safeguards) stays behind
+`bSkyrimMoves=0`. Halo's movement feel (speed, jump height) is to be approximated in Skyrim's
+values later.
+
 **Skyrim's own controls drive Chief** (decided 2026-10-04, replacing SkyCraft's raw-key
 passthrough). The Skyrim window keeps focus, and Skyrim's input system does what it always does:
 it maps keys, mouse and gamepad to **user events** through its ControlMap, including the user's

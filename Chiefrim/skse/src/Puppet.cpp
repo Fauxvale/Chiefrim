@@ -231,6 +231,50 @@ namespace chiefrim::Puppet
 			logger::info("Chief's radius {:.0f} units", context.chief_radius);
 		}
 
+		// Skyrim moves the player: where it is and looks, for Halo's Chief to
+		// follow (aimed along the camera).
+		void PublishPlayer(RE::PlayerCharacter* a_player)
+		{
+			static std::uint32_t frame = 0;
+			static RE::NiPoint3 lastPosition;
+			static LARGE_INTEGER lastTime{};
+			cr_skyrim_player player{};
+			const auto position = a_player->GetPosition();
+			player.frame = ++frame;
+			player.flags = CR_SKYRIM_DRIVES;
+			player.position = { position.x, position.y, position.z };
+			player.yaw = a_player->data.angle.z;
+			player.pitch = a_player->data.angle.x;
+			// the camera: its root's position, and its forward column
+			// (Skyrim's camera-root columns are right, forward, up)
+			player.eye = player.position;
+			player.forward = { std::sin(player.yaw) * std::cos(player.pitch), std::cos(player.yaw) * std::cos(player.pitch), -std::sin(player.pitch) };
+			if (auto* camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
+				const auto& world = camera->cameraRoot->world;
+				player.eye = { world.translate.x, world.translate.y, world.translate.z };
+				player.forward = { world.rotate.entry[0][1], world.rotate.entry[1][1], world.rotate.entry[2][1] };
+			}
+			LARGE_INTEGER now{}, frequency{};
+			::QueryPerformanceCounter(&now);
+			::QueryPerformanceFrequency(&frequency);
+			if (lastTime.QuadPart) {
+				const float dt = float(double(now.QuadPart - lastTime.QuadPart) / double(frequency.QuadPart));
+				if (dt > 0.0f && dt < 0.25f) {
+					player.velocity = { (position.x - lastPosition.x) / dt, (position.y - lastPosition.y) / dt, (position.z - lastPosition.z) / dt };
+				}
+			}
+			lastTime = now;
+			lastPosition = position;
+			if (const auto* controller = a_player->GetCharController();
+				controller && controller->context.currentState == RE::hkpCharacterStateType::kOnGround) {
+				player.flags |= CR_SKYRIM_ON_GROUND;
+			}
+			if (a_player->IsSneaking()) {
+				player.flags |= CR_SKYRIM_SNEAKING;
+			}
+			Link::Get().SendSkyrimPlayer(player);
+		}
+
 		// Halo publishes at its frame rate, Skyrim draws at its own (uneven
 		// against Halo's): taking the latest state each frame, the player moved
 		// in uneven steps, stalling and lurching. States are kept with Halo's
@@ -388,7 +432,7 @@ namespace chiefrim::Puppet
 				}
 			}
 			s.lastPuppetPosition = position;
-			Camera::Drive(a_player, shown);
+			Camera::Drive(a_player, shown, true);
 		}
 
 		void PerFrame(RE::PlayerCharacter* a_player)
@@ -425,6 +469,9 @@ namespace chiefrim::Puppet
 			const bool worldChanged = !s.worldSent || id != s.worldId || interior != s.interior;
 
 			// Halo hasn't moved Chief yet: Skyrim keeps the player where it put him.
+			if (Settings::SkyrimMoves()) {
+				s.awaitingTeleport.reset();  // Skyrim's player is where it is; Chief follows
+			}
 			if (s.awaitingTeleport && !worldChanged) {
 				auto state = link.ReadPlayerState();
 				const bool arrived = state &&
@@ -456,7 +503,13 @@ namespace chiefrim::Puppet
 				return;
 			}
 
-			if (auto state = link.ReadPlayerState()) {
+			if (Settings::SkyrimMoves()) {
+				PublishPlayer(a_player);
+				s.lastPuppetPosition = position;  // a jump further than a frame's walk is a teleport
+				if (auto state = link.ReadPlayerState()) {
+					Camera::Drive(a_player, *state, false);  // Halo's field of view (zoom)
+				}
+			} else if (auto state = link.ReadPlayerState()) {
 				Follow(a_player, *state);
 			}
 			Collision::Update(a_player);

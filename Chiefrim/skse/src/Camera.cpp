@@ -18,6 +18,7 @@ namespace chiefrim::Camera
 		struct State
 		{
 			bool          driving{ false };
+			bool viewFromHalo{ true };  // Halo moves the player: its eye and view are the camera's
 			RE::NiPoint3  eye{};
 			RE::NiMatrix3 rotation{};   // columns: forward, up, right (NiCamera)
 			// Skyrim's camera-root convention, checked against Chief's view
@@ -184,7 +185,7 @@ namespace chiefrim::Camera
 			static void thunk(RE::PlayerCamera* a_this)
 			{
 				func(a_this);
-				if (!s.driving || !a_this->cameraRoot || !a_this->IsInFirstPerson()) {
+				if (!s.driving || !s.viewFromHalo || !a_this->cameraRoot || !a_this->IsInFirstPerson()) {
 					return;
 				}
 				auto* root = a_this->cameraRoot.get();
@@ -206,7 +207,7 @@ namespace chiefrim::Camera
 			static void thunk(RE::TESCameraState* a_this, RE::NiPoint3& a_out)
 			{
 				func(a_this, a_out);
-				if (s.driving) {
+				if (s.driving && s.viewFromHalo) {
 					a_out = s.eye;
 				}
 			}
@@ -247,7 +248,7 @@ namespace chiefrim::Camera
 			sites.size(), s.useHaloFov ? std::format("Chief's, {:.0f} unzoomed", s.fieldOfView) : std::string("Skyrim's own"));
 	}
 
-	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state)
+	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state, bool a_viewFromHalo)
 	{
 		auto* camera = RE::PlayerCamera::GetSingleton();
 		if (!camera) {
@@ -255,10 +256,11 @@ namespace chiefrim::Camera
 		}
 		s.eye = { a_state.eye.x, a_state.eye.y, a_state.eye.z };
 		s.rotation = RotationFrom(a_state.forward, a_state.up);
-		if (!s.driving) {
-			logger::info("Chief's eyes drive the camera");
+		if (!s.driving || s.viewFromHalo != a_viewFromHalo) {
+			logger::info("{}", a_viewFromHalo ? "Chief's eyes drive the camera" : "Skyrim's camera, with Chief's field of view");
 		}
 		s.driving = true;
+		s.viewFromHalo = a_viewFromHalo;
 
 		if (!camera->IsInFirstPerson()) {
 			camera->ForceFirstPerson();

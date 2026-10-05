@@ -37,6 +37,8 @@ real chiefrim_field_of_view_tangent_scale(void);
 struct cr_shared *chiefrim_shared(void);
 /* Skyrim has said hello and keeps its heartbeat. */
 boolean chiefrim_linked(void);
+/* Skyrim moves the player and Chief follows (docs §7), rather than Halo moving Chief. */
+boolean chiefrim_skyrim_drives(void);
 
 /* chiefrim_input.c (docs §7): Chief's controls from Skyrim's actions.
 input_abstraction.c (keyboard_controls_update) and player_control.c call

@@ -179,6 +179,13 @@ namespace chiefrim
 		}
 	}
 
+	void Link::SendSkyrimPlayer(const cr_skyrim_player& a_player)
+	{
+		if (shm_) {
+			CR_SLOT_WRITE(&shm_->skyrim_player, a_player);
+		}
+	}
+
 	std::optional<cr_player_state> Link::ReadPlayerState()
 	{
 		if (!shm_) {

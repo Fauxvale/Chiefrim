@@ -12,8 +12,9 @@ namespace chiefrim::Camera
 	// kDataLoaded: hooks the first-person camera and PlayerCamera::Update.
 	void Install();
 
-	// Each frame while Chief drives the player: the view to show.
-	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state);
+	// Each frame while linked: Halo's field of view (zoom), Chief's arms hidden,
+	// and, when Halo moves the player (a_viewFromHalo), Chief's eye and view.
+	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state, bool a_viewFromHalo);
 
 	// Chief's unzoomed field of view for Halo ([Camera] fFieldOfView, degrees,
 	// horizontal for 4:3 as Skyrim measures it; 0 = Halo's own).

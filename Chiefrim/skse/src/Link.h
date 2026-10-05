@@ -28,6 +28,7 @@ namespace chiefrim
 
 		// The latest player state; nullopt until Halo publishes one.
 		std::optional<cr_player_state> ReadPlayerState();
+		void SendSkyrimPlayer(const cr_skyrim_player& a_player);
 
 	private:
 		bool TryOpen(ULONGLONG a_now);

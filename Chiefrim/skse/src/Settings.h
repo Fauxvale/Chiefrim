@@ -28,4 +28,13 @@ namespace chiefrim::Settings
 	{
 		return ::GetPrivateProfileIntW(a_section, a_key, a_default ? 1 : 0, IniPath().c_str()) != 0;
 	}
+
+	// [Movement] bSkyrimMoves: Skyrim's player walks, jumps and collides with
+	// Skyrim's own controller, and Halo's Chief follows it (docs §7). 0: Halo
+	// moves Chief and the player follows him (the first design).
+	inline bool SkyrimMoves()
+	{
+		static const bool value = ReadBool(L"Movement", L"bSkyrimMoves", true);
+		return value;
+	}
 }

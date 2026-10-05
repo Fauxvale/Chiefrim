@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 4u
+#define CR_PROTOCOL_VERSION 5u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -158,9 +158,30 @@ typedef struct cr_player_state
 		type value;                 \
 	} name
 
+/* Skyrim -> Halo, when Skyrim moves the player (docs §7): where the player
+is and looks. Halo's Chief follows: placed there each frame, aimed along
+the camera. Skyrim units/radians. */
+typedef struct cr_skyrim_player
+{
+	uint32_t frame;         /* bumps each Skyrim frame */
+	uint32_t flags;         /* CR_SKYRIM_* */
+	cr_vec3  position;      /* feet */
+	float    yaw;           /* Skyrim heading (rotZ) */
+	float    pitch;         /* Skyrim rotX */
+	cr_vec3  eye;           /* the camera's position */
+	cr_vec3  forward;       /* the camera's forward axis */
+	cr_vec3  velocity;      /* units per second */
+	uint32_t reserved[2];
+} cr_skyrim_player;
+
+#define CR_SKYRIM_DRIVES    0x0001u /* Skyrim moves the player; Chief follows (else Halo moves Chief) */
+#define CR_SKYRIM_ON_GROUND 0x0002u
+#define CR_SKYRIM_SNEAKING  0x0004u
+
 CR_DECLARE_SLOT(cr_slot_world_context, cr_world_context);
 CR_DECLARE_SLOT(cr_slot_input, cr_input);
 CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
+CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
 
 /* ---- rings (events) ---------------------------------------------------- */
 
@@ -283,6 +304,7 @@ typedef struct cr_shared
 	cr_slot_world_context world_context;  /* S->H */
 	cr_slot_input         input;          /* S->H */
 	cr_slot_player_state  player_state;   /* H->S */
+	cr_slot_skyrim_player skyrim_player;  /* S->H */
 
 	/* rings */
 	cr_ring to_halo;
@@ -480,6 +502,8 @@ CR_STATIC_ASSERT(sizeof(cr_player_state) == 88, "cr_player_state");
 CR_STATIC_ASSERT(sizeof(cr_slot_world_context) == 48, "cr_slot_world_context");
 CR_STATIC_ASSERT(sizeof(cr_slot_input) == 64, "cr_slot_input");
 CR_STATIC_ASSERT(sizeof(cr_slot_player_state) == 96, "cr_slot_player_state");
+CR_STATIC_ASSERT(sizeof(cr_skyrim_player) == 72, "cr_skyrim_player");
+CR_STATIC_ASSERT(sizeof(cr_slot_skyrim_player) == 80, "cr_slot_skyrim_player");
 CR_STATIC_ASSERT(sizeof(cr_msg_header) == 8, "cr_msg_header");
 CR_STATIC_ASSERT(sizeof(cr_msg_hello) == 64, "cr_msg_hello");
 CR_STATIC_ASSERT(sizeof(cr_msg_teleport) == 24, "cr_msg_teleport");
@@ -490,8 +514,8 @@ CR_STATIC_ASSERT(__builtin_offsetof(cr_msg_collision_tris, tris) == 40, "cr_msg_
 CR_STATIC_ASSERT(CR_COLLISION_TRIS_SIZE(CR_TRIS_PER_MESSAGE) <= 0xFFF8u, "a full collision message fits a ring message");
 CR_STATIC_ASSERT(sizeof(cr_ring) == 128 + CR_RING_BYTES, "cr_ring");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, world_context) == 64, "cr_shared.world_context");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 272, "cr_shared.to_halo");
-CR_STATIC_ASSERT(sizeof(cr_shared) == 272 + 2 * (128 + CR_RING_BYTES), "cr_shared");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 352, "cr_shared.to_halo");
+CR_STATIC_ASSERT(sizeof(cr_shared) == 352 + 2 * (128 + CR_RING_BYTES), "cr_shared");
 
 #ifdef __cplusplus
 }

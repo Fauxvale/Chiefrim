@@ -24,16 +24,16 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 4
+VERSION = 5
 RING_BYTES = 4 * 1024 * 1024
-TOTAL_SIZE = 272 + 2 * (128 + RING_BYTES)
+TOTAL_SIZE = 352 + 2 * (128 + RING_BYTES)
 
 # offsets (chiefrim_protocol.h)
 SKYRIM_PID, HALO_PID = 16, 20
 SKYRIM_STATE, HALO_STATE = 24, 28
 SKYRIM_HEARTBEAT, HALO_HEARTBEAT = 32, 36
-SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER = 64, 112, 176
-RING_TO_HALO, RING_TO_SKYRIM = 272, 272 + 128 + RING_BYTES
+SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER, SLOT_SKYRIM_PLAYER = 64, 112, 176, 272
+RING_TO_HALO, RING_TO_SKYRIM = 352, 352 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
@@ -320,6 +320,8 @@ def main():
                         help="the world is a collision dump Halo saved (build/collision-dumps), Chief starting where it says")
     parser.add_argument("--walk", action="store_true",
                         help="walk forward all the time, turning slowly")
+    parser.add_argument("--skyrim-moves", action="store_true",
+                        help="as the plugin does by default: the fake's own player walks north over the terrain and Halo's Chief follows")
     parser.add_argument("--hole", action="store_true",
                         help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
     parser.add_argument("--radius", type=float, default=0.0,
@@ -435,6 +437,17 @@ def main():
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz - 100.0, yaw))
                 print(f"fake_skyrim: sink: Chief to 100 units under ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 drive_state["sunk"] = True
+            if options.skyrim_moves:
+                # the player walks north at 300 units a second after 2 s, on the terrain
+                t = time.monotonic() - started
+                walked = max(0.0, t - 2.0) * 300.0
+                px, py = options.x, options.y + walked
+                pz = options.z + terrain_height(px - options.x, py - options.y)
+                drive_state["skyrim_frame"] = drive_state.get("skyrim_frame", 0) + 1
+                link.slot_write(SLOT_SKYRIM_PLAYER, struct.pack("<II3fff3f3f3f2I",
+                    drive_state["skyrim_frame"], 0x1 | 0x2, px, py, pz, 0.0, 0.0,
+                    px, py, pz + 120.0, 0.0, 1.0, 0.0, 0.0, 300.0 if t > 2 else 0.0, 0.0, 0, 0))
+                drive_state["skyrim_pos"] = (px, py, pz)
             if link.u32(HALO_STATE) == SIDE_CLOSING:
                 print("fake_skyrim: Halo is closing")
                 break
