@@ -127,13 +127,37 @@ def terrain_triangles(ox, oy, oz):
     return tris
 
 
+DUMP = None  # (triangles with flags, Chief's position), world units about the dump's origin
+
+
+def load_dump(path):
+    """a build Halo dumped: its triangles (world units, with their flags) and where Chief was"""
+    data = open(path, "rb").read()
+    count = struct.unpack_from("<i", data, 8)[0]
+    tris = []
+    for i in range(count):
+        v = struct.unpack_from("<9fIhh", data, 12 + 44 * i)
+        tris.append((v[0:9], v[11] & 0xFFFF))
+    off = 12 + 44 * count
+    chief = struct.unpack_from("<3f", data, off + 4) if len(data) >= off + 16 and struct.unpack_from("<i", data, off)[0] else (0.0, 0.0, 0.0)
+    return tris, chief
+
+
+def world_triangles(ox, oy, oz):
+    """(triangle, flags): a dump's, about the origin, or the synthetic terrain"""
+    if DUMP:
+        k = 213.36
+        return [(tuple(c * k + (ox, oy, oz)[j % 3] for j, c in enumerate(t)), flags) for t, flags in DUMP[0]]
+    return [(t, (CR_TRIANGLE_ONE_SIDED | CR_TRIANGLE_LAND) if i < GROUND_COUNT else CR_TRIANGLE_ONE_SIDED if i in SOLID else 0)
+            for i, t in enumerate(terrain_triangles(ox, oy, oz))]
+
+
 def send_terrain(link, epoch, ox, oy, oz, generation=1):
     regions = {}
-    for i, t in enumerate(terrain_triangles(ox, oy, oz)):
+    for t, flags in world_triangles(ox, oy, oz):
         cx, cy, cz = (t[0] + t[3] + t[6]) / 3, (t[1] + t[4] + t[7]) / 3, (t[2] + t[5] + t[8]) / 3
         key = (math.floor(cx / REGION_UNITS), math.floor(cy / REGION_UNITS), math.floor(cz / REGION_UNITS))
-        regions.setdefault(key, []).append((t, (CR_TRIANGLE_ONE_SIDED | CR_TRIANGLE_LAND) if i < GROUND_COUNT else
-                                              CR_TRIANGLE_ONE_SIDED if i in SOLID else 0))
+        regions.setdefault(key, []).append((t, flags))
     link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, generation))
     sent = 0
     for (rx, ry, rz), tris in regions.items():
@@ -164,6 +188,11 @@ def drive_input(t, frame, presses, state):
     held = 0
     plan = DRIVE_TERRAIN if state.get("terrain") else DRIVE
     phase = next((what for start, end, what in plan if start <= t < end), "stop")
+    if state.get("walk"):
+        phase = "walk" if t >= 2 else "stop"
+        if phase == "walk":
+            forward = 1.0
+            state["yaw"] += 0.0015  # ~0.3 rad/s: wander over what's there
     if phase == "forward":
         forward = 1.0
     elif phase == "strafe right":
@@ -287,6 +316,10 @@ def main():
                         help="with --ledge: the slab is a board 4 units thick, open below (a boardwalk's edge)")
     parser.add_argument("--sink-at", type=float, default=0.0,
                         help="seconds in: put Chief 100 units under the ground (a test of the land rule)")
+    parser.add_argument("--dump", default="",
+                        help="the world is a collision dump Halo saved (build/collision-dumps), Chief starting where it says")
+    parser.add_argument("--walk", action="store_true",
+                        help="walk forward all the time, turning slowly")
     parser.add_argument("--hole", action="store_true",
                         help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
     parser.add_argument("--radius", type=float, default=0.0,
@@ -294,6 +327,15 @@ def main():
     parser.add_argument("--height", type=float, default=128.0,
                         help="Chief's height in Skyrim units, as the plugin sends it (0: Halo's own)")
     options = parser.parse_args()
+    if options.dump:
+        global DUMP
+        DUMP = load_dump(options.dump)
+        options.terrain = True  # send it
+        # Chief's start: the dump's own spot, the origin where the dump's was
+        options.x, options.y, options.z = 19500.0 + DUMP[1][0] * 213.36, -7400.0 + DUMP[1][1] * 213.36, -3650.0 + DUMP[1][2] * 213.36
+        options.dump_origin = (19500.0, -7400.0, -3650.0)
+    if options.walk:
+        options.drive = True
 
     print(f"fake_skyrim: waiting for {PATH}", flush=True)
     deadline = time.monotonic() + options.seconds
@@ -338,7 +380,7 @@ def main():
         LEDGE = options.ledge
         global PLANK
         PLANK = options.plank
-        send_terrain(link, 1, options.x, options.y, options.z)
+        send_terrain(link, 1, *(options.dump_origin if DUMP else (options.x, options.y, options.z)))
 
     last_print = 0.0
     last_seq = 0
@@ -347,7 +389,7 @@ def main():
     silenced = False
     frame = 0
     presses = [0] * 16
-    drive_state = {"yaw": 0.0, "terrain": options.terrain}
+    drive_state = {"yaw": 0.0, "terrain": options.terrain, "walk": options.walk}
     generation, epoch = 1, 1
     last_recenter = time.monotonic()
     last_position = None
@@ -386,7 +428,7 @@ def main():
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
                 print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 if options.terrain:
-                    send_terrain(link, epoch, options.x, options.y, options.z, generation)
+                    send_terrain(link, epoch, *(options.dump_origin if DUMP else (options.x, options.y, options.z)), generation)
                 last_recenter = time.monotonic()
             if options.sink_at and not drive_state.get("sunk") and time.monotonic() - started >= options.sink_at and last_position:
                 px, py, pz, yaw = last_position

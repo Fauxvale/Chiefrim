@@ -41,6 +41,17 @@ namespace chiefrim::Puppet
 			std::uint32_t snapshotState{ 0 };
 			ULONGLONG watchUntil{ 0 };
 			ULONGLONG nextWatch{ 0 };
+			// Movement as Skyrim shows it, summed up every 30 s (docs: hitches)
+			struct
+			{
+				LARGE_INTEGER last{};
+				LARGE_INTEGER since{};
+				RE::NiPoint3 lastPosition;
+				bool havePosition{ false };
+				double speedAverage{ 0.0 };
+				std::uint32_t frames{ 0 }, slowFrames{ 0 }, sameState{ 0 }, stalls{ 0 }, lurches{ 0 }, inAir{ 0 };
+				std::uint32_t lastTick{ 0 };
+			} motion;
 		} s;
 
 		using Flags = RE::CHARACTER_FLAGS;
@@ -220,6 +231,57 @@ namespace chiefrim::Puppet
 			logger::info("Chief's radius {:.0f} units", context.chief_radius);
 		}
 
+		// Per frame: did the player move evenly? Frames given no new state,
+		// frames that stalled or lurched against the recent speed, slow
+		// frames, and Skyrim's controller thinking it's in the air.
+		void Measure(RE::PlayerCharacter* a_player, const cr_player_state& a_state, const RE::NiPoint3& a_position)
+		{
+			auto& m = s.motion;
+			LARGE_INTEGER now{}, frequency{};
+			::QueryPerformanceCounter(&now);
+			::QueryPerformanceFrequency(&frequency);
+			if (!m.since.QuadPart) {
+				m.since = now;
+			}
+			if (m.last.QuadPart && m.havePosition) {
+				const double dt = double(now.QuadPart - m.last.QuadPart) / double(frequency.QuadPart);
+				const double moved = m.lastPosition.GetDistance(a_position);
+				m.frames++;
+				m.slowFrames += dt > 0.040;
+				m.sameState += a_state.tick == m.lastTick;
+				if (dt > 0.0 && dt < 0.25) {
+					const double speed = moved / dt;
+					if (m.speedAverage > 150.0) {  // walking (Skyrim units a second)
+						m.stalls += speed < m.speedAverage * 0.35;
+						m.lurches += speed > m.speedAverage * 2.0 && moved < 200.0;
+					}
+					m.speedAverage = m.speedAverage * 0.9 + speed * 0.1;
+				}
+				if (const auto* controller = a_player->GetCharController()) {
+					m.inAir += controller->context.currentState != RE::hkpCharacterStateType::kOnGround;
+				}
+			}
+			m.last = now;
+			m.lastPosition = a_position;
+			m.havePosition = true;
+			m.lastTick = a_state.tick;
+			if (double(now.QuadPart - m.since.QuadPart) / double(frequency.QuadPart) >= 30.0) {
+				if (m.frames) {
+					logger::info("last 30 s as Skyrim showed it: {} frames ({} over 40 ms), {} with no new state from Halo, "
+								 "{} stalls and {} lurches while walking, {} with Skyrim's controller in the air",
+						m.frames, m.slowFrames, m.sameState, m.stalls, m.lurches, m.inAir);
+				}
+				const auto keep = m.speedAverage;
+				m = {};
+				m.since = now;
+				m.last = now;
+				m.lastPosition = a_position;
+				m.havePosition = true;
+				m.lastTick = a_state.tick;
+				m.speedAverage = keep;
+			}
+		}
+
 		// Applies Halo's latest state every frame, new or not: between Halo's
 		// frames nothing on Skyrim's side may move the player away from Chief.
 		void Follow(RE::PlayerCharacter* a_player, const cr_player_state& a_state)
@@ -239,6 +301,7 @@ namespace chiefrim::Puppet
 			}
 
 			const RE::NiPoint3 position{ a_state.position.x, a_state.position.y, a_state.position.z };
+			Measure(a_player, a_state, position);
 			a_player->SetPosition(position, true);
 			a_player->data.angle.z = a_state.yaw;
 			a_player->data.angle.x = a_state.pitch;
