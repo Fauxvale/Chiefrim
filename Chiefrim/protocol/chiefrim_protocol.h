@@ -230,7 +230,8 @@ typedef struct cr_msg_collision_reset
 {
 	cr_msg_header header;
 	uint32_t epoch;      /* regions from older epochs are stale */
-	uint32_t reserved;
+	uint32_t world_generation; /* the world context (generation) this collision is for;
+	                              Halo builds nothing until both have arrived. 0: any */
 } cr_msg_collision_reset;
 
 typedef struct cr_msg_collision_tris

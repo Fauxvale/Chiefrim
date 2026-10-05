@@ -101,13 +101,13 @@ def terrain_triangles(ox, oy, oz):
     return tris
 
 
-def send_terrain(link, epoch, ox, oy, oz):
+def send_terrain(link, epoch, ox, oy, oz, generation=1):
     regions = {}
     for t in terrain_triangles(ox, oy, oz):
         cx, cy, cz = (t[0] + t[3] + t[6]) / 3, (t[1] + t[4] + t[7]) / 3, (t[2] + t[5] + t[8]) / 3
         key = (math.floor(cx / REGION_UNITS), math.floor(cy / REGION_UNITS), math.floor(cz / REGION_UNITS))
         regions.setdefault(key, []).append(t)
-    link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, 0))
+    link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, generation))
     sent = 0
     for (rx, ry, rz), tris in regions.items():
         for first in range(0, max(len(tris), 1), TRIS_PER_MESSAGE):
@@ -348,7 +348,7 @@ def main():
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
                 print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 if options.terrain:
-                    send_terrain(link, epoch, options.x, options.y, options.z)
+                    send_terrain(link, epoch, options.x, options.y, options.z, generation)
                 last_recenter = time.monotonic()
             if link.u32(HALO_STATE) == SIDE_CLOSING:
                 print("fake_skyrim: Halo is closing")

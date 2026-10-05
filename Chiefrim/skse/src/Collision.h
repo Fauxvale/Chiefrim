@@ -8,7 +8,8 @@ namespace chiefrim::Collision
 	// (CR_REGION_UNITS). Halo builds its collision BSP from them.
 
 	// The world changed (or a new Halo): forget what was sent, tell Halo to.
-	void Reset();
+	// a_worldGeneration: the world context the new collision goes with.
+	void Reset(std::uint32_t a_worldGeneration);
 
 	// Once a frame while linked, in gameplay: harvests and sends a few
 	// regions around the player, within a small time budget.

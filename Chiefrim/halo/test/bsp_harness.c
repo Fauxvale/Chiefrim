@@ -267,16 +267,16 @@ static void probe_below(struct chiefrim_bsp *bsp, real_point3d const *chief)
 	put_long((long)(chief->x * 1000)); put(" "); put_long((long)(chief->y * 1000)); put(" "); put_long((long)(chief->z * 1000));
 	put(", lowest collision ");
 	put_long((long)(bsp->min_z * 1000));
-	start.z += 2.f;
+	start.z = getenv("PROBE_Z") ? (real)atol(getenv("PROBE_Z")) / 1000.f : start.z + 2.f; /* PROBE_Z: x1000 wu */
 	if (collision_bsp_test_vector(3, &bsp->bsp, 0, NULL, &start, &down, REAL_MAX, &result))
 	{
-		put("; down from 2 wu above, a hit at t x1000 ");
-		put_long((long)(result.t * 1000));
+		put("; down from PROBE_Z (or 2 above him), a hit at z x1000 ");
+		put_long((long)((start.z + down.k * result.t) * 1000));
 		put(", surface ");
 		put_long(result.surface_index);
 	}
 	else
-		put("; down from 2 wu above: nothing");
+		put("; down from PROBE_Z (or 2 above him): nothing");
 	put("\n");
 	(void)i;
 }

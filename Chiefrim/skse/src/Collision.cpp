@@ -616,8 +616,49 @@ namespace chiefrim::Collision
 			return (std::uint64_t(std::uint32_t(a_x) & 0x1FFFFF) << 42) | (std::uint64_t(std::uint32_t(a_y) & 0x1FFFFF) << 21) | (std::uint32_t(a_z) & 0x1FFFFF);
 		}
 
+		// Splits triangles longer than kMaxEdge (at the middle of the longest
+		// edge) until none is: a big one (a box's face is two triangles, and
+		// interiors' floors are big boxes) would go only to the region of its
+		// centre, which may be out of reach while the player stands on it.
+		void Subdivide(std::vector<Tri>& a_tris)
+		{
+			static constexpr float kMaxEdge = 256.0f;
+			for (std::size_t i = 0; i < a_tris.size(); ++i) {
+				for (;;) {
+					Tri& t = a_tris[i];
+					float best = 0.0f;
+					int edge = 0;
+					for (int e = 0; e < 3; ++e) {
+						const float* a = &t.v[e * 3];
+						const float* b = &t.v[((e + 1) % 3) * 3];
+						const float d[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+						const float length = Dot(d, d);
+						if (length > best) {
+							best = length;
+							edge = e;
+						}
+					}
+					if (!(best > kMaxEdge * kMaxEdge) || a_tris.size() > 4'000'000) {
+						break;
+					}
+					// edge a->b, opposite corner c: (a, m, c) stays, (m, b, c) is added
+					const int a = edge, b = (edge + 1) % 3;
+					float m[3];
+					for (int k = 0; k < 3; ++k) {
+						m[k] = (t.v[a * 3 + k] + t.v[b * 3 + k]) * 0.5f;
+					}
+					Tri other = t;
+					for (int k = 0; k < 3; ++k) {
+						t.v[b * 3 + k] = m[k];
+						other.v[a * 3 + k] = m[k];
+					}
+					a_tris.push_back(other);  // may move a_tris: t is not used after this
+				}
+			}
+		}
+
 		// One region's triangles: every triangle whose centre is in it (so a
-		// triangle is in exactly one region).
+		// triangle is in exactly one region). Big ones are split first.
 		Pending Harvest(int a_rx, int a_ry, int a_rz)
 		{
 			const float lo[3] = { a_rx * CR_REGION_UNITS, a_ry * CR_REGION_UNITS, a_rz * CR_REGION_UNITS };
@@ -641,6 +682,7 @@ namespace chiefrim::Collision
 				}
 				std::vector<Tri> tris;
 				Triangulate(job, tris);
+				Subdivide(tris);
 				for (const auto& t : tris) {
 					const float c[3] = { (t.v[0] + t.v[3] + t.v[6]) / 3.0f, (t.v[1] + t.v[4] + t.v[7]) / 3.0f, (t.v[2] + t.v[5] + t.v[8]) / 3.0f };
 					if (c[0] < lo[0] || c[0] >= hi[0] || c[1] < lo[1] || c[1] >= hi[1] || c[2] < lo[2] || c[2] >= hi[2]) {
@@ -700,7 +742,7 @@ namespace chiefrim::Collision
 		}
 	}
 
-	void Reset()
+	void Reset(std::uint32_t a_worldGeneration)
 	{
 		++s.epoch;
 		s.harvested.clear();
@@ -708,6 +750,7 @@ namespace chiefrim::Collision
 		s.outbox.clear();
 		cr_msg_collision_reset reset{};
 		reset.epoch = s.epoch;
+		reset.world_generation = a_worldGeneration;
 		Link::Get().PushRaw(CR_MSG_COLLISION_RESET, &reset, sizeof(reset));
 		logger::info("collision: reset (epoch {})", s.epoch);
 	}

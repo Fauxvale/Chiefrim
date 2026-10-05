@@ -94,7 +94,7 @@ namespace chiefrim::Puppet
 			auto& link = Link::Get();
 			link.SendWorldContext(context);
 			link.SendTeleport(position, a_player->data.angle.z);
-			Collision::Reset();  // Halo forgets the old world's collision
+			Collision::Reset(context.generation);  // Halo forgets the old world's collision
 
 			s.worldSent = true;
 			s.worldId = a_id;

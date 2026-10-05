@@ -105,6 +105,8 @@ static struct
 
 	cr_vec3 origin;             /* Skyrim units: Halo (0,0,0) */
 	unsigned long origin_generation; /* counts origin changes */
+	unsigned long world_generation;     /* Skyrim's world context in force */
+	unsigned long collision_generation; /* the one Skyrim's last collision reset was for */
 	real floor_z;               /* world units */
 	boolean world_valid;
 
@@ -695,6 +697,7 @@ void chiefrim_world_message(int type, void const *message)
 		cr_msg_collision_reset const *reset = (cr_msg_collision_reset const *)message;
 
 		world.epoch = reset->epoch;
+		world.collision_generation = reset->world_generation;
 		region_clear_all();
 		world.dirty = FALSE;
 	}
@@ -762,6 +765,12 @@ void chiefrim_world_update(real_point3d const *chief)
 		world.center[2] = cz;
 		world.dirty = TRUE;
 	}
+	/* Skyrim's world context and its collision reset come by different
+	ways (a slot, the ring): until both are in, the regions held are the
+	old world's, and built around the new origin they'd be in the wrong
+	place. */
+	if (world.collision_generation && world.collision_generation != world.world_generation)
+		return;
 	if (world.dirty && !chiefrim_world_worker_busy() &&
 		system_milliseconds() - world.last_build_ms >= BUILD_INTERVAL_MS)
 	{
@@ -857,4 +866,9 @@ boolean chiefrim_world_room_for(real_point3d const *feet, real height)
 		return TRUE;
 	centre.z += MAX(height * 0.55f, radius + 0.1f);
 	return !collision_bsp_test_sphere(&world.current->bsp, 0, NULL, &centre, radius, sphere);
+}
+
+void chiefrim_world_generation(unsigned long generation)
+{
+	world.world_generation = generation;
 }

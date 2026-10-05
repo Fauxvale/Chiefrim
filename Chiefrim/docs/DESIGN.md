@@ -178,6 +178,13 @@ collision code.
   - the in-game self-test rejects a build only for more than 2 (or 10%) misses in its sample;
   - exact repeats of a triangle (either winding: Skyrim's two-sided meshes) are dropped, and
     polygons stacked on one plane go in at most 8 references per leaf;
+  - Skyrim's world context (a slot) and its collision reset (the ring) arrive separately; the reset
+    names the world-context generation it goes with, and Halo builds nothing until both are in.
+    (Applying the new origin first, Halo built the old cell's collision around it: after a door,
+    Chief stood on the wrong world's geometry for a moment and dropped through.)
+  - the exporter splits triangles to edges of at most 256 units before sorting them into regions
+    by their centres: a big one (a box's face is two triangles; interiors' floors are big boxes)
+    went only to the region of its centre, out of reach while the player stood on it;
   - a build is installed only for the origin it was made for: one still running when Skyrim moves
     the origin (a load, a door, `coc`) is thrown away (installing it shifted the ground under Chief
     and he fell through);

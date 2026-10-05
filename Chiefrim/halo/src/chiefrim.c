@@ -141,6 +141,7 @@ static void chiefrim_apply_world(void)
 		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
+	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
 	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
 		world.world_id, world.is_interior ? " (interior)" : "",
