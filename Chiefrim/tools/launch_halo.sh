@@ -19,7 +19,7 @@ halo="$root/halo/.work/build/linux/halo"
 
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
 [ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
-mkdir -p "$data" "$root/build/halo-saves"
+mkdir -p "$data" "$root/build/halo-saves" "$root/build/collision-dumps"
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
 printf 'map_name levels\\b30\\b30\n' > "$data/init.txt"
 
@@ -27,7 +27,7 @@ bot=""
 [ "${1:-}" = "--bot" ] && bot="bot:1"
 
 echo "Halo log: $data/debug.txt"
-exec env CHIEFRIM=1 \
+exec env CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 	HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \
 	HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_FULLSCREEN=0 \
 	HALO_TEST_INPUT="$bot" \

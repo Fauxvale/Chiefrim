@@ -4,7 +4,8 @@
 # compiler flags) and runs it on synthetic Skyrim-like collision of growing
 # size: bumpy ground, rotated boxes like rocks, a ramp, a cliff and a wall.
 # Needs a built halo/.work (tools/setup_halo.py). SELF_TEST=1 also runs Halo's
-# own ray and sphere queries on every surface.
+# own ray and sphere queries on every surface. Builds Halo dumped for being
+# slow or failing (build/collision-dumps) are replayed too.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 work="$root/halo/.work"
@@ -25,4 +26,10 @@ clang --target=i686-linux-gnu -m32 -no-pie "$out/bsp_harness.o" "$out/chiefrim_b
 	-Wl,--unresolved-symbols=ignore-all -lm -o "$out/bsp_harness"
 for size in "512 0" "1024 50" "2048 200" "3072 400" "3072 1500"; do
 	timeout 120 "$out/bsp_harness" $size
+done
+# and any builds Halo dumped for being slow or failing (launch_halo.sh)
+for dump in "$root"/build/collision-dumps/*.bin; do
+	[ -e "$dump" ] || continue
+	echo "replay $(basename "$dump"):"
+	timeout 120 "$out/bsp_harness" --replay "$dump"
 done

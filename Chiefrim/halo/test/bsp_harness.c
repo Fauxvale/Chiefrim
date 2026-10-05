@@ -281,6 +281,24 @@ int main(int argc, char **argv)
 		t[n].v[2].x = (cx) * k; t[n].v[2].y = (cy) * k; t[n].v[2].z = (cz) * k; \
 		t[n].id = (unsigned long)n; n++; } while (0)
 
+	/* --replay FILE: a build Halo dumped (chiefrim_world.c); no strcmp or
+	memcmp, which Halo's headers send to its own (unlinked) versions */
+	if (argc > 2 && argv[1][0] == '-' && argv[1][1] == '-' && argv[1][2] == 'r')
+	{
+		FILE *file = fopen(argv[2], "rb");
+		char magic[8];
+
+		if (!file || fread(magic, 1, 8, file) != 8 || magic[0] != 'C' || magic[1] != 'R' || magic[6] != '1' ||
+			fread(&n, sizeof(n), 1, file) != 1 || n < 0 || n > capacity ||
+			fread(t, sizeof(*t), (size_t)n, file) != (size_t)n)
+		{
+			printf("can't read the dump %s\n", argv[2]);
+			return 1;
+		}
+		fclose(file);
+		goto build;
+	}
+
 	for (i = 0; i < (long)(2 * half / 64); i++)
 	{
 		for (j = 0; j < (long)(2 * half / 64); j++)
@@ -315,6 +333,7 @@ int main(int argc, char **argv)
 	TRI(-2000, -800, 0, 2000, -800, 0, 2000, -800, 400);
 	TRI(-2000, -800, 0, 2000, -800, 400, -2000, -800, 400);
 
+build:
 	start = now_ms();
 	error[0] = 0;
 	bsp = chiefrim_bsp_build(t, n, &map_plane, 1, &map, 0, error, sizeof(error));

@@ -32,10 +32,17 @@ Skyrim's shape as Halo's collision (Chiefrim/docs/DESIGN.md §5):
 #include "units/bipeds.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef __linux__
+#include <fcntl.h>
 #include <pthread.h>
+#include <time.h>
+#include <unistd.h>
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1 /* Linux's; the build's -D__STRICT_ANSI__ hides it */
+#endif
 #endif
 
 /* The game's malloc is a debug allocator for the main thread; region data
@@ -53,6 +60,7 @@ and builds are shared with the worker, so they use the C library's. */
 #define BUILD_RADIUS_Z       1
 #define EVICT_RADIUS         5        /* regions further away are dropped */
 #define BUILD_INTERVAL_MS    250
+#define DUMP_SLOWER_THAN_MS  1000 /* builds this slow (or failing) are dumped */
 #define FLOOR_HALF_SIZE      2000.0f  /* world units */
 #define SELF_TEST_SAMPLES    48
 
@@ -199,6 +207,45 @@ static void region_evict(long cx, long cy, long cz)
 /* ---------- the worker */
 
 #ifdef __linux__
+static long chiefrim_world_clock_ms(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (long)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+/* A slow or failed build's input, to replay offline (halo/test/bsp_harness
+--replay): CHIEFRIM_DUMP_DIR/build-<pid>-<n>.bin, "CRDUMP1" then the count
+and the triangles as they are in memory (i386). These are Skyrim's shapes:
+tools/launch_halo.sh puts them under build/, which git ignores. */
+static void chiefrim_world_dump(struct build_job const *job, long milliseconds, char const *error)
+{
+	static long dump_count = 0;
+	char const *directory = getenv("CHIEFRIM_DUMP_DIR");
+	char path[512];
+	long count = job->triangle_count;
+	int file;
+
+	if (!directory || !directory[0] || dump_count >= 20)
+		return;
+	snprintf(path, sizeof(path), "%s/build-%ld-%ld.bin", directory, (long)getpid(), dump_count++);
+	file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (file < 0)
+		return;
+	if (write(file, "CRDUMP1", 8) != 8 ||
+		write(file, &count, sizeof(count)) != (ssize_t)sizeof(count) ||
+		write(file, job->triangles, sizeof(*job->triangles) * (size_t)count) != (ssize_t)(sizeof(*job->triangles) * (size_t)count))
+	{
+		close(file);
+		unlink(path);
+		return;
+	}
+	close(file);
+	fprintf(stderr, "chiefrim: dumped a %s build (%ld triangles, %ld ms) to %s\n",
+		error[0] ? "failed" : "slow", count, milliseconds, path);
+}
+
 static void *chiefrim_world_worker(void *unused)
 {
 	(void)unused;
@@ -210,6 +257,7 @@ static void *chiefrim_world_worker(void *unused)
 		char error[160];
 		struct collision_bsp *map_collision;
 		struct structure_bsp *map_structure;
+		long started, elapsed;
 
 		while (!world.job_pending)
 			pthread_cond_wait(&world.wake, &world.lock);
@@ -221,9 +269,13 @@ static void *chiefrim_world_worker(void *unused)
 		pthread_mutex_unlock(&world.lock);
 
 		error[0] = 0;
+		started = chiefrim_world_clock_ms();
 		bsp = chiefrim_bsp_build(job.triangles, job.triangle_count,
 			(real_plane3d const *)map_collision->bsp3d.planes.address, map_collision->bsp3d.planes.count,
 			map_structure, map_structure->collision_materials.count > 0 ? 0 : NONE, error, sizeof(error));
+		elapsed = chiefrim_world_clock_ms() - started;
+		if (!bsp || elapsed > DUMP_SLOWER_THAN_MS)
+			chiefrim_world_dump(&job, elapsed, error);
 
 		pthread_mutex_lock(&world.lock);
 		world.result = bsp;
