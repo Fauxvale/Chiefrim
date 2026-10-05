@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 1u
+#define CR_PROTOCOL_VERSION 2u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -85,21 +85,39 @@ typedef struct cr_world_context
 	uint32_t reserved[3];
 } cr_world_context;
 
-/* Skyrim -> Halo. Raw input for this frame (docs §7). */
-#define CR_KEY_WORDS 8 /* 256 scancode bits */
+/* Skyrim -> Halo. Chief's controls (docs §7). Skyrim's ControlMap has already
+turned keys, mouse and gamepad into user events, so these are actions, not
+keys: rebinding a Skyrim action rebinds Chief's with it. */
+#define CR_ACTION_JUMP           0u
+#define CR_ACTION_CROUCH         1u
+#define CR_ACTION_FIRE           2u
+#define CR_ACTION_ZOOM           3u
+#define CR_ACTION_RELOAD         4u
+#define CR_ACTION_GRENADE        5u /* throw */
+#define CR_ACTION_MELEE          6u
+#define CR_ACTION_ACTION         7u /* pick up / swap weapon */
+#define CR_ACTION_SWITCH_WEAPON  8u
+#define CR_ACTION_SWITCH_GRENADE 9u
+#define CR_ACTION_FLASHLIGHT     10u
+#define CR_ACTION_COUNT          11u
+#define CR_ACTION_SLOTS          16u /* room to grow */
+
 typedef struct cr_input
 {
 	uint32_t frame;               /* Skyrim frame counter */
-	uint32_t keys[CR_KEY_WORDS];  /* DirectInput scancodes held, bit per code */
-	int32_t  mouse_dx, mouse_dy;  /* accumulated since the last frame */
-	int32_t  wheel;
-	uint32_t mouse_buttons;       /* bit 0 left, 1 right, 2 middle, 3 x1, 4 x2 */
 	uint32_t routing;             /* CR_ROUTE_* */
-	uint32_t reserved[2];
+	uint32_t held;                /* bit per CR_ACTION_* held now */
+	uint32_t session;             /* changes when the totals below restart */
+	uint8_t  presses[CR_ACTION_SLOTS]; /* per action, +1 per press (wraps):
+	                                      a tap between two Halo frames still counts */
+	float    forward;             /* -1..1, +forward */
+	float    strafe;              /* -1..1, +right */
+	double   yaw_total;           /* radians turned since the session began, +right (clockwise) */
+	double   pitch_total;         /* radians, +up */
 } cr_input;
 
-#define CR_ROUTE_HALO   0u /* gameplay: Halo gets input */
-#define CR_ROUTE_SKYRIM 1u /* a Skyrim menu or scene owns input; Halo freezes */
+#define CR_ROUTE_HALO   0u /* gameplay: Chief gets the actions */
+#define CR_ROUTE_SKYRIM 1u /* a Skyrim menu or scene owns input; Chief gets none */
 
 /* Halo -> Skyrim. The player and camera (docs §6). Skyrim units/radians. */
 typedef struct cr_player_state
@@ -400,10 +418,11 @@ static inline float cr_halo_yaw_to_sky_heading(float yaw)
 
 CR_STATIC_ASSERT(sizeof(cr_vec3) == 12, "cr_vec3");
 CR_STATIC_ASSERT(sizeof(cr_world_context) == 40, "cr_world_context");
-CR_STATIC_ASSERT(sizeof(cr_input) == 64, "cr_input");
+CR_STATIC_ASSERT(sizeof(cr_input) == 56, "cr_input");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_input, yaw_total) == 40, "cr_input.yaw_total");
 CR_STATIC_ASSERT(sizeof(cr_player_state) == 88, "cr_player_state");
 CR_STATIC_ASSERT(sizeof(cr_slot_world_context) == 48, "cr_slot_world_context");
-CR_STATIC_ASSERT(sizeof(cr_slot_input) == 72, "cr_slot_input");
+CR_STATIC_ASSERT(sizeof(cr_slot_input) == 64, "cr_slot_input");
 CR_STATIC_ASSERT(sizeof(cr_slot_player_state) == 96, "cr_slot_player_state");
 CR_STATIC_ASSERT(sizeof(cr_msg_header) == 8, "cr_msg_header");
 CR_STATIC_ASSERT(sizeof(cr_msg_hello) == 64, "cr_msg_hello");
@@ -411,8 +430,8 @@ CR_STATIC_ASSERT(sizeof(cr_msg_teleport) == 24, "cr_msg_teleport");
 CR_STATIC_ASSERT(sizeof(cr_msg_log) == 128, "cr_msg_log");
 CR_STATIC_ASSERT(sizeof(cr_ring) == 128 + CR_RING_BYTES, "cr_ring");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, world_context) == 64, "cr_shared.world_context");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 280, "cr_shared.to_halo");
-CR_STATIC_ASSERT(sizeof(cr_shared) == 280 + 2 * (128 + CR_RING_BYTES), "cr_shared");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 272, "cr_shared.to_halo");
+CR_STATIC_ASSERT(sizeof(cr_shared) == 272 + 2 * (128 + CR_RING_BYTES), "cr_shared");
 
 #ifdef __cplusplus
 }

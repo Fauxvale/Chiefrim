@@ -78,13 +78,14 @@ int main(int argc, char **argv)
 		state.reserved[1] = ~tick;
 		CR_SLOT_WRITE(&shm->player_state, state);
 
-		/* Input slot: keys[i] = frame * 31 + i. */
+		/* Input slot: presses[i] = frame * 31 + i, held = ~frame. */
 		if (CR_SLOT_READ(&shm->input, &input))
 		{
 			int i, ok = 1;
-			for (i = 0; i < CR_KEY_WORDS; i++)
-				ok &= input.keys[i] == input.frame * 31u + (uint32_t)i;
-			ok &= input.mouse_dx == -(int32_t)input.frame;
+			for (i = 0; i < (int)CR_ACTION_SLOTS; i++)
+				ok &= input.presses[i] == (uint8_t)(input.frame * 31u + (uint32_t)i);
+			ok &= input.held == ~input.frame;
+			ok &= input.yaw_total == (double)input.frame * 0.5;
 			input_reads++;
 			if (!ok || input.frame < last_frame)
 				input_torn++;

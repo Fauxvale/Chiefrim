@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "Input.h"
 #include "Puppet.h"
 
 namespace
@@ -21,6 +22,7 @@ namespace
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
+			chiefrim::Input::Install();
 			chiefrim::Puppet::Install();
 		}
 	}

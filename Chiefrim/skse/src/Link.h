@@ -21,6 +21,7 @@ namespace chiefrim
 
 		void SendWorldContext(const cr_world_context& a_context);
 		void SendTeleport(const RE::NiPoint3& a_position, float a_heading);
+		void SendInput(const cr_input& a_input);
 
 		// The latest player state; nullopt until Halo publishes one.
 		std::optional<cr_player_state> ReadPlayerState();

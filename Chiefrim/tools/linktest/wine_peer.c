@@ -149,9 +149,10 @@ void mainCRTStartup(void)
 		/* Input slot, checked by the native side. */
 		memset(&input, 0, sizeof(input));
 		input.frame = i;
-		for (k = 0; k < CR_KEY_WORDS; k++)
-			input.keys[k] = i * 31u + (unsigned)k;
-		input.mouse_dx = -(int)i;
+		for (k = 0; k < (int)CR_ACTION_SLOTS; k++)
+			input.presses[k] = (uint8_t)(i * 31u + (unsigned)k);
+		input.held = ~i;
+		input.yaw_total = (double)i * 0.5;
 		CR_SLOT_WRITE(&shm->input, input);
 		CR_STORE_REL(&shm->skyrim_heartbeat, (uint32_t)GetTickCount64());
 

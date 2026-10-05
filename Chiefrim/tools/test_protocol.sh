@@ -13,6 +13,11 @@ for bits in 32 64; do
 	"$out/test_protocol_$bits"
 done
 
+# Halo itself builds with -malign-double (8-byte doubles in i386 structs).
+printf '#include "chiefrim_protocol.h"\n' |
+	clang -m32 -malign-double -std=c11 -Wall -Werror -fsyntax-only -I"$root/protocol" -x c -
+echo "ok: layout pins hold for i386 with -malign-double (Halo's build)"
+
 for target in x86_64-pc-windows-msvc i686-pc-windows-msvc; do
 	printf '#include "chiefrim_protocol.h"\n' |
 		clang++ --target=$target -ffreestanding -std=c++23 -Wall -Werror \

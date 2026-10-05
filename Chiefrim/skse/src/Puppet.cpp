@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Puppet.h"
 
+#include "Input.h"
 #include "Link.h"
 
 namespace chiefrim::Puppet
@@ -110,11 +111,16 @@ namespace chiefrim::Puppet
 			const bool wasConnected = link.Connected();
 			if (!link.Update()) {
 				s.worldSent = false;
+				if (wasConnected) {
+					Input::OnUnlinked();  // Skyrim's own controls back
+				}
 				return;
 			}
 			if (!wasConnected) {
 				s.worldSent = false;  // a new Halo: tell it everything again
+				Input::OnLinked();
 			}
+			Input::Publish(a_player);
 			if (!GameplayIsRunning()) {
 				return;
 			}

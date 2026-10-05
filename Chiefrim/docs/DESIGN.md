@@ -207,27 +207,69 @@ definition comes from that map. Chiefrim loads one **host map**.
 
 ## 7. Input
 
-Same model as SkyCraft. The Skyrim window has OS focus. **InputBridge** reads raw input through
-Skyrim's input device manager, swallows it from Skyrim's controls, and writes it to the shared
-input slot. In Halo, the SDL keyboard and mouse path in `port/linux/src/sdl_platform.c`
-(`platform_pump_events`) takes its input from that slot instead. The Halo window stays hidden, and
-it is told it has focus so the mouse stays captured.
+**Skyrim's own controls drive Chief** (decided 2026-10-04, replacing SkyCraft's raw-key
+passthrough). The Skyrim window keeps focus, and Skyrim's input system does what it always does:
+it maps keys, mouse and gamepad to **user events** through its ControlMap, including the user's
+remaps from the in-game Controls menu and `ControlMap_Custom.txt`. Chiefrim turns those user events
+into Halo actions.
 
-| Key | Goes to | Does |
+**Rule: Chiefrim never reads a raw key for anything Skyrim has a binding for.** It reads only the
+user event (`ButtonEvent::QUserEvent()`), so rebinding a Skyrim action rebinds the matching Chief
+action with it. For example, with movement on the arrow keys, Chief moves with the arrow keys. The
+only raw keys are Chiefrim's own two hotkeys.
+
+### Skyrim side (InputBridge, in the plugin)
+
+- An input event sink on `BSInputDeviceManager` sees every event with its user event already
+  resolved for the gameplay context. Movement comes from `forward`/`back`/`strafeLeft`/
+  `strafeRight` and the `move` stick. Look comes from the `look` events (mouse motion, right stick),
+  scaled by Skyrim's own `fMouseHeadingSensitivity` and inverted when Skyrim's invert-Y is on.
+- **Crouch follows Skyrim's sneak state.** Skyrim's Sneak handler stays on, so Skyrim's stealth
+  works, and however Sneak is configured (toggle or hold), Chief crouches exactly while the player
+  sneaks.
+- While linked and in gameplay, Skyrim's own `PlayerControls` handlers for the actions Chief
+  takes are switched off: movement, look, sprint, ready weapon, auto-move, toggle run, run, jump,
+  shout, attack/block and toggle POV. They're switched back on when the link closes. Activate
+  and Sneak stay on.
+- Menus open, dialogue, loading screens, console: routing is `Skyrim`, Halo gets neutral input,
+  and Skyrim gets everything as usual.
+
+### Default mapping (`Chiefrim.ini`, `[Controls]`)
+
+| Halo action | Skyrim user event (default key) | Notes |
 |---|---|---|
-| **G** | Skyrim | Activate: doors, NPCs (talk), containers, levers, furniture |
-| **Esc** | Skyrim | Skyrim journal / system menu (Halo's pause menu is suppressed) |
-| **J** / **M** / **T** | Skyrim | Journal / map / wait |
-| **F9**, **~** | Skyrim | Quickload, console |
-| **O** | Halo | Halo settings screen (controls, mouse, audio), drawn in the HUD layer |
-| everything else | Halo | Halo's own bindings: WASD, mouse, fire, grenade, melee (F), reload (R), action (E: pick up or swap weapons), flashlight (Q), zoom (Z) and so on |
+| Move | Forward / Back / Strafe Left / Strafe Right, Move stick | |
+| Look | Look (mouse, right stick) | Skyrim's sensitivity and invert-Y |
+| Jump | Jump (Space) | |
+| Crouch | *Skyrim's sneak state* (Sneak, Ctrl) | Stealth keeps working |
+| Fire | Right Attack/Block (LMB) | |
+| Zoom | Left Attack/Block (RMB) | |
+| Reload | Ready Weapon (R) | |
+| Throw grenade | Shout (Z) | |
+| Melee | Toggle POV (F) | |
+| Switch weapon | Zoom In / Zoom Out (mouse wheel) | |
+| Pick up / swap weapon | Activate (E) | Also still Skyrim's Activate |
+| **Switch grenade** | **Chiefrim hotkey** `iSwitchGrenadeKey` (default G) | A raw key, Chiefrim's own |
+| **Flashlight** | **Chiefrim hotkey** `iFlashlightKey` (default V) | A raw key, Chiefrim's own |
 
-**Routing modes** (from SkyCraft):
+Each Halo action's Skyrim user event can be changed in the ini, by its ControlMap name. At start-up,
+and when the Controls menu closes, the plugin logs the key each action is currently bound to. It
+also warns, in the log and as a corner message, when a Chiefrim hotkey is also bound to a Skyrim
+gameplay action.
 
-- **Gameplay:** input goes to Halo, with the allow-list above going to Skyrim.
-- **Halo screen open:** input goes to Halo.
-- **Skyrim menu open** (dialogue, barter, lockpicking, map, loading screen): input goes to
-  Skyrim, and the Halo game clock is frozen (`game_time` stops).
+### Halo side
+
+Halo's port already reduces input to an abstract per-player state (`struct game_input_state` in
+`source/input/input_abstraction.c`): ticks held per game control, forward and strafe, plus direct
+mouse aim in radians (`player_control.c`). In Chiefrim mode, `chiefrim_input.c` fills that same
+state for local player 0 from the link's input slot. Hooks in `input_abstraction.c` cover the
+buttons, movement and reload, and a hook in `player_control.c` covers aim, with no magnetism, as
+for the port's mouse. Halo's own keyboard still works for testing (`tools/launch_halo.sh`).
+
+**The link carries actions, not keys:** the protocol's `cr_input` (v2) holds a bit per held
+action, a press counter per action (so a tap shorter than one Halo frame isn't lost), forward and
+strafe, and running yaw and pitch totals (so look motion isn't lost or doubled between the two
+games' frames).
 
 ## 8. Combat
 
@@ -396,7 +438,7 @@ Each phase ends in something you can play.
 | # | Phase | "Done" when |
 |---|---|---|
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
-| 1 | **Walk Skyrim as Chief** | CollisionField stage A through the runtime BSP compiler (§5.2), CameraDriver, InputBridge. You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
+| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **built 2026-10-04, in-game test pending**), CameraDriver, CollisionField stage A through the runtime BSP compiler (§5.2). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |

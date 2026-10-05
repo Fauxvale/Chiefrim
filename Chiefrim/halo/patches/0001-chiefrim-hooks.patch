@@ -29,6 +29,79 @@ index 0549cc04..8a62a182 100644
  	recorded_animations_update();
  	objects_update();
  	players_update_after_game();
+diff --git a/source/game/player_control.c b/source/game/player_control.c
+index 72798d4b..015440ec 100644
+--- a/source/game/player_control.c
++++ b/source/game/player_control.c
+@@ -209,6 +209,7 @@ symbols in this file:
+ #include "units/vehicles.h"
+ 
+ #include "real_math.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -1236,7 +1237,8 @@ static void get_local_player_input_blob(
+ 							/* no magnetism for the mouse (port/linux/src/xinput_sdl.c) */
+ 							extern int halo_linux_mouse_aiming(short gamepad_index);
+ 
+-							if (halo_linux_mouse_aiming(gamepad_index))
++							if (halo_linux_mouse_aiming(gamepad_index) ||
++								chiefrim_input_driving(gamepad_index)) /* CHIEFRIM: aims like the mouse */
+ 							{
+ 								control->magnetism_level = 0.f;
+ 							}
+@@ -1300,6 +1302,21 @@ static void get_local_player_input_blob(
+ 							input->facing_delta.yaw += mouse_yaw;
+ 							input->facing_delta.pitch += mouse_pitch;
+ 						}
++						/* CHIEFRIM: Skyrim's look, direct like the mouse */
++						if (chiefrim_input_look(gamepad_index, &mouse_yaw, &mouse_pitch))
++						{
++							if (player->unit_index != NONE && control->zoom_level != NONE)
++							{
++								real inverse_zoom = 1.f / unit_get_zoom_magnification(
++									player->unit_index,
++									control->zoom_level);
++
++								mouse_yaw *= inverse_zoom;
++								mouse_pitch *= inverse_zoom;
++							}
++							input->facing_delta.yaw += mouse_yaw;
++							input->facing_delta.pitch += mouse_pitch;
++						}
+ 					}
+ 				}
+ 				else
+diff --git a/source/input/input_abstraction.c b/source/input/input_abstraction.c
+index a9decc9c..f8550cb1 100644
+--- a/source/input/input_abstraction.c
++++ b/source/input/input_abstraction.c
+@@ -69,6 +69,7 @@ symbols in this file:
+ #include "units/vehicle_definitions.h"
+ #include "units/vehicles.h"
+ #include "halo_keyboard.h" /* port */
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -243,6 +244,8 @@ static void keyboard_controls_update(
+ 	long control_index;
+ 	long x, y;
+ 
++	held |= chiefrim_input_keyboard_actions((short)controller_index); /* CHIEFRIM: Skyrim's actions */
++
+ 	for (control_index = 0; control_index < NUMBER_OF_GAME_CONTROLS; control_index++)
+ 	{
+ 		if (keyboard_game_controls[control_index] < 0)
+@@ -268,6 +271,7 @@ static void keyboard_controls_update(
+ 		state->forward_movement = y * length;
+ 		state->strafe = -x * length;
+ 	}
++	chiefrim_input_movement((short)controller_index, &state->forward_movement, &state->strafe); /* CHIEFRIM */
+ 	return;
+ }
+ 
 diff --git a/source/main/main.c b/source/main/main.c
 index e35691e1..a1b87c1a 100644
 --- a/source/main/main.c

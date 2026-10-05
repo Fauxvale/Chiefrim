@@ -167,6 +167,13 @@ namespace chiefrim
 		Push(CR_MSG_TELEPORT, &teleport, sizeof(teleport));
 	}
 
+	void Link::SendInput(const cr_input& a_input)
+	{
+		if (shm_) {
+			CR_SLOT_WRITE(&shm_->input, a_input);
+		}
+	}
+
 	std::optional<cr_player_state> Link::ReadPlayerState()
 	{
 		if (!shm_) {

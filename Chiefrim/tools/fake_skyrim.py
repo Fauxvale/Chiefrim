@@ -24,20 +24,50 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 1
+VERSION = 2
 RING_BYTES = 256 * 1024
-TOTAL_SIZE = 280 + 2 * (128 + RING_BYTES)
+TOTAL_SIZE = 272 + 2 * (128 + RING_BYTES)
 
 # offsets (chiefrim_protocol.h)
 SKYRIM_PID, HALO_PID = 16, 20
 SKYRIM_STATE, HALO_STATE = 24, 28
 SKYRIM_HEARTBEAT, HALO_HEARTBEAT = 32, 36
-SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER = 64, 112, 184
-RING_TO_HALO, RING_TO_SKYRIM = 280, 280 + 128 + RING_BYTES
+SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER = 64, 112, 176
+RING_TO_HALO, RING_TO_SKYRIM = 272, 272 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
+ACTION_JUMP, ACTION_CROUCH = 0, 1
+INPUT_FORMAT = "<IIII16Bffdd"  # cr_input (protocol v2)
+
+# (start s, end s, what): the --drive script, after a 2 s settle
+DRIVE = [(2, 4, "forward"), (4, 6, "strafe right"), (6, 8, "turn right"),
+         (8, 8.1, "jump"), (10, 12, "crouch"), (12, 13, "stop")]
+
+
+def drive_input(t, frame, presses, state):
+    """the cr_input for t seconds into the run"""
+    forward = strafe = 0.0
+    held = 0
+    phase = next((what for start, end, what in DRIVE if start <= t < end), "stop")
+    if phase == "forward":
+        forward = 1.0
+    elif phase == "strafe right":
+        strafe = 1.0
+    elif phase == "turn right":
+        state["yaw"] += 0.02  # radians per tick of this loop (~200/s): ~4 rad/s
+    elif phase == "jump":
+        held |= 1 << ACTION_JUMP
+    elif phase == "crouch":
+        held |= 1 << ACTION_CROUCH
+    if held & (1 << ACTION_JUMP) and not state.get("jumped"):
+        presses[ACTION_JUMP] = (presses[ACTION_JUMP] + 1) & 0xFF
+        state["jumped"] = True
+    if state.get("phase") != phase:
+        print(f"fake_skyrim: drive: {phase}", flush=True)
+        state["phase"] = phase
+    return struct.pack(INPUT_FORMAT, frame, 0, held, 1, *presses, forward, strafe, state["yaw"], 0.0)
 TAMRIEL = 0x3C
 
 
@@ -121,6 +151,8 @@ def main():
     parser.add_argument("--silence-at", type=float, default=0.0,
                         help="seconds in: stop the heartbeat, as a Skyrim that hangs (0: never)")
     parser.add_argument("--silence-for", type=float, default=5.0)
+    parser.add_argument("--drive", action="store_true",
+                        help="script Chief through the input slot: forward, strafe right, turn right, jump, crouch")
     options = parser.parse_args()
 
     print(f"fake_skyrim: waiting for {PATH}", flush=True)
@@ -164,6 +196,9 @@ def main():
     last_tick = None
     started = time.monotonic()
     silenced = False
+    frame = 0
+    presses = [0] * 16
+    drive_state = {"yaw": 0.0}
     try:
         while time.monotonic() < deadline:
             quiet = options.silence_at > 0 and 0 <= time.monotonic() - started - options.silence_at < options.silence_for
@@ -172,6 +207,9 @@ def main():
                 silenced = quiet
             if not quiet:
                 link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))
+            if options.drive:
+                frame += 1
+                link.slot_write(SLOT_INPUT, drive_input(time.monotonic() - started, frame, presses, drive_state))
             while (message := link.pop(RING_TO_SKYRIM)) is not None:
                 msg_type, body = message
                 if msg_type == MSG_HELLO:
@@ -183,7 +221,7 @@ def main():
                 print("fake_skyrim: Halo is closing")
                 break
             now = time.monotonic()
-            if now - last_print >= 0.5:
+            if now - last_print >= (0.25 if options.drive else 0.5):
                 seq, payload = link.slot_read(SLOT_PLAYER, 88)
                 if payload and seq != last_seq:
                     v = struct.unpack("<II3f2fI3f3f3f3f2I", payload)

@@ -14,13 +14,14 @@ stage="$root/build/dist/stage"
 mkdir -p "$stage/SKSE/Plugins"
 python3 "$root/tools/check_licenses.py"
 cp "$dll" "$stage/SKSE/Plugins/"
+cp "$root/skse/Chiefrim.ini" "$stage/SKSE/Plugins/"
 cp "$root/../LICENSE" "$stage/SKSE/Plugins/Chiefrim-LICENSE.txt"
 cp "$root/../THIRD-PARTY-NOTICES.md" "$stage/SKSE/Plugins/Chiefrim-THIRD-PARTY-NOTICES.md"
 zip="$root/build/dist/Chiefrim-$version.zip"
 (cd "$stage" && python3 -c "
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], 'w', zipfile.ZIP_DEFLATED) as z:
-    for name in ('Chiefrim.dll', 'Chiefrim-LICENSE.txt', 'Chiefrim-THIRD-PARTY-NOTICES.md'):
+    for name in ('Chiefrim.dll', 'Chiefrim.ini', 'Chiefrim-LICENSE.txt', 'Chiefrim-THIRD-PARTY-NOTICES.md'):
         z.write('SKSE/Plugins/' + name)
 " "$zip")
 echo "wrote $zip"

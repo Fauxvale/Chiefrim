@@ -569,6 +569,16 @@ static void chiefrim_debug_collision(void)
 
 /* ---------- public code */
 
+struct cr_shared *chiefrim_shared(void)
+{
+	return chiefrim.active ? chiefrim.shm : NULL;
+}
+
+boolean chiefrim_linked(void)
+{
+	return chiefrim.active && chiefrim.linked;
+}
+
 boolean chiefrim_active(void)
 {
 	return chiefrim.active;

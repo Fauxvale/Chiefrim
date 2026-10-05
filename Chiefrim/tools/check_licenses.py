@@ -11,7 +11,7 @@ Checks, against licenses.toml:
 - CommonLibSSE-NG is still GPL-3.0;
 - with --halo: the pinned halo-ce-universal is still CC0, every folder in
   its port/third_party is listed and allowed or excluded, and no compiled
-  file carries an excluded component's code.
+  file, nor any of our patches, carries an excluded component's code.
 
 Exit status 1 on any problem. tools/setup_halo.py and tools/setup_skse.sh
 run it before building.
@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent      # Chiefrim/
 REPO = ROOT.parent                                  # the git repository
 SPDX = "SPDX-License-Identifier: GPL-3.0-or-later"
-SOURCE_SUFFIXES = {".c", ".h", ".cpp", ".hpp", ".py", ".sh", ".cmake", ".toml"}
+SOURCE_SUFFIXES = {".c", ".h", ".cpp", ".hpp", ".py", ".sh", ".cmake", ".toml", ".ini"}
 SOURCE_NAMES = {"CMakeLists.txt"}
 
 problems = []
@@ -135,6 +135,15 @@ def check_halo(manifest):
         check_markers(work / "port" / "third_party" / name / entry["license_file"], entry["markers"], f"halo: {name}")
 
     banned = [entry["banned_marker"] for entry in listed.values() if entry.get("excluded")]
+    replaced = {entry["replaced_by"] for entry in listed.values() if entry.get("excluded")}
+    for patch in sorted((ROOT / "halo" / "patches").glob("*.patch")):
+        text = patch.read_text(encoding="utf-8", errors="replace")
+        for marker in banned:
+            if marker in text:
+                problem(f"halo: {patch.name} carries code of an excluded component ({marker})")
+        for path in replaced:
+            if f"a/{path} " in text or f"b/{path}\n" in text:
+                problem(f"halo: {patch.name} touches {path}, which halo/overrides replaces whole")
     for folder in ("source", "port/linux", "port/windows", "port/include"):
         for path in (work / folder).rglob("*"):
             if path.suffix not in {".c", ".h", ".cpp"} or not path.is_file():
