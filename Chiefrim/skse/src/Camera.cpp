@@ -200,6 +200,28 @@ namespace chiefrim::Camera
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// The first-person camera takes Toggle POV and the scroll wheel (Zoom
+		// In/Out) itself, to go to the third person: while Chief is linked
+		// those are his (melee, switch weapon), and the camera stays first
+		// person (it went third person for a frame, then was forced back).
+		struct FirstPersonCanProcessHook
+		{
+			static bool thunk(RE::PlayerInputHandler* a_this, RE::InputEvent* a_event)
+			{
+				if (s.driving && a_event) {
+					if (const auto* button = a_event->AsButtonEvent()) {
+						const auto* events = RE::UserEvents::GetSingleton();
+						const auto& name = button->QUserEvent();
+						if (events && (name == events->togglePOV || name == events->zoomIn || name == events->zoomOut)) {
+							return false;
+						}
+					}
+				}
+				return func(a_this, a_event);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// The first-person camera's position: Chief's eye (crouching and
 		// jumping included).
 		struct FirstPersonTranslationHook
@@ -244,6 +266,8 @@ namespace chiefrim::Camera
 
 		REL::Relocation<std::uintptr_t> firstPerson{ RE::VTABLE_FirstPersonState[0] };
 		FirstPersonTranslationHook::func = firstPerson.write_vfunc(0x5, FirstPersonTranslationHook::thunk);
+		REL::Relocation<std::uintptr_t> firstPersonInput{ RE::VTABLE_FirstPersonState[1] };
+		FirstPersonCanProcessHook::func = firstPersonInput.write_vfunc(0x1, FirstPersonCanProcessHook::thunk);
 		logger::info("camera hooks installed (PlayerCamera::Update at {} call site(s), first-person translation); FOV: {}",
 			sites.size(), s.useHaloFov ? std::format("Chief's, {:.0f} unzoomed", s.fieldOfView) : std::string("Skyrim's own"));
 	}
