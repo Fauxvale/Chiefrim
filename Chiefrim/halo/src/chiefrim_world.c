@@ -25,6 +25,7 @@ Skyrim's shape as Halo's collision (Chiefrim/docs/DESIGN.md §5):
 #include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
 #include "objects/objects.h"
+#include "physics/bsp3d.h"
 #include "physics/collision_bsp.h"
 #include "physics/collisions.h"
 #include "scenario/scenario.h"
@@ -48,8 +49,8 @@ and builds are shared with the worker, so they use the C library's. */
 /* ---------- constants */
 
 #define REGION_SLOTS         4096     /* power of two */
-#define BUILD_RADIUS_XY      3        /* regions around Chief's, in a build */
-#define BUILD_RADIUS_Z       2
+#define BUILD_RADIUS_XY      2        /* regions around Chief's, in a build */
+#define BUILD_RADIUS_Z       1
 #define EVICT_RADIUS         5        /* regions further away are dropped */
 #define BUILD_INTERVAL_MS    250
 #define FLOOR_HALF_SIZE      2000.0f  /* world units */
@@ -237,13 +238,14 @@ static void *chiefrim_world_worker(void *unused)
 
 /* ---------- checks and swaps (main thread) */
 
-/* Rays from just in front of, and just behind, sampled triangles must hit
+/* Rays from just in front of, and just behind, sampled surfaces must hit
 them; spheres resting on them must touch them. Through Halo's own queries,
-so a BSP that passes is one Halo reads as we meant. */
-static boolean chiefrim_world_self_test(struct chiefrim_bsp *bsp, struct build_job const *job)
+so a BSP that passes is one Halo reads as we meant. The surfaces sampled are
+the ones the builder kept (it welds and drops degenerate triangles). */
+static boolean chiefrim_world_self_test(struct chiefrim_bsp *bsp)
 {
 	struct collision_bsp_test_sphere_result *sphere;
-	long samples = MIN(job->triangle_count, SELF_TEST_SAMPLES);
+	long samples = MIN(bsp->triangle_count, SELF_TEST_SAMPLES);
 	long passed = 0, tested = 0, i;
 
 	sphere = (struct collision_bsp_test_sphere_result *)malloc(sizeof(*sphere));
@@ -251,56 +253,67 @@ static boolean chiefrim_world_self_test(struct chiefrim_bsp *bsp, struct build_j
 		return FALSE;
 	for (i = 0; i < samples; i++)
 	{
-		struct chiefrim_triangle const *t = &job->triangles[i * job->triangle_count / samples];
-		real_vector3d e1, e2, n;
-		real length;
+		long surface_index = i * bsp->triangle_count / samples;
+		struct collision_surface const *surface = &bsp->surfaces[surface_index];
+		real_point3d points[MAXIMUM_VERTICES_PER_COLLISION_SURFACE];
+		short point_count = collision_surface_polygon(&bsp->bsp, surface_index, points);
+		real_plane3d plane;
 		real_point3d centre, start;
-		real_vector3d ray;
+		real_vector3d ray, e1, e2, n;
 		struct collision_bsp_test_vector_result result;
 		boolean front, back, touch;
+		real area;
+		short p;
 
-		e1.i = t->v[1].x - t->v[0].x; e1.j = t->v[1].y - t->v[0].y; e1.k = t->v[1].z - t->v[0].z;
-		e2.i = t->v[2].x - t->v[0].x; e2.j = t->v[2].y - t->v[0].y; e2.k = t->v[2].z - t->v[0].z;
+		if (point_count < 3)
+			continue;
+		bsp3d_get_plane_from_designator(&bsp->bsp.bsp3d, surface->plane_designator, &plane);
+		e1.i = points[1].x - points[0].x; e1.j = points[1].y - points[0].y; e1.k = points[1].z - points[0].z;
+		e2.i = points[2].x - points[0].x; e2.j = points[2].y - points[0].y; e2.k = points[2].z - points[0].z;
 		n.i = e1.j * e2.k - e1.k * e2.j;
 		n.j = e1.k * e2.i - e1.i * e2.k;
 		n.k = e1.i * e2.j - e1.j * e2.i;
-		length = sqrtf(n.i * n.i + n.j * n.j + n.k * n.k);
-		/* tiny triangles say little about the BSP: skip them */
-		if (length < 0.0005f)
-			continue;
-		n.i /= length; n.j /= length; n.k /= length;
-		centre.x = (t->v[0].x + t->v[1].x + t->v[2].x) / 3.f;
-		centre.y = (t->v[0].y + t->v[1].y + t->v[2].y) / 3.f;
-		centre.z = (t->v[0].z + t->v[1].z + t->v[2].z) / 3.f;
+		area = 0.5f * sqrtf(n.i * n.i + n.j * n.j + n.k * n.k);
+		if (area < 0.0005f)
+			continue; /* slivers say little about the BSP */
+		centre.x = centre.y = centre.z = 0.f;
+		for (p = 0; p < point_count; p++)
+		{
+			centre.x += points[p].x / point_count;
+			centre.y += points[p].y / point_count;
+			centre.z += points[p].z / point_count;
+		}
 		tested++;
 
-		start.x = centre.x + n.i * 0.1f; start.y = centre.y + n.j * 0.1f; start.z = centre.z + n.k * 0.1f;
-		ray.i = -n.i * 0.2f; ray.j = -n.j * 0.2f; ray.k = -n.k * 0.2f;
+		start.x = centre.x + plane.n.i * 0.1f; start.y = centre.y + plane.n.j * 0.1f; start.z = centre.z + plane.n.k * 0.1f;
+		ray.i = -plane.n.i * 0.2f; ray.j = -plane.n.j * 0.2f; ray.k = -plane.n.k * 0.2f;
 		front = collision_bsp_test_vector(
 			FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_back_facing_surfaces_bit),
-			&bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.5001f;
+			&bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f; /* planes merge within 0.004 wu: a triangle may sit that far off its plane */
 
-		start.x = centre.x - n.i * 0.1f; start.y = centre.y - n.j * 0.1f; start.z = centre.z - n.k * 0.1f;
+		start.x = centre.x - plane.n.i * 0.1f; start.y = centre.y - plane.n.j * 0.1f; start.z = centre.z - plane.n.k * 0.1f;
 		ray.i = -ray.i; ray.j = -ray.j; ray.k = -ray.k;
 		back = collision_bsp_test_vector(
 			FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_back_facing_surfaces_bit),
-			&bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.5001f;
+			&bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f; /* planes merge within 0.004 wu: a triangle may sit that far off its plane */
 
-		start.x = centre.x + n.i * 0.05f; start.y = centre.y + n.j * 0.05f; start.z = centre.z + n.k * 0.05f;
+		start.x = centre.x + plane.n.i * 0.05f; start.y = centre.y + plane.n.j * 0.05f; start.z = centre.z + plane.n.k * 0.05f;
 		touch = collision_bsp_test_sphere(&bsp->bsp, 0, NULL, &start, 0.1f, sphere);
 
 		if (front && back && touch)
 			passed++;
 		else if (tested - passed <= 3)
-			error(_error_silent, "chiefrim: BSP self-test: triangle %ld: ray from front %s, from back %s, sphere %s",
-				i * job->triangle_count / samples, front ? "hit" : "missed", back ? "hit" : "missed", touch ? "touched" : "missed");
+			error(_error_silent, "chiefrim: BSP self-test: surface %ld (area %.4f, normal %.2f %.2f %.2f, at %.2f %.2f %.2f): "
+				"ray from front %s, from back %s, sphere %s",
+				surface_index, area, plane.n.i, plane.n.j, plane.n.k, centre.x, centre.y, centre.z,
+				front ? "hit" : "missed", back ? "hit" : "missed", touch ? "touched" : "missed");
 	}
 	free(sphere);
 	if (tested == 0)
 		return TRUE;
 	if (passed * 100 < tested * 95)
 	{
-		error(_error_silent, "chiefrim: BSP self-test failed: %ld of %ld triangles", passed, tested);
+		error(_error_silent, "chiefrim: BSP self-test failed: %ld of %ld surfaces", passed, tested);
 		return FALSE;
 	}
 	return TRUE;
@@ -358,7 +371,6 @@ static boolean chiefrim_world_install_floor(void)
 	};
 	static int const order[2][3] = { { 0, 1, 2 }, { 0, 2, 3 } };
 	struct chiefrim_bsp *bsp;
-	struct build_job job;
 	char message[160];
 	long t, v;
 
@@ -379,9 +391,7 @@ static boolean chiefrim_world_install_floor(void)
 	bsp = chiefrim_bsp_build(floor, 2,
 		(real_plane3d const *)world.map_collision->bsp3d.planes.address, world.map_collision->bsp3d.planes.count,
 		world.map_structure, world.map_structure->collision_materials.count > 0 ? 0 : NONE, message, sizeof(message));
-	job.triangles = floor;
-	job.triangle_count = 2;
-	if (!bsp || !chiefrim_world_self_test(bsp, &job))
+	if (!bsp || !chiefrim_world_self_test(bsp))
 	{
 		error(_error_silent, "chiefrim: no floor (%s)", bsp ? "self-test" : message);
 		chiefrim_bsp_free(bsp);
@@ -492,7 +502,7 @@ static void chiefrim_world_collect_result(void)
 		error(_error_silent, "chiefrim: collision build failed: %s", message);
 	else if (job.map_generation != world.map_generation || !world.world_valid)
 		chiefrim_bsp_free(bsp); /* built for a map or world that is gone */
-	else if (!chiefrim_world_self_test(bsp, &job))
+	else if (!chiefrim_world_self_test(bsp))
 		chiefrim_bsp_free(bsp);
 	else
 	{

@@ -65,12 +65,14 @@ struct chiefrim_bsp
 	long vertex_count;
 	struct structure_leaf *structure_leaves;
 	long structure_leaf_count;
+	struct structure_cluster *clusters;  /* the map's, without fog planes */
+	long cluster_count;
 
 	unsigned long *surface_ids;          /* the triangle's id; | 0x80000000 for its back */
 	long triangle_count;                 /* kept after dropping degenerate ones: surfaces
 	                                        0..n-1 are their fronts, n..2n-1 their twins */
 	long max_depth;
-	long dropped_overlaps;               /* coplanar overlaps a 2D BSP couldn't separate */
+	long dropped_overlaps;               /* triangles overlapping on a plane, in extra references */
 };
 
 /* Builds a BSP from triangles. map_planes (the map's collision planes) are

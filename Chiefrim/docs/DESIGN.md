@@ -144,10 +144,24 @@ collision code.
 
 - **Phase 0:** a hand-built BSP of one flat square at the Skyrim player's ground height. It has one
   node, one leaf, one surface, four edges and four vertices.
-- **Phase 1:** a **runtime BSP compiler**. It takes Skyrim's collision triangles near the player
-  (from the WorldExporter), builds the 3D BSP, leaves, 2D BSPs, surfaces and winged edges on a
-  worker thread, and swaps the result in between ticks as the player moves. Skyrim's triangle soup
-  isn't sealed, so open edges have no surface on their other side, as the Phase 0 floor's do.
+- **Phase 1:** a **runtime BSP builder** (`halo/src/chiefrim_bsp.c`), on a worker thread, swapped
+  in between ticks (`chiefrim_world.c`). Skyrim's collision is an open triangle soup, so:
+  - no solid leaves: every leaf is "two-sided", so Halo's ray query tests every plane it crosses,
+    exactly;
+  - each triangle is two surfaces, itself and a reversed twin (the sphere query matches surfaces to
+    the side it came from); winged edges are shared between neighbours, and no edge is left open
+    (Halo's edge features read both sides);
+  - space is halved with axis-aligned planes (kd-tree style, between triangle centres) down to cells
+    of about 8 triangles; a cell's triangle planes form a *chain* of nodes whose two children are
+    both the next node, ending in one leaf that refers to every triangle of the cell from both sides.
+    Splitting on triangle planes alone duplicated triangles across them without end on Skyrim's
+    meshes (depth over 120, out of memory); chains keep every path short (depth ≤ ~80);
+  - triangles overlapping on one plane, which no 2D split can separate, go in extra references to
+    that plane in the same leaf (Halo tries them all);
+  - each build passes a self-test through Halo's own ray and sphere queries before it is swapped in.
+    `tools/test_bsp.sh` (`SELF_TEST=1`) runs the builder and Halo's real queries offline on
+    synthetic Skyrim-like ground: all of 36,434 surfaces pass, ~0.5 s.
+  - the map's clusters are copied without fog planes (b30's sea made Chief "underwater").
 
 **Winding:** a surface's edges run **counter-clockwise in its 2D projection**. That is the winding
 the ray query (`collision_surface_test_point`) and the sphere query (`collision_surface_test_sphere`)
@@ -165,8 +179,9 @@ the world's static bodies (static, animated static, trees, props, terrain, groun
 walls, stair helpers), their shape trees (MOPP, compressed and extended meshes, lists,
 transforms), and boxes, capsules and convex hulls as outward-wound triangles; every read is
 fault-guarded. Triangles go to Halo in Skyrim units, per 1024-unit cube region (each triangle in
-the one region holding its centre), within ±3 regions around and -2..+1 below/above the player,
-at most 3 regions and 2.5 ms a frame; regions next to the player are re-sent every 2 s (doors).
+the one region holding its centre), within ±2 regions around and ±1 below/above the player, at
+most 3 regions and 2.5 ms a frame. Regions next to the player are harvested again every second,
+and sent only when their triangles changed (a door opened); far ones are forgotten.
 
 The table below was the original plan:
 
@@ -461,7 +476,7 @@ Each phase ends in something you can play.
 | # | Phase | "Done" when |
 |---|---|---|
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
-| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver (§6: **done, verified in game 2026-10-04**; Skyrim's camera-root columns are right, forward, up), CollisionField through the runtime BSP builder (§5.2: **built 2026-10-04**; synthetic ramp, cliff and wall tests pass; in-game test pending). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
+| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver (§6: **done, verified in game 2026-10-04**; Skyrim's camera-root columns are right, forward, up), CollisionField through the runtime BSP builder (§5.2: built 2026-10-04; first in-game test found failing builds, fixed with chains; **second in-game test pending**). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |

@@ -30,6 +30,10 @@ namespace chiefrim::Puppet
 			ULONGLONG lastTickChange{ 0 };
 			bool loggedStale{ false };
 			bool loadingScreenClosed{ false };
+			// After telling Halo to move Chief: don't follow (or detect Skyrim
+			// moves) until Halo's state shows him there, or a moment passed.
+			std::optional<RE::NiPoint3> awaitingTeleport;
+			ULONGLONG awaitingSince{ 0 };
 		} s;
 
 		bool GameplayIsRunning()
@@ -79,6 +83,8 @@ namespace chiefrim::Puppet
 			s.interior = a_interior;
 			s.lastPuppetPosition = position;
 			s.haveTick = false;
+			s.awaitingTeleport = position;
+			s.awaitingSince = ::GetTickCount64();
 			logger::info("world {:08X}{}: origin and floor at ({:.0f}, {:.0f}, {:.0f})",
 				a_id, a_interior ? " (interior)" : "", position.x, position.y, position.z);
 		}
@@ -143,6 +149,22 @@ namespace chiefrim::Puppet
 
 			const auto position = a_player->GetPosition();
 			const bool worldChanged = !s.worldSent || id != s.worldId || interior != s.interior;
+
+			// Halo hasn't moved Chief yet: Skyrim keeps the player where it put him.
+			if (s.awaitingTeleport && !worldChanged) {
+				auto state = link.ReadPlayerState();
+				const bool arrived = state &&
+					RE::NiPoint3{ state->position.x, state->position.y, state->position.z }.GetDistance(*s.awaitingTeleport) < 256.0f;
+				if (!arrived && ::GetTickCount64() - s.awaitingSince < 2000) {
+					Collision::Update(a_player);
+					return;
+				}
+				if (!arrived) {
+					logger::warn("Halo didn't move Chief to the teleport in 2 s; following him anyway");
+				}
+				s.awaitingTeleport.reset();
+				s.lastPuppetPosition = position;
+			}
 			const auto horizontal = [](const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) {
 				return std::hypot(a_a.x - a_b.x, a_a.y - a_b.y);
 			};

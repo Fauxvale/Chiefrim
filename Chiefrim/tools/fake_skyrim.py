@@ -43,9 +43,14 @@ REGION_UNITS = 1024.0
 TRIS_PER_MESSAGE = 1600
 
 
+ROUGH = False
+
+
 def terrain_height(dx, dy):
     """the synthetic ground, relative to the start (Skyrim units)"""
     h = 0.0
+    if ROUGH:  # gentle bumps: every triangle its own plane
+        h += 12 * math.sin(dx * 0.013) * math.cos(dy * 0.011) + 6 * math.sin((dx + dy) * 0.031)
     if dy > 256:  # 25 degree ramp north, to a plateau
         h += min(dy - 256, 1244) * math.tan(math.radians(25))
     if dx > 600:  # 60 degree cliff east
@@ -66,6 +71,23 @@ def terrain_triangles(ox, oy, oz):
             v = [(ox + x, oy + y, oz + terrain_height(x, y)) for x, y in p]
             tris.append(v[0] + v[1] + v[2])
             tris.append(v[0] + v[2] + v[3])
+    if ROUGH:  # rocks: boxes, rotated, scattered (not near the start)
+        import random
+        rng = random.Random(7)
+        for _ in range(400):
+            cx, cy = rng.uniform(-3000, 3000), rng.uniform(-3000, 3000)
+            if abs(cx) < 300 and abs(cy) < 300:
+                continue
+            hx, hy, hz, a = rng.uniform(20, 120), rng.uniform(20, 120), rng.uniform(10, 80), rng.uniform(0, math.pi)
+            base = oz + terrain_height(cx, cy)
+            corners = []
+            for k in range(8):
+                lx, ly, lz = (hx if k & 1 else -hx), (hy if k & 2 else -hy), (hz if k & 4 else -hz)
+                corners.append((ox + cx + lx * math.cos(a) - ly * math.sin(a), oy + cy + lx * math.sin(a) + ly * math.cos(a), base + lz))
+            for q in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+                a0, a1, a2, a3 = (corners[i] for i in q)
+                tris.append(a0 + a1 + a2)
+                tris.append(a0 + a2 + a3)
     # a wall south of the start, 400 high, facing north
     a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
     c, d = (ox + 2000, oy - 800, oz + 400), (ox - 2000, oy - 800, oz + 400)
@@ -217,6 +239,8 @@ def main():
     parser.add_argument("--terrain", action="store_true",
                         help="stream synthetic collision: a 25 degree ramp up north, a 60 degree cliff east, a wall south;"
                              " with --drive, walk into each")
+    parser.add_argument("--rough", action="store_true",
+                        help="with --terrain: bumpy ground (a plane per triangle, like Skyrim's) and boxes like rocks")
     parser.add_argument("--drive", action="store_true",
                         help="script Chief through the input slot: forward, strafe right, turn right, jump, crouch")
     options = parser.parse_args()
@@ -257,6 +281,8 @@ def main():
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, options.z, math.radians(options.heading)))
     if options.terrain:
+        global ROUGH
+        ROUGH = options.rough
         send_terrain(link, 1, options.x, options.y, options.z)
 
     last_print = 0.0

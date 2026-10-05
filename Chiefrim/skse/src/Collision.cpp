@@ -17,12 +17,12 @@ namespace chiefrim::Collision
 	{
 		using Clock = std::chrono::steady_clock;
 
-		constexpr int  kRadiusXY = 3;   // regions around the player's (Halo builds from these)
-		constexpr int  kBelow = 2;
+		constexpr int  kRadiusXY = 2;   // regions around the player's: what Halo builds from
+		constexpr int  kBelow = 1;
 		constexpr int  kAbove = 1;
 		constexpr auto kFrameBudget = std::chrono::microseconds(2500);
 		constexpr int  kMaxRegionsPerFrame = 3;
-		constexpr auto kRefreshNear = std::chrono::milliseconds(2000);  // doors and the like move
+		constexpr auto kRefreshNear = std::chrono::milliseconds(1000);  // doors and the like move
 		constexpr std::uint32_t kMaxKeys = 16384;
 		constexpr std::size_t   kMaxTriangles = 200000;  // per region, a sanity bound
 
@@ -51,6 +51,7 @@ namespace chiefrim::Collision
 		{
 			std::uint32_t epoch{ 0 };
 			std::unordered_map<std::uint64_t, Clock::time_point> harvested;
+			std::unordered_map<std::uint64_t, std::uint64_t> sentHash;  // what Halo has of each region
 			std::vector<std::array<int, 3>> offsets;
 			std::vector<Body>   bodies;
 			std::vector<Pending> outbox;   // regions waiting for room in the ring
@@ -655,6 +656,17 @@ namespace chiefrim::Collision
 			return out;
 		}
 
+		// FNV-1a over a region's triangles: a region is sent again only when it changed.
+		std::uint64_t HashOf(const std::vector<cr_triangle>& a_tris)
+		{
+			std::uint64_t h = 1469598103934665603ull;
+			const auto* bytes = reinterpret_cast<const std::uint8_t*>(a_tris.data());
+			for (std::size_t i = 0; i < a_tris.size() * sizeof(cr_triangle); ++i) {
+				h = (h ^ bytes[i]) * 1099511628211ull;
+			}
+			return h ^ a_tris.size();
+		}
+
 		// Sends as much of the outbox as the ring has room for.
 		void Flush()
 		{
@@ -692,6 +704,7 @@ namespace chiefrim::Collision
 	{
 		++s.epoch;
 		s.harvested.clear();
+		s.sentHash.clear();
 		s.outbox.clear();
 		cr_msg_collision_reset reset{};
 		reset.epoch = s.epoch;
@@ -746,19 +759,34 @@ namespace chiefrim::Collision
 				GatherBodies(world);
 				gathered = true;
 			}
+			Pending region;
 			{
 				RE::BSReadLockGuard lock(bhk->worldLock);
-				s.outbox.push_back(Harvest(rx, ry, rz));
+				region = Harvest(rx, ry, rz);
 			}
 			s.harvested[key] = now;
+			const auto hash = HashOf(region.tris);
+			const auto sent = s.sentHash.find(key);
+			if (sent == s.sentHash.end() || sent->second != hash) {
+				s.sentHash[key] = hash;  // new, or it changed (a door opened)
+				s.outbox.push_back(std::move(region));
+			}
 			if (++done >= kMaxRegionsPerFrame || Clock::now() - start > kFrameBudget) {
 				break;
 			}
 		}
 		Flush();
 
-		if (s.harvested.size() > s.offsets.size() * 4) {
-			s.harvested.clear();  // bound memory: far regions are sent again when needed
+		// Forget far regions (Halo drops them too): they are harvested again
+		// when the player comes back. Never wholesale: that re-sent everything.
+		if (s.harvested.size() > s.offsets.size() * 2) {
+			const auto isFar = [&](std::uint64_t a_key) {
+				const auto unpack = [](std::uint64_t v) { return static_cast<int>(static_cast<std::int32_t>(static_cast<std::uint32_t>(v & 0x1FFFFF) << 11) >> 11); };
+				return std::abs(unpack(a_key >> 42) - prx) > kRadiusXY + 2 || std::abs(unpack(a_key >> 21) - pry) > kRadiusXY + 2 ||
+				       std::abs(unpack(a_key) - prz) > kBelow + 2;
+			};
+			std::erase_if(s.harvested, [&](const auto& a_entry) { return isFar(a_entry.first); });
+			std::erase_if(s.sentHash, [&](const auto& a_entry) { return isFar(a_entry.first); });
 		}
 		if (now - s.lastLog > std::chrono::seconds(10) && s.regionsSent) {
 			logger::info("collision: {} regions, {} triangles sent so far", s.regionsSent, s.trianglesSent);

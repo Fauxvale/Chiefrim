@@ -23,9 +23,19 @@ the BSP has no solid leaves. Instead:
   a triangle and its twin on one edge read as a knife edge, which is what an
   open edge is.
 
-The 3D BSP splits on triangle planes, balancing the halves; a triangle on a
-splitting plane is referenced (through a 2D BSP of that plane's triangles)
-from the leaves on each side of it that it reaches. Triangles aren't
+The 3D BSP halves space with axis-aligned planes (at the median of the
+triangles' centres, kd-tree style) until each cell holds a few triangles.
+Halo finds a triangle only through a plane it crossed on the way to a leaf,
+so a cell's triangle planes must be nodes; but splitting on triangle planes
+duplicates every triangle across them, and on bumpy ground (a plane per
+triangle) that multiplies without end. So a cell's planes form a CHAIN whose
+nodes send both sides on to the next node, ending in one leaf that refers
+to every triangle of the cell from both sides: every path through the cell
+crosses every plane, nothing is duplicated. (A node graph, not a tree:
+Halo's traversals only follow indices.) The price: Halo's sphere query
+walks a chain once per side of each plane a sphere straddles, so chains are
+short (CHIEFRIM_BSP_CHAIN). A triangle on a splitting plane is referenced
+(through a 2D BSP of that plane's triangles) from the leaves it reaches. Triangles aren't
 clipped: a 2D BSP's leaves are whole triangles, and Halo's own exact
 point-in-polygon tests sort out the rest.
 
@@ -50,6 +60,9 @@ the game's debug one (which isn't thread-safe).
 #define CHIEFRIM_BSP_EPSILON         0.0005f  /* world units: 0.1 Skyrim unit */
 #define CHIEFRIM_BSP_WELD            0.002f   /* vertices this close are one */
 #define CHIEFRIM_BSP_MAXIMUM_DEPTH   120      /* Halo's plane stacks hold 128 */
+#define CHIEFRIM_BSP_CELL           8        /* triangles in a cell: below this, a plane chain */
+#define CHIEFRIM_BSP_CHAIN          12       /* at most this many planes in one chain */
+#define CHIEFRIM_BSP_AXIS_DEPTH     60       /* axis-aligned splits stop by this depth */
 #define CHIEFRIM_BSP_CANDIDATES      16
 #define CHIEFRIM_BSP_SAMPLE          512
 #define CHIEFRIM_SURFACE_TWO_SIDED_LEAF 0x0001 /* _collision_leaf_contains_two_sided_bit */
@@ -83,6 +96,12 @@ struct pending
 	long count;
 };
 
+struct projected
+{
+	long surface;
+	real_point2d p[3];
+};
+
 struct hash_entry
 {
 	unsigned long key[3];
@@ -111,6 +130,11 @@ struct builder
 	struct hash_table edge_table;
 	boolean failed;
 	long dropped_deep;
+	/* triangles a 2D BSP couldn't separate from the rest (overlapping on one
+	plane): they go in another reference to the same plane in the leaf */
+	struct projected *overflow;
+	long overflow_count;
+	long overflow_capacity;
 };
 
 /* ---------- helpers */
@@ -372,22 +396,37 @@ static long surface_for(struct builder_triangle const *t, boolean negative)
 
 /* ---------- 2D BSPs (one per leaf reference) */
 
-struct projected
+static void overflow(struct builder *b, struct projected const *items, long count)
 {
-	long surface;
-	real_point2d p[3];
-};
+	long i;
+
+	if (b->overflow_count + count > b->overflow_capacity)
+	{
+		long capacity = MAX(64, (b->overflow_count + count) * 2);
+		struct projected *grown = (struct projected *)realloc(b->overflow, sizeof(struct projected) * (size_t)capacity);
+
+		if (!grown)
+		{
+			b->failed = TRUE;
+			return;
+		}
+		b->overflow = grown;
+		b->overflow_capacity = capacity;
+	}
+	for (i = 0; i < count; i++)
+		b->overflow[b->overflow_count++] = items[i];
+}
 
 static long build_2d(struct builder *b, struct projected *items, long count, long depth)
 {
 	long best_item = NONE, best_edge = 0, best_score = LONG_MAX;
-	long candidates = MIN(count, 8);
+	long candidates = MIN(count, 64); /* every triangle's edges, in practice */
 	long c;
 
 	if (count == 1 || depth > 64)
 	{
 		if (count > 1)
-			b->out->dropped_overlaps += count - 1;
+			overflow(b, items + 1, count - 1);
 		return items[0].surface | LONG_MIN;
 	}
 
@@ -444,8 +483,8 @@ static long build_2d(struct builder *b, struct projected *items, long count, lon
 
 	if (best_item == NONE)
 	{
-		/* exact coplanar overlaps: no line separates them */
-		b->out->dropped_overlaps += count - 1;
+		/* overlapping on this plane: no line separates them */
+		overflow(b, items + 1, count - 1);
 		return items[0].surface | LONG_MIN;
 	}
 
@@ -516,14 +555,16 @@ static long build_2d(struct builder *b, struct projected *items, long count, lon
 	}
 }
 
-static long build_reference_root(struct builder *b, struct pending const *entry)
+/* The triangles of a pending entry, projected as collision_bsp.c projects
+for this reference. NULL if out of memory. */
+static struct projected *project_entry(struct builder *b, struct pending const *entry)
 {
 	real_plane3d const *plane = &b->out->planes[entry->designator & LONG_MAX];
 	real absolute_i = fabsf(plane->n.i), absolute_j = fabsf(plane->n.j), absolute_k = fabsf(plane->n.k);
 	short projection;
 	boolean sign;
 	struct projected *items;
-	long i, root;
+	long i;
 
 	/* the projection collision_bsp.c uses for this reference */
 	if (absolute_k >= absolute_j && absolute_k >= absolute_i)
@@ -536,7 +577,7 @@ static long build_reference_root(struct builder *b, struct pending const *entry)
 	if (!items)
 	{
 		b->failed = TRUE;
-		return entry->surfaces[0] | LONG_MIN;
+		return NULL;
 	}
 	for (i = 0; i < entry->count; i++)
 	{
@@ -554,9 +595,7 @@ static long build_reference_root(struct builder *b, struct pending const *entry)
 			edge_index = edge->edge_indices[reverse];
 		}
 	}
-	root = build_2d(b, items, entry->count, 0);
-	free(items);
-	return root;
+	return items;
 }
 
 /* ---------- the 3D BSP */
@@ -574,20 +613,38 @@ static long make_leaf(struct builder *b, struct pending const *pending, long pen
 
 	for (p = 0; p < pending_count; p++)
 	{
-		long root;
-		long reference;
+		struct projected *items;
+		long item_count = pending[p].count;
 
-		if (pending[p].count == 0)
+		if (item_count == 0)
 			continue;
-		root = build_reference_root(b, &pending[p]);
-		reference = b->out->reference_count;
-		GROW(b, references, reference_capacity, reference + 1);
+		items = project_entry(b, &pending[p]);
+		if (!items)
+			return NONE;
+		/* one reference, and another to the same plane for whatever overlaps
+		on it (Halo tries every reference of a leaf) */
+		while (item_count > 0 && !b->failed)
+		{
+			long root, reference;
+
+			b->overflow_count = 0;
+			root = build_2d(b, items, item_count, 0);
+			reference = b->out->reference_count;
+			GROW(b, references, reference_capacity, reference + 1);
+			if (b->failed)
+				break;
+			b->out->reference_count++;
+			b->out->references[reference].plane_designator = pending[p].designator;
+			b->out->references[reference].root_index = root;
+			count++;
+			b->out->dropped_overlaps += b->overflow_count; /* now: in extra references */
+			if (b->overflow_count) /* the game's memcpy rejects NULL, even for 0 bytes */
+				memcpy(items, b->overflow, sizeof(struct projected) * (size_t)b->overflow_count);
+			item_count = b->overflow_count;
+		}
+		free(items);
 		if (b->failed)
 			return NONE;
-		b->out->reference_count++;
-		b->out->references[reference].plane_designator = pending[p].designator;
-		b->out->references[reference].root_index = root;
-		count++;
 	}
 
 	b->out->leaves[leaf].flags = CHIEFRIM_SURFACE_TWO_SIDED_LEAF;
@@ -698,10 +755,179 @@ static void free_pending(struct pending *pending, long count)
 	free(pending);
 }
 
+static int compare_reals(void const *a, void const *z)
+{
+	real x = *(real const *)a, y = *(real const *)z;
+
+	return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/* An axis-aligned plane halving a large set: the longest axis of the
+triangles' centres, at their median. NONE if it can't make both halves
+smaller (everything straddles it). */
+static long choose_axis_plane(struct builder *b, long const *triangles, long count)
+{
+	real lo[3] = { REAL_MAX, REAL_MAX, REAL_MAX }, hi[3] = { -REAL_MAX, -REAL_MAX, -REAL_MAX };
+	long sample = MIN(count, 1024);
+	real *centres;
+	long axis = 0, i, front = 0, back = 0;
+	real_plane3d plane;
+	long plane_index;
+
+	for (i = 0; i < count; i++)
+	{
+		struct builder_triangle const *t = &b->triangles[triangles[i]];
+		long k;
+
+		for (k = 0; k < 3; k++)
+		{
+			real c = (t->v[0].n[k] + t->v[1].n[k] + t->v[2].n[k]) / 3.f;
+
+			lo[k] = MIN(lo[k], c);
+			hi[k] = MAX(hi[k], c);
+		}
+	}
+	for (i = 1; i < 3; i++)
+	{
+		if (hi[i] - lo[i] > hi[axis] - lo[axis])
+			axis = i;
+	}
+	if (hi[axis] - lo[axis] < 0.01f)
+		return NONE;
+
+	centres = (real *)malloc(sizeof(real) * (size_t)sample);
+	if (!centres)
+	{
+		b->failed = TRUE;
+		return NONE;
+	}
+	for (i = 0; i < sample; i++)
+	{
+		struct builder_triangle const *t = &b->triangles[triangles[i * count / sample]];
+
+		centres[i] = (t->v[0].n[axis] + t->v[1].n[axis] + t->v[2].n[axis]) / 3.f;
+	}
+	qsort(centres, (size_t)sample, sizeof(real), compare_reals);
+	plane.n.i = axis == 0 ? 1.f : 0.f;
+	plane.n.j = axis == 1 ? 1.f : 0.f;
+	plane.n.k = axis == 2 ? 1.f : 0.f;
+	/* halfway between two centres, never through one: a split plane through
+	a triangle crosses Halo's rays where that triangle's plane does, and the
+	ray query takes the crossing for the split's, missing the triangle */
+	plane.d = sample > 1 ? (centres[sample / 2 - 1] + centres[sample / 2]) * 0.5f : centres[0];
+	free(centres);
+
+	/* both halves must shrink */
+	for (i = 0; i < count; i++)
+	{
+		struct builder_triangle const *t = &b->triangles[triangles[i]];
+		real mn = MIN(MIN(t->v[0].n[axis], t->v[1].n[axis]), t->v[2].n[axis]) - plane.d;
+		real mx = MAX(MAX(t->v[0].n[axis], t->v[1].n[axis]), t->v[2].n[axis]) - plane.d;
+
+		if (mx > -CHIEFRIM_BSP_EPSILON)
+			front++;
+		if (mn < CHIEFRIM_BSP_EPSILON)
+			back++;
+	}
+	if (front >= count || back >= count)
+		return NONE;
+
+	plane_index = add_plane(b, &plane);
+	return plane_index == NONE ? NONE : (plane_index & LONG_MAX);
+}
+
+/* A cell's planes as a chain (see the top): nodes in order, both children
+the next one, then one leaf with every triangle of the cell referenced from
+both sides of its plane, besides what the cell's ancestors pass down. NONE
+if the cell has more planes than a chain may hold. */
+static long build_chain(struct builder *b, long const *triangles, long count,
+	struct pending const *pending, long pending_count, long depth)
+{
+	long planes[CHIEFRIM_BSP_CHAIN];
+	long plane_count = 0, first_node, leaf, i, p;
+	struct pending *all;
+	long all_count;
+
+	for (i = 0; i < count; i++)
+	{
+		long plane = b->triangles[triangles[i]].plane;
+
+		for (p = 0; p < plane_count && planes[p] != plane; p++)
+			;
+		if (p < plane_count)
+			continue;
+		if (plane_count == CHIEFRIM_BSP_CHAIN)
+			return NONE;
+		planes[plane_count++] = plane;
+	}
+	if (depth + plane_count >= CHIEFRIM_BSP_MAXIMUM_DEPTH)
+		return NONE;
+
+	/* the leaf's references: the ancestors', and each chain plane's
+	triangles from both sides */
+	all_count = pending_count + plane_count * 2;
+	all = (struct pending *)calloc((size_t)MAX(all_count, 1), sizeof(struct pending));
+	if (!all)
+	{
+		b->failed = TRUE;
+		return NONE;
+	}
+	for (i = 0; i < pending_count; i++)
+		all[i] = pending[i]; /* shared, not freed here */
+	for (p = 0; p < plane_count; p++)
+	{
+		struct pending *front = &all[pending_count + p * 2];
+		struct pending *back = &all[pending_count + p * 2 + 1];
+
+		front->designator = planes[p];
+		back->designator = planes[p] | LONG_MIN;
+		front->surfaces = (long *)malloc(sizeof(long) * (size_t)count);
+		back->surfaces = (long *)malloc(sizeof(long) * (size_t)count);
+		if (!front->surfaces || !back->surfaces)
+		{
+			b->failed = TRUE;
+			break;
+		}
+		for (i = 0; i < count; i++)
+		{
+			struct builder_triangle const *t = &b->triangles[triangles[i]];
+
+			if (t->plane != planes[p])
+				continue;
+			front->surfaces[front->count++] = surface_for(t, FALSE);
+			back->surfaces[back->count++] = surface_for(t, TRUE);
+		}
+	}
+
+	first_node = b->out->node_count;
+	if (!b->failed)
+		GROW(b, nodes, node_capacity, first_node + plane_count);
+	leaf = b->failed ? NONE : make_leaf(b, all, all_count);
+	if (!b->failed && leaf != NONE)
+	{
+		b->out->node_count += plane_count;
+		for (p = 0; p < plane_count; p++)
+		{
+			long next = p + 1 < plane_count ? first_node + p + 1 : (leaf | LONG_MIN);
+
+			b->out->nodes[first_node + p].plane_designator = planes[p];
+			b->out->nodes[first_node + p].children[0] = next;
+			b->out->nodes[first_node + p].children[1] = next;
+		}
+		b->out->max_depth = MAX(b->out->max_depth, depth + plane_count);
+	}
+	for (p = pending_count; p < all_count; p++)
+		free(all[p].surfaces);
+	free(all);
+	if (b->failed || leaf == NONE)
+		return NONE;
+	return plane_count ? first_node : (leaf | LONG_MIN);
+}
+
 static long build_3d(struct builder *b, long const *triangles, long count,
 	struct pending const *pending, long pending_count, long depth)
 {
-	long plane_index, node, i;
+	long plane_index = NONE, node, i;
 	real_plane3d plane;
 	long *front = NULL, *back = NULL, *on = NULL;
 	long front_count = 0, back_count = 0, on_count = 0;
@@ -720,7 +946,20 @@ static long build_3d(struct builder *b, long const *triangles, long count,
 		return leaf == NONE ? NONE : (leaf | LONG_MIN);
 	}
 
-	plane_index = choose_plane(b, triangles, count);
+	if (count > CHIEFRIM_BSP_CELL && depth < CHIEFRIM_BSP_AXIS_DEPTH)
+		plane_index = choose_axis_plane(b, triangles, count);
+	if (b->failed)
+		return NONE;
+	if (plane_index == NONE)
+	{
+		long chain = build_chain(b, triangles, count, pending, pending_count, depth);
+
+		if (chain != NONE || b->failed)
+			return chain;
+		/* too many planes for one chain, and no axis plane divides them:
+		split on a triangle plane (duplicating the ones across it) */
+		plane_index = choose_plane(b, triangles, count);
+	}
 	plane = b->out->planes[plane_index];
 
 	front = (long *)malloc(sizeof(long) * (size_t)count);
@@ -980,6 +1219,23 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 		b.out->structure.leaves.count = b.out->structure_leaf_count;
 		b.out->structure.leaves.address = b.out->structure_leaves;
 		b.out->structure.leaves.definition = NULL;
+
+		/* the map's clusters without their fog planes: below the host
+		level's sea, Halo would think Chief is under water
+		(scenario_location_underwater) */
+		b.out->cluster_count = map_structure->clusters.count;
+		b.out->clusters = (struct structure_cluster *)malloc(sizeof(struct structure_cluster) * (size_t)MAX(b.out->cluster_count, 1));
+		if (!b.out->clusters)
+		{
+			snprintf(error, (size_t)error_size, "out of memory");
+			goto fail;
+		}
+		if (b.out->cluster_count)
+			memcpy(b.out->clusters, map_structure->clusters.address, sizeof(struct structure_cluster) * (size_t)b.out->cluster_count);
+		for (i = 0; i < b.out->cluster_count; i++)
+			b.out->clusters[i].fog_reference = NONE;
+		b.out->structure.clusters.address = b.out->clusters;
+		b.out->structure.clusters.definition = NULL;
 	}
 
 	/* the tag blocks */
@@ -997,6 +1253,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 
 	b.out->triangle_count = b.triangle_count;
 	free(b.triangles);
+	free(b.overflow);
 	hash_dispose(&b.plane_table);
 	hash_dispose(&b.vertex_table);
 	hash_dispose(&b.edge_table);
@@ -1005,6 +1262,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 fail:
 	free(order);
 	free(b.triangles);
+	free(b.overflow);
 	hash_dispose(&b.plane_table);
 	hash_dispose(&b.vertex_table);
 	hash_dispose(&b.edge_table);
@@ -1025,6 +1283,7 @@ void chiefrim_bsp_free(struct chiefrim_bsp *bsp)
 	free(bsp->edges);
 	free(bsp->vertices);
 	free(bsp->structure_leaves);
+	free(bsp->clusters);
 	free(bsp->surface_ids);
 	free(bsp);
 }
