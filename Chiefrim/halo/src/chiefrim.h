@@ -15,6 +15,8 @@ Without it, every function here does nothing and the game is unchanged.
 #pragma once
 
 #include "cseries.h"
+#include "math/real_math.h"
+#include "chiefrim/chiefrim_protocol.h"
 
 boolean chiefrim_active(void);
 
@@ -43,6 +45,13 @@ unsigned long chiefrim_input_keyboard_actions(short controller_index);
 boolean chiefrim_input_movement(short controller_index, real *forward, real *strafe);
 boolean chiefrim_input_look(short gamepad_index, real *yaw, real *pitch);
 boolean chiefrim_input_driving(short gamepad_index);
+
+/* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
+void chiefrim_world_initialize(void);
+void chiefrim_world_map_loaded(void);             /* a structure BSP loaded */
+void chiefrim_world_reset(cr_vec3 origin, real floor_z); /* a new world; floor in world units */
+void chiefrim_world_message(int type, void const *message);
+void chiefrim_world_update(real_point3d const *chief); /* each frame; Chief or NULL */
 
 /* scenario.c, right after a structure BSP becomes the global one. Replaces
 the map's collision BSP with Chiefrim's (docs §5.1). */

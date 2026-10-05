@@ -2,17 +2,14 @@
 /*
 CHIEFRIM.C
 
-The Halo side of Chiefrim, Phase 0 (Chiefrim/docs/DESIGN.md §12):
+The Halo side of Chiefrim (Chiefrim/docs/DESIGN.md):
 
 - LINK: creates /dev/shm/chiefrim_v1 (chiefrim_protocol.h), keeps a
   heartbeat, reads the Skyrim side's world context and events, and publishes
   the player state every frame.
-- WORLD: replaces the map's collision BSP with one built here. Halo's biped
-  physics keeps indices of the surfaces and edges it stands on, so Skyrim's
-  shape has to reach it as a real collision BSP, not as loose collision
-  features. Phase 0 builds the simplest one: a single flat square at the
-  Skyrim player's ground height. Every point above it is in leaf 0 (the map's
-  first cluster), so nothing is ever "outside the map" (docs §5.1).
+- WORLD: Skyrim's collision becomes Halo's, as a collision BSP built at
+  runtime (chiefrim_world.c, chiefrim_bsp.c; docs §5). Until Skyrim's
+  triangles arrive, a flat floor at the Skyrim player's feet.
 - PLAYER: when the link starts, and on each Teleport, moves Chief to the
   Skyrim player's position and heading.
 - LEVEL: the host map is a campaign level (multiplayer maps start no game,
@@ -53,31 +50,6 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include <unistd.h>
 #endif
 
-/* ---------- constants */
-
-/* Half the side of the Phase 0 floor, in world units (1 wu = 3.048 m). */
-#define FLOOR_HALF_SIZE 2000.0f
-
-/* ---------- structures (the collision BSP's own, from collision_bsp.c) */
-
-struct chiefrim_collision_leaf
-{
-	word flags;
-	short bsp2d_reference_count;
-	long first_bsp2d_reference_index;
-};
-
-struct chiefrim_bsp2d_reference
-{
-	long plane_designator;
-	long root_index;
-};
-
-typedef char chiefrim_collision_leaf_size_assert[
-	sizeof(struct chiefrim_collision_leaf) == 0x08 ? 1 : -1];
-typedef char chiefrim_bsp2d_reference_size_assert[
-	sizeof(struct chiefrim_bsp2d_reference) == 0x08 ? 1 : -1];
-
 /* ---------- globals */
 
 static struct
@@ -97,210 +69,14 @@ static struct
 	uint32_t ticks;
 	uint32_t last_skyrim_heartbeat;
 	uint32_t last_skyrim_heartbeat_change;
+	uint32_t skyrim_pid;          /* from its hello */
 } chiefrim;
-
-/* The replacement collision BSP: one node, one leaf, one surface with four
-edges, and one plane of its own. The plane list starts with a copy of the
-map's planes, because the structure BSP's cluster portals index it
-(structure_clusters_in_sphere); the floor's plane comes after them. */
-static struct
-{
-	struct collision_bsp bsp;
-	real_plane3d *planes;         /* the map's planes, then the floor's */
-	long plane_capacity;
-	long floor_plane_index;
-	struct bsp3d_node nodes[1];
-	struct chiefrim_collision_leaf leaves[1];
-	struct chiefrim_bsp2d_reference references[1];
-	struct collision_surface surfaces[1];
-	struct collision_edge edges[4];
-	struct collision_vertex vertices[4];
-} chiefrim_floor;
 
 /* ---------- private code */
 
 static uint32_t chiefrim_now_ms(void)
 {
 	return (uint32_t)system_milliseconds();
-}
-
-static void chiefrim_tag_block(struct tag_block *block, void *address, long count)
-{
-	block->count = count;
-	block->address = address;
-	block->definition = NULL;
-}
-
-/* Fills chiefrim_floor with a square at height z (world units). Edges run
-counter-clockwise seen from above (in the surface's 2D projection), the
-winding the ray and sphere queries treat as inside. (The opposite of what
-collision_surface_test_point2d expects: that function, used only for AI
-pathfinding, has the other sign.) chiefrim_floor_self_test checks it. */
-static void chiefrim_floor_build(real z)
-{
-	static real const corners[4][2] = {
-		{ -FLOOR_HALF_SIZE, -FLOOR_HALF_SIZE },
-		{ FLOOR_HALF_SIZE, -FLOOR_HALF_SIZE },
-		{ FLOOR_HALF_SIZE, FLOOR_HALF_SIZE },
-		{ -FLOOR_HALF_SIZE, FLOOR_HALF_SIZE },
-	};
-	struct structure_bsp *structure_bsp = global_structure_bsp_get();
-	struct tag_block const *map_planes = &TAG_BLOCK_GET_ELEMENT(
-		&structure_bsp->collision_bsp, 0, struct collision_bsp)->bsp3d.planes;
-	long const plane = map_planes->count;
-	real_plane3d *planes = chiefrim_floor.planes;
-	long capacity = chiefrim_floor.plane_capacity;
-	long index;
-
-	if (capacity < plane + 1)
-	{
-		if (planes)
-			free(planes); /* the game's debug free() rejects NULL */
-		capacity = plane + 1;
-		planes = (real_plane3d *)malloc(capacity * sizeof(real_plane3d));
-	}
-	memset(&chiefrim_floor, 0, sizeof(chiefrim_floor));
-	chiefrim_floor.planes = planes;
-	chiefrim_floor.plane_capacity = capacity;
-	chiefrim_floor.floor_plane_index = plane;
-
-	if (plane > 0)
-		memcpy(planes, map_planes->address, plane * sizeof(real_plane3d));
-	planes[plane].n.i = 0.0f;
-	planes[plane].n.j = 0.0f;
-	planes[plane].n.k = 1.0f;
-	planes[plane].d = z;
-
-	/* children[distance >= 0]: above the floor is leaf 0, below is solid. */
-	chiefrim_floor.nodes[0].plane_designator = plane;
-	chiefrim_floor.nodes[0].children[0] = NONE;
-	chiefrim_floor.nodes[0].children[1] = 0 | LONG_MIN;
-
-	chiefrim_floor.leaves[0].flags = 0;
-	chiefrim_floor.leaves[0].bsp2d_reference_count = 1;
-	chiefrim_floor.leaves[0].first_bsp2d_reference_index = 0;
-
-	/* No 2D nodes: the reference's root is surface 0 itself. */
-	chiefrim_floor.references[0].plane_designator = plane;
-	chiefrim_floor.references[0].root_index = 0 | LONG_MIN;
-
-	chiefrim_floor.surfaces[0].plane_designator = plane;
-	chiefrim_floor.surfaces[0].first_edge_index = 0;
-	chiefrim_floor.surfaces[0].flags = 0;
-	chiefrim_floor.surfaces[0].breakable_surface_index = (byte)NONE;
-	chiefrim_floor.surfaces[0].material_index =
-		structure_bsp->collision_materials.count > 0 ? 0 : NONE;
-
-	for (index = 0; index < 4; index++)
-	{
-		struct collision_vertex *vertex = &chiefrim_floor.vertices[index];
-		struct collision_edge *edge = &chiefrim_floor.edges[index];
-
-		vertex->point.x = corners[index][0];
-		vertex->point.y = corners[index][1];
-		vertex->point.z = z;
-		vertex->first_edge_index = index;
-
-		edge->vertex_indices[0] = index;
-		edge->vertex_indices[1] = (index + 1) % 4;
-		edge->edge_indices[0] = (index + 1) % 4;   /* next edge around surface 0 */
-		edge->edge_indices[1] = (index + 3) % 4;   /* the open side: nothing there */
-		edge->surface_indices[0] = 0;
-		edge->surface_indices[1] = NONE;
-	}
-
-	chiefrim_tag_block(&chiefrim_floor.bsp.bsp3d.nodes, chiefrim_floor.nodes, 1);
-	chiefrim_tag_block(&chiefrim_floor.bsp.bsp3d.planes, planes, plane + 1);
-	chiefrim_tag_block(&chiefrim_floor.bsp.leaves, chiefrim_floor.leaves, 1);
-	chiefrim_tag_block(&chiefrim_floor.bsp.bsp2d_references, chiefrim_floor.references, 1);
-	chiefrim_tag_block(&chiefrim_floor.bsp.bsp2d.nodes, NULL, 0);
-	chiefrim_tag_block(&chiefrim_floor.bsp.surfaces, chiefrim_floor.surfaces, 1);
-	chiefrim_tag_block(&chiefrim_floor.bsp.edges, chiefrim_floor.edges, 4);
-	chiefrim_tag_block(&chiefrim_floor.bsp.vertices, chiefrim_floor.vertices, 4);
-}
-
-/* Checks the floor with the engine's own queries; logs and returns FALSE
-on a mistake. */
-static boolean chiefrim_floor_self_test(real z)
-{
-	struct collision_bsp *bsp = &chiefrim_floor.bsp;
-	real_point3d above = { 1.0f, 2.0f, z + 0.5f };
-	real_point3d below = { 1.0f, 2.0f, z - 0.5f };
-	real_point3d resting = { 1.0f, 2.0f, z + 0.1f };
-	real_point3d beyond = { FLOOR_HALF_SIZE * 2.0f, 0.0f, z + 0.1f };
-	real_vector3d down = { 0.0f, 0.0f, -1.0f };
-	struct collision_bsp_test_vector_result result;
-	struct collision_bsp_test_sphere_result *sphere =
-		(struct collision_bsp_test_sphere_result *)malloc(sizeof(*sphere));
-	boolean ok = TRUE;
-
-	if (bsp3d_test_point(&bsp->bsp3d, 0, &above) != 0)
-	{
-		error(_error_silent, "chiefrim: floor self-test: a point above is not in leaf 0");
-		ok = FALSE;
-	}
-	if (bsp3d_test_point(&bsp->bsp3d, 0, &below) != NONE)
-	{
-		error(_error_silent, "chiefrim: floor self-test: a point below is not solid");
-		ok = FALSE;
-	}
-	/* The query biped movement depends on (collision_get_features_in_sphere). */
-	if (!collision_bsp_test_sphere(bsp, 0, NULL, &resting, 0.25f, sphere) ||
-		sphere->surface_count != 1 || sphere->surface_indices[0] != 0)
-	{
-		error(_error_silent, "chiefrim: floor self-test: a sphere resting on the floor does not touch it (winding)");
-		ok = FALSE;
-	}
-	if (collision_bsp_test_sphere(bsp, 0, NULL, &beyond, 0.25f, sphere))
-	{
-		error(_error_silent, "chiefrim: floor self-test: a sphere beyond the edge touches the floor");
-		ok = FALSE;
-	}
-	free(sphere);
-	if (!collision_bsp_test_vector(
-			FLAG(_collision_test_front_facing_surfaces_bit),
-			bsp, 0, NULL, &above, &down, REAL_MAX, &result) ||
-		fabsf(result.t - 0.5f) > 0.001f || result.surface_index != 0)
-	{
-		error(_error_silent, "chiefrim: floor self-test: a ray down does not hit the floor at t=0.5");
-		ok = FALSE;
-	}
-
-	return ok;
-}
-
-/* The floor's height in world units: the world context's floor_z, relative
-to its origin. */
-static real chiefrim_floor_height(void)
-{
-	if (!chiefrim.world_valid)
-		return 0.0f;
-	return (chiefrim.world.floor_z - chiefrim.world.origin.z) / CR_SKY_UNITS_PER_WU;
-}
-
-static void chiefrim_install_floor(void)
-{
-	real z = chiefrim_floor_height();
-
-	chiefrim_floor_build(z);
-	if (!chiefrim_floor_self_test(z))
-	{
-		error(_error_silent, "chiefrim: keeping the map's own collision");
-		return;
-	}
-	scenario_override_collision_bsp(&chiefrim_floor.bsp);
-
-	/* Bipeds remember the surface they stand on, by its index in the old
-	collision BSP; the new one doesn't have it. The engine forgets these on
-	its own BSP switches (scenario.c's disconnect procs) the same way. */
-	{
-		struct object_iterator iterator;
-
-		object_iterator_new(&iterator, _object_mask_biped, 0);
-		while (object_iterator_next(&iterator))
-			biped_disconnect_from_structure_bsp(iterator.index);
-	}
-	error(_error_silent, "chiefrim: collision is a flat floor at z=%.3f wu", z);
 }
 
 static long chiefrim_local_unit(void)
@@ -352,6 +128,8 @@ static void chiefrim_apply_world(void)
 
 	floor_moved = !chiefrim.world_valid ||
 		world.floor_z - world.origin.z != chiefrim.world.floor_z - chiefrim.world.origin.z;
+	if (floor_moved || world.origin.x != chiefrim.world.origin.x || world.origin.y != chiefrim.world.origin.y)
+		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
 	chiefrim.world_valid = TRUE;
@@ -359,8 +137,6 @@ static void chiefrim_apply_world(void)
 		world.world_id, world.is_interior ? " (interior)" : "",
 		world.origin.x, world.origin.y, world.origin.z, world.floor_z, world.field_of_view);
 
-	if (floor_moved && global_scenario_try_and_get())
-		chiefrim_install_floor();
 	/* Placing Chief is the Teleport message's job (Skyrim sends one with each
 	new world), never a side effect of seeing the world again. */
 }
@@ -389,7 +165,7 @@ static void chiefrim_say_hello(void)
 
 static void chiefrim_pump_events(void)
 {
-	unsigned char buffer[256];
+	static unsigned long buffer[0x10000 / sizeof(unsigned long)]; /* a full collision message */
 	int type;
 
 	while ((type = cr_ring_pop(&chiefrim.shm->to_halo, buffer, sizeof(buffer))) >= 0)
@@ -407,6 +183,7 @@ static void chiefrim_pump_events(void)
 				break;
 			}
 			chiefrim.linked = TRUE;
+			chiefrim.skyrim_pid = hello->pid;
 			error(_error_silent, "chiefrim: linked to Skyrim (pid %u, %s)", hello->pid, hello->build);
 			chiefrim_say_hello();
 			break;
@@ -420,6 +197,10 @@ static void chiefrim_pump_events(void)
 			chiefrim.placement_pending = TRUE;
 			break;
 		}
+		case CR_MSG_COLLISION_RESET:
+		case CR_MSG_COLLISION_TRIS:
+			chiefrim_world_message(type, buffer);
+			break;
 		default:
 			break;
 		}
@@ -523,6 +304,14 @@ static void chiefrim_watch_skyrim(void)
 	{
 		chiefrim.last_skyrim_heartbeat = heartbeat;
 		chiefrim.last_skyrim_heartbeat_change = now;
+		/* a Skyrim that stalled and came back (its heartbeat moves again,
+		same process): linked again, no new hello needed */
+		if (!chiefrim.linked && chiefrim.skyrim_pid && CR_LOAD_ACQ(&chiefrim.shm->skyrim_pid) == chiefrim.skyrim_pid &&
+			CR_LOAD_ACQ(&chiefrim.shm->skyrim_state) == CR_SIDE_READY)
+		{
+			chiefrim.linked = TRUE;
+			error(_error_silent, "chiefrim: Skyrim is responding again");
+		}
 	}
 	else if (chiefrim.linked && now - chiefrim.last_skyrim_heartbeat_change > CR_HEARTBEAT_TIMEOUT_MS)
 	{
@@ -654,6 +443,7 @@ void chiefrim_initialize(void)
 	CR_STORE_REL(&chiefrim.shm->halo_state, CR_SIDE_READY);
 	CR_STORE_REL(&chiefrim.shm->magic, CR_MAGIC); /* last: the mapping is valid */
 	chiefrim.active = TRUE;
+	chiefrim_world_initialize();
 	atexit(chiefrim_dispose); /* the game leaves through several exits */
 	error(_error_silent, "chiefrim: active, %s ready (protocol %u)", CR_SHM_LINUX_PATH, CR_PROTOCOL_VERSION);
 }
@@ -675,6 +465,15 @@ void chiefrim_frame(void)
 	chiefrim_watch_skyrim();
 	chiefrim_pump_events();
 	chiefrim_apply_world();
+
+	{
+		long unit_index = chiefrim_local_unit();
+		real_point3d chief;
+
+		if (unit_index != NONE)
+			object_get_origin(unit_index, &chief);
+		chiefrim_world_update(unit_index != NONE ? &chief : NULL);
+	}
 
 	chiefrim_debug_collision();
 	if (chiefrim.placement_pending)
@@ -704,11 +503,9 @@ void chiefrim_structure_bsp_loaded(void)
 	chiefrim.level_cleared = FALSE;
 
 	/* A new BSP brings its own collision. Until Skyrim's world arrives, keep
-	it, so the level can spawn Chief at its own starting location; then put
-	the floor over it and move him. */
+	it, so the level can spawn Chief at its own starting location; then
+	Chiefrim's collision goes over it and Chief moves. */
+	chiefrim_world_map_loaded();
 	if (chiefrim.world_valid)
-	{
-		chiefrim_install_floor();
 		chiefrim.placement_pending = TRUE;
-	}
 }

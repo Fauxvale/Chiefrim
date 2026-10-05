@@ -24,8 +24,8 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 3
-RING_BYTES = 256 * 1024
+VERSION = 4
+RING_BYTES = 4 * 1024 * 1024
 TOTAL_SIZE = 272 + 2 * (128 + RING_BYTES)
 
 # offsets (chiefrim_protocol.h)
@@ -38,6 +38,60 @@ RING_TO_HALO, RING_TO_SKYRIM = 272, 272 + 128 + RING_BYTES
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
+MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
+REGION_UNITS = 1024.0
+TRIS_PER_MESSAGE = 1600
+
+
+def terrain_height(dx, dy):
+    """the synthetic ground, relative to the start (Skyrim units)"""
+    h = 0.0
+    if dy > 256:  # 25 degree ramp north, to a plateau
+        h += min(dy - 256, 1244) * math.tan(math.radians(25))
+    if dx > 600:  # 60 degree cliff east
+        h += (dx - 600) * math.tan(math.radians(60))
+    return h
+
+
+def terrain_triangles(ox, oy, oz):
+    """(triangle as 9 floats) list, world coordinates, wound counter-clockwise from above"""
+    tris = []
+    step, half = 64.0, 3072.0
+    n = int(2 * half / step)
+    for i in range(n):
+        for j in range(n):
+            x0, y0 = -half + i * step, -half + j * step
+            x1, y1 = x0 + step, y0 + step
+            p = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+            v = [(ox + x, oy + y, oz + terrain_height(x, y)) for x, y in p]
+            tris.append(v[0] + v[1] + v[2])
+            tris.append(v[0] + v[2] + v[3])
+    # a wall south of the start, 400 high, facing north
+    a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
+    c, d = (ox + 2000, oy - 800, oz + 400), (ox - 2000, oy - 800, oz + 400)
+    tris.append(a + b + c)
+    tris.append(a + c + d)
+    return tris
+
+
+def send_terrain(link, epoch, ox, oy, oz):
+    regions = {}
+    for t in terrain_triangles(ox, oy, oz):
+        cx, cy, cz = (t[0] + t[3] + t[6]) / 3, (t[1] + t[4] + t[7]) / 3, (t[2] + t[5] + t[8]) / 3
+        key = (math.floor(cx / REGION_UNITS), math.floor(cy / REGION_UNITS), math.floor(cz / REGION_UNITS))
+        regions.setdefault(key, []).append(t)
+    link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, 0))
+    sent = 0
+    for (rx, ry, rz), tris in regions.items():
+        for first in range(0, max(len(tris), 1), TRIS_PER_MESSAGE):
+            chunk = tris[first:first + TRIS_PER_MESSAGE]
+            body = struct.pack("<IiiiIIII", epoch, rx, ry, rz, len(tris), first, len(chunk), 0)
+            body += b"".join(struct.pack("<9fHH", *t, 0, 0) for t in chunk)
+            while not link.push(RING_TO_HALO, MSG_COLLISION_TRIS, body):
+                time.sleep(0.01)
+            link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))  # still here
+            sent += len(chunk)
+    print(f"fake_skyrim: terrain: {sent} triangles in {len(regions)} regions", flush=True)
 ACTION_JUMP, ACTION_CROUCH = 0, 1
 INPUT_FORMAT = "<IIII16Bffdd"  # cr_input (protocol v2)
 
@@ -45,19 +99,26 @@ INPUT_FORMAT = "<IIII16Bffdd"  # cr_input (protocol v2)
 DRIVE = [(2, 4, "forward"), (4, 6, "strafe right"), (6, 8, "turn right"),
          (8, 8.1, "jump"), (10, 12, "crouch"), (12, 13, "forward"),
          (13, 15, "stall"), (15, 16, "stop")]
+# --terrain --drive: up the ramp north, east into the cliff, south down to the wall
+DRIVE_TERRAIN = [(3, 7, "forward"), (7, 7.05, "turn right 90"), (7.5, 11, "forward"),
+                 (11, 11.05, "turn right 90"), (11.5, 18, "forward"), (18, 19, "stop")]
 
 
 def drive_input(t, frame, presses, state):
     """the cr_input for t seconds into the run"""
     forward = strafe = 0.0
     held = 0
-    phase = next((what for start, end, what in DRIVE if start <= t < end), "stop")
+    plan = DRIVE_TERRAIN if state.get("terrain") else DRIVE
+    phase = next((what for start, end, what in plan if start <= t < end), "stop")
     if phase == "forward":
         forward = 1.0
     elif phase == "strafe right":
         strafe = 1.0
     elif phase == "turn right":
         state["yaw"] += 0.02  # radians per tick of this loop (~200/s): ~4 rad/s
+    elif phase == "turn right 90" and state.get("turned") != t // 1:
+        state["yaw"] += math.pi / 2
+        state["turned"] = t // 1
     elif phase == "jump":
         held |= 1 << ACTION_JUMP
     elif phase == "crouch":
@@ -153,6 +214,9 @@ def main():
     parser.add_argument("--silence-at", type=float, default=0.0,
                         help="seconds in: stop the heartbeat, as a Skyrim that hangs (0: never)")
     parser.add_argument("--silence-for", type=float, default=5.0)
+    parser.add_argument("--terrain", action="store_true",
+                        help="stream synthetic collision: a 25 degree ramp up north, a 60 degree cliff east, a wall south;"
+                             " with --drive, walk into each")
     parser.add_argument("--drive", action="store_true",
                         help="script Chief through the input slot: forward, strafe right, turn right, jump, crouch")
     options = parser.parse_args()
@@ -192,6 +256,8 @@ def main():
         TAMRIEL, 0, options.x, options.y, options.z, options.z, 1, options.fov, 0, 0))
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, options.z, math.radians(options.heading)))
+    if options.terrain:
+        send_terrain(link, 1, options.x, options.y, options.z)
 
     last_print = 0.0
     last_seq = 0
@@ -200,7 +266,7 @@ def main():
     silenced = False
     frame = 0
     presses = [0] * 16
-    drive_state = {"yaw": 0.0}
+    drive_state = {"yaw": 0.0, "terrain": options.terrain}
     try:
         while time.monotonic() < deadline:
             quiet = options.silence_at > 0 and 0 <= time.monotonic() - started - options.silence_at < options.silence_for
@@ -211,7 +277,7 @@ def main():
                 link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))
             if options.drive:
                 t = time.monotonic() - started
-                stalled = any(start <= t < end and what == "stall" for start, end, what in DRIVE)
+                stalled = any(start <= t < end and what == "stall" for start, end, what in (DRIVE_TERRAIN if options.terrain else DRIVE))
                 if stalled and drive_state.get("phase") != "stall":
                     print("fake_skyrim: drive: stall (input stops, forward was held; Chief should stop)", flush=True)
                     drive_state["phase"] = "stall"

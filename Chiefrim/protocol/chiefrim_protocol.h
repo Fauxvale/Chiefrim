@@ -37,13 +37,13 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 3u
+#define CR_PROTOCOL_VERSION 4u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
 #define CR_SHM_WINE_PATH    L"Z:\\dev\\shm\\chiefrim_v1"
 
-#define CR_RING_BYTES       (256u * 1024u)                   /* each direction */
+#define CR_RING_BYTES       (4u * 1024u * 1024u)             /* each direction: collision comes in bursts */
 
 /* 1 Halo world unit = 10 ft = 3.048 m; Skyrim = 70 units/m (docs §4). */
 #define CR_SKY_UNITS_PER_WU 213.36f
@@ -185,6 +185,23 @@ vehicles); docs §10. */
 #define CR_MSG_HELLO     0x01u /* both ways */
 #define CR_MSG_TELEPORT  0x02u /* S->H */
 #define CR_MSG_LOG       0x03u /* H->S: a line for SKSE's log */
+#define CR_MSG_COLLISION_RESET 0x04u /* S->H: forget all collision regions */
+#define CR_MSG_COLLISION_TRIS  0x05u /* S->H: (part of) one region's triangles */
+
+/* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
+triangles in Skyrim world units, wound counter-clockwise around their
+front, per cube region of CR_REGION_UNITS. A region arrives in one or more
+CR_MSG_COLLISION_TRIS messages (first..first+count of total, in order);
+total 0 means the region is empty. */
+#define CR_REGION_UNITS        1024.0f
+#define CR_TRIS_PER_MESSAGE    1600u
+
+typedef struct cr_triangle
+{
+	cr_vec3  v[3];
+	uint16_t material;   /* reserved: Skyrim material, 0 for now */
+	uint16_t flags;
+} cr_triangle;
 
 typedef struct cr_msg_hello
 {
@@ -206,6 +223,28 @@ typedef struct cr_msg_log
 	cr_msg_header header;
 	char     text[120];
 } cr_msg_log;
+
+typedef struct cr_msg_collision_reset
+{
+	cr_msg_header header;
+	uint32_t epoch;      /* regions from older epochs are stale */
+	uint32_t reserved;
+} cr_msg_collision_reset;
+
+typedef struct cr_msg_collision_tris
+{
+	cr_msg_header header;
+	uint32_t epoch;
+	int32_t  rx, ry, rz; /* region: floor(skyrim position / CR_REGION_UNITS) */
+	uint32_t total;      /* the region's triangle count */
+	uint32_t first;      /* this message's first triangle */
+	uint32_t count;      /* triangles in this message */
+	uint32_t reserved;
+	cr_triangle tris[CR_TRIS_PER_MESSAGE]; /* only count are sent */
+} cr_msg_collision_tris;
+
+#define CR_COLLISION_TRIS_SIZE(count) \
+	((uint32_t)__builtin_offsetof(cr_msg_collision_tris, tris) + (uint32_t)(count) * (uint32_t)sizeof(cr_triangle))
 
 /* ---- the whole mapping ------------------------------------------------- */
 
@@ -430,6 +469,10 @@ CR_STATIC_ASSERT(sizeof(cr_msg_header) == 8, "cr_msg_header");
 CR_STATIC_ASSERT(sizeof(cr_msg_hello) == 64, "cr_msg_hello");
 CR_STATIC_ASSERT(sizeof(cr_msg_teleport) == 24, "cr_msg_teleport");
 CR_STATIC_ASSERT(sizeof(cr_msg_log) == 128, "cr_msg_log");
+CR_STATIC_ASSERT(sizeof(cr_triangle) == 40, "cr_triangle");
+CR_STATIC_ASSERT(sizeof(cr_msg_collision_reset) == 16, "cr_msg_collision_reset");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_msg_collision_tris, tris) == 40, "cr_msg_collision_tris.tris");
+CR_STATIC_ASSERT(CR_COLLISION_TRIS_SIZE(CR_TRIS_PER_MESSAGE) <= 0xFFF8u, "a full collision message fits a ring message");
 CR_STATIC_ASSERT(sizeof(cr_ring) == 128 + CR_RING_BYTES, "cr_ring");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, world_context) == 64, "cr_shared.world_context");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 272, "cr_shared.to_halo");

@@ -154,7 +154,7 @@ index bcd26cd0..176277d3 100644
  
  boolean render_camera_world_to_screen(
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
-index 265149a3..c3387cee 100644
+index 265149a3..76b6189b 100644
 --- a/source/scenario/scenario.c
 +++ b/source/scenario/scenario.c
 @@ -194,6 +194,7 @@ symbols in this file:
@@ -165,17 +165,23 @@ index 265149a3..c3387cee 100644
  
  /* ---------- constants */
  
-@@ -409,6 +410,17 @@ struct collision_bsp *global_collision_bsp_get(
+@@ -409,6 +410,23 @@ struct collision_bsp *global_collision_bsp_get(
  	return global_collision_bsp;
  }
  
-+/* CHIEFRIM: replaces the collision of the loaded structure BSP (the
-+structure BSP itself stays: clusters, rendering, sound). */
-+void scenario_override_collision_bsp(
-+	struct collision_bsp *collision_bsp)
++/* CHIEFRIM: replaces the loaded structure BSP's collision with Chiefrim's
++(chiefrim_world.c), and its structure BSP with a copy whose leaves match
++that collision's (the map's clusters, sky, fog and sound stay). */
++void scenario_override_bsps(
++	struct collision_bsp *collision_bsp,
++	struct structure_bsp *structure_bsp)
 +{
 +	global_collision_bsp = collision_bsp;
 +	global_bsp3d = &collision_bsp->bsp3d;
++	if (structure_bsp)
++	{
++		global_structure_bsp = structure_bsp;
++	}
 +
 +	return;
 +}
@@ -183,7 +189,7 @@ index 265149a3..c3387cee 100644
  struct bsp3d *global_bsp3d_get(
  	void)
  {
-@@ -1039,6 +1051,7 @@ boolean scenario_switch_structure_bsp(
+@@ -1039,6 +1057,7 @@ boolean scenario_switch_structure_bsp(
  				struct collision_bsp);
  			scenario_globals->structure_bsp_index = structure_bsp_index;
  			global_structure_bsp_index = structure_bsp_index;
@@ -192,14 +198,14 @@ index 265149a3..c3387cee 100644
  			if (had_old_structure_bsp)
  			{
 diff --git a/source/scenario/scenario.h b/source/scenario/scenario.h
-index 73088440..9e12c2f7 100644
+index 73088440..c3e862fb 100644
 --- a/source/scenario/scenario.h
 +++ b/source/scenario/scenario.h
 @@ -100,6 +100,7 @@ struct scenario *global_scenario_try_and_get(void);
  struct structure_bsp *global_structure_bsp_get(void);
  struct collision_bsp *global_collision_bsp_get(void);
  struct bsp3d *global_bsp3d_get(void);
-+void scenario_override_collision_bsp(struct collision_bsp *collision_bsp); /* CHIEFRIM */
++void scenario_override_bsps(struct collision_bsp *collision_bsp, struct structure_bsp *structure_bsp); /* CHIEFRIM */
  struct game_globals *scenario_get_game_globals(void);
  long global_structure_bsp_tag_index_get(void);
  void scenario_location_award_bonus(struct location *location);
