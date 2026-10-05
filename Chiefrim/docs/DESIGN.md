@@ -188,8 +188,10 @@ collision code.
   - a build is installed only for the origin it was made for: one still running when Skyrim moves
     the origin (a load, a door, `coc`) is thrown away (installing it shifted the ground under Chief
     and he fell through);
-  - after the origin moves, Chief stands on the stand-in floor until Skyrim's collision is built;
-    if that ground turns out higher, he is lifted onto it;
+  - after the origin moves, Chief stands on the stand-in floor until a build has ground under him
+    (Skyrim's collision arrives region by region, and the first builds may not have his yet;
+    swapping the stand-in out for them dropped him through), or 6 s have passed; if that ground
+    turns out higher, he is lifted onto it;
   - a floor guard: each frame, if Chief went down through a surface facing up (Halo can shove a
     wedged biped through one), he is put back on top of it with his fall stopped. Offline, on real
     Skyrim dumps, a short drop through ~95% of floors is seen; the rest have a steeper surface just

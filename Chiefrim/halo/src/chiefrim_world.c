@@ -64,6 +64,7 @@ and builds are shared with the worker, so they use the C library's. */
 #define SUPPORT_PROBE_ABOVE  0.1f /* world units: a biped's ground, from just above its feet... */
 #define SUPPORT_PROBE_BELOW  0.2f /* ...to this far under them */
 #define FLOOR_GUARD_RAISE    0.05f /* world units: the floor guard's ray starts this far above the feet */
+#define AWAIT_GROUND_MS      6000 /* after a load: at most this long on the stand-in floor */
 #define SETTLE_REACH         0.5f /* world units (~107 Skyrim units) */
 #define DUMP_SLOWER_THAN_MS  1000 /* builds this slow (or failing) are dumped */
 #define FLOOR_HALF_SIZE      2000.0f  /* world units */
@@ -122,6 +123,8 @@ static struct
 	boolean have_chief;
 	real_point3d chief;         /* last seen, world units */
 	boolean settle_pending;     /* the first build since the origin moved has landed */
+	boolean awaiting_ground;    /* since the origin moved: keep the stand-in floor until a build has ground under Chief */
+	unsigned long reset_ms;
 	boolean awaiting_first_build;
 
 #ifdef __linux__
@@ -313,6 +316,19 @@ static void *chiefrim_world_worker(void *unused)
 #endif
 
 /* ---------- checks and swaps (main thread) */
+
+/* Is there something to stand on under these feet (world units)? From a
+knee's height above them to a step below. */
+static boolean chiefrim_world_ground_under(struct chiefrim_bsp *bsp, real_point3d const *feet)
+{
+	struct collision_bsp_test_vector_result result;
+	real_point3d start = *feet;
+	real_vector3d down = { 0.f, 0.f, -(SETTLE_REACH + 1.0f) };
+
+	start.z += SETTLE_REACH;
+	return collision_bsp_test_vector(FLAG(_collision_test_front_facing_surfaces_bit),
+		&bsp->bsp, 0, NULL, &start, &down, REAL_MAX, &result);
+}
 
 /* Rays from just in front of, and just behind, sampled surfaces must hit
 them; spheres resting on them must touch them. Through Halo's own queries,
@@ -597,6 +613,15 @@ static void chiefrim_world_collect_result(void)
 	}
 	else if (!chiefrim_world_self_test(bsp))
 		chiefrim_bsp_free(bsp);
+	else if (world.awaiting_ground && world.have_chief && !chiefrim_world_ground_under(bsp, &world.chief) &&
+		system_milliseconds() - world.reset_ms < AWAIT_GROUND_MS)
+	{
+		/* Skyrim's collision is still arriving after a load, and not yet
+		under Chief: swapping out the stand-in floor now would drop him
+		through the gap. The next build, with more regions, tries again. */
+		chiefrim_bsp_free(bsp);
+		world.dirty = TRUE;
+	}
 	else
 	{
 		world.builds++;
@@ -607,6 +632,10 @@ static void chiefrim_world_collect_result(void)
 				bsp->max_depth, bsp->dropped_overlaps ? " (some coplanar overlaps)" : "",
 				system_milliseconds() - world.job_started_ms);
 		}
+		if (world.awaiting_ground && system_milliseconds() - world.reset_ms >= AWAIT_GROUND_MS)
+			error(_error_silent, "chiefrim: no ground under Chief in Skyrim's collision %lu ms after the load; using it anyway",
+				system_milliseconds() - world.reset_ms);
+		world.awaiting_ground = FALSE;
 		chiefrim_world_install(bsp);
 		world.installed_floor = FALSE;
 		if (world.awaiting_first_build)
@@ -680,6 +709,8 @@ void chiefrim_world_reset(cr_vec3 origin, real floor_z)
 	world.origin_generation++; /* builds in flight were for the old origin */
 	world.awaiting_first_build = TRUE;
 	world.settle_pending = FALSE;
+	world.awaiting_ground = TRUE;
+	world.reset_ms = system_milliseconds();
 	world.floor_z = floor_z;
 	world.world_valid = TRUE;
 	/* The regions are in Skyrim units, whatever the origin: only Skyrim's
