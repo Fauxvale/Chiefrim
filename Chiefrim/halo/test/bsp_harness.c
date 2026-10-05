@@ -221,7 +221,8 @@ static void self_test(struct chiefrim_bsp *bsp)
 		front = collision_bsp_test_vector(3, &bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f; /* plane merging may sit a triangle 0.004 wu off its plane */
 		start.x = centre.x - plane.n.i * 0.1f; start.y = centre.y - plane.n.j * 0.1f; start.z = centre.z - plane.n.k * 0.1f;
 		ray.i = -ray.i; ray.j = -ray.j; ray.k = -ray.k;
-		back = collision_bsp_test_vector(3, &bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f; /* plane merging may sit a triangle 0.004 wu off its plane */
+		back = bsp->one_sided[s] || /* the land: nothing from below */
+			(collision_bsp_test_vector(3, &bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f);
 		start.x = centre.x + plane.n.i * 0.05f; start.y = centre.y + plane.n.j * 0.05f; start.z = centre.z + plane.n.k * 0.05f;
 		touch = collision_bsp_test_sphere(&bsp->bsp, 0, NULL, &start, 0.1f, &sphere);
 		fail_front += !front;
@@ -423,6 +424,8 @@ int main(int argc, char **argv)
 			TRI(x0, y0, height(x0, y0), x1, y1, height(x1, y1), x0, y1, height(x0, y1));
 		}
 	}
+	for (i = 0; i < n; i++)
+		t[i].flags = 0x0001; /* the ground: one-sided, as Skyrim's land (CR_TRIANGLE_ONE_SIDED) */
 	for (i = 0; i < rocks; i++)
 	{
 		float cx = uniform(-half, half), cy = uniform(-half, half);

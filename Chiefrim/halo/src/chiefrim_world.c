@@ -388,9 +388,10 @@ static boolean chiefrim_world_self_test(struct chiefrim_bsp *bsp)
 
 		start.x = centre.x - plane.n.i * 0.1f; start.y = centre.y - plane.n.j * 0.1f; start.z = centre.z - plane.n.k * 0.1f;
 		ray.i = -ray.i; ray.j = -ray.j; ray.k = -ray.k;
-		back = collision_bsp_test_vector(
-			FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_back_facing_surfaces_bit),
-			&bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f;
+		back = bsp->one_sided[surface_index] || /* the land: nothing from below */
+			(collision_bsp_test_vector(
+				FLAG(_collision_test_front_facing_surfaces_bit) | FLAG(_collision_test_back_facing_surfaces_bit),
+				&bsp->bsp, 0, NULL, &start, &ray, REAL_MAX, &result) && result.t <= 0.55f);
 
 		start.x = centre.x + plane.n.i * 0.05f; start.y = centre.y + plane.n.j * 0.05f; start.z = centre.z + plane.n.k * 0.05f;
 		touch = collision_bsp_test_sphere(&bsp->bsp, 0, NULL, &start, 0.1f, sphere);
@@ -565,7 +566,7 @@ static void chiefrim_world_start_build(long cx, long cy, long cz)
 			out->id = (((unsigned long)region->rx & 0x7Fu) << 24 | ((unsigned long)region->ry & 0x7Fu) << 17 |
 				((unsigned long)region->rz & 0x1u) << 16 | (t & 0xFFFFu)) & 0x7FFFFFFFu;
 			out->material = 0;
-			out->pad = 0;
+			out->flags = (short)region->triangles[t].flags;
 		}
 	}
 
@@ -925,12 +926,20 @@ void chiefrim_world_generation(unsigned long generation)
 	world.world_generation = generation;
 }
 
+boolean chiefrim_world_floor_within(real_point3d const *feet, real reach);
+
 /* A floor (a surface facing up) right under these feet (world units)? */
 boolean chiefrim_world_floor_beneath(real_point3d const *feet)
 {
+	return chiefrim_world_floor_within(feet, 0.2f);
+}
+
+/* A floor from just above these feet to this far below them? */
+boolean chiefrim_world_floor_within(real_point3d const *feet, real reach)
+{
 	struct collision_bsp_test_vector_result result;
 	real_point3d start = *feet;
-	real_vector3d down = { 0.f, 0.f, -0.3f };
+	real_vector3d down = { 0.f, 0.f, -(reach + 0.1f) };
 
 	if (!world.current || world.installed_floor)
 		return FALSE;

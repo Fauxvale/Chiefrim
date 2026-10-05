@@ -148,6 +148,10 @@ collision code.
   in between ticks (`chiefrim_world.c`). Skyrim's collision is an open triangle soup, so:
   - no solid leaves: every leaf is "two-sided", so Halo's ray query tests every plane it crosses,
     exactly;
+  - the land (Skyrim's height-field terrain, flagged `CR_TRIANGLE_ONE_SIDED` by the exporter) is
+    one-sided: its twin is in no leaf. Where terrain pokes up through a road or a floor mesh, its
+    back would push whoever stands on the road down through it (the tenth in-game test: Chief in a
+    stack of 2-4 layers within 60 units, the floor guard fighting Halo);
   - each triangle is two surfaces, itself and a reversed twin (the sphere query matches surfaces to
     the side it came from); winged edges are shared between neighbours, and no edge is left open
     (Halo's edge features read both sides);
@@ -195,7 +199,8 @@ collision code.
     swapping the stand-in out for them dropped him through), or 6 s have passed; if that ground
     turns out higher, he is lifted onto it;
   - a floor guard: each frame, if Chief went down through a surface facing up (Halo can shove a
-    wedged biped through one), he is put back on top of it with his fall stopped. It looks along the
+    wedged biped through one) with no floor within a step below, he is put back on top of it with
+    his fall stopped (with a floor just below, it is layered geometry, Halo's to settle). It looks along the
     path of his pill's lower sphere's centre, not his feet (Halo's biped origin is the bottom of
     that sphere): rolling off an edge, the feet dip below the edge's height while still over it,
     and a guard on the feet put him back on every frame (he caught on road pieces' and floors'

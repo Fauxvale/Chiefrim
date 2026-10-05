@@ -25,7 +25,7 @@ struct chiefrim_triangle
 	real_point3d v[3];
 	unsigned long id;
 	short material;
-	short pad;
+	short flags;        /* CR_TRIANGLE_ONE_SIDED: no back (the land) */
 };
 
 struct chiefrim_bsp_leaf
@@ -69,6 +69,7 @@ struct chiefrim_bsp
 	long cluster_count;
 
 	unsigned long *surface_ids;          /* the triangle's id; | 0x80000000 for its back */
+	byte *one_sided;                     /* per front: its back is in no leaf (the land) */
 	long triangle_count;                 /* kept after dropping degenerate ones: surfaces
 	                                        0..n-1 are their fronts, n..2n-1 their twins */
 	real min_z;                          /* the lowest point of any triangle */

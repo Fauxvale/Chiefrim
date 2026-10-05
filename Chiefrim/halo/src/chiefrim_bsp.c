@@ -44,6 +44,7 @@ offline, with Halo's own queries, under AddressSanitizer.
 
 #include "cseries.h"
 #include "chiefrim/chiefrim_bsp.h"
+#include "chiefrim/chiefrim_protocol.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -84,6 +85,7 @@ struct fragment
 	long count;
 	long plane;       /* index; its normal is the plane's, or negated */
 	boolean flipped;
+	boolean one_sided; /* no back: referenced only on the side it faces */
 	long shared;      /* times it went to both sides of a split, on its path */
 	unsigned long id;
 };
@@ -94,6 +96,7 @@ struct emitted
 	real_point3d p[CHIEFRIM_SURFACE_POINTS];
 	long count;
 	long designator;  /* the front's: plane | (flipped ? sign : 0) */
+	boolean one_sided;
 	unsigned long id;
 };
 
@@ -592,6 +595,7 @@ static void emit(struct builder *b, long f, long *out, long *out_count)
 		b->emitted[e].count = take + 1;
 		b->emitted[e].designator = source.plane | (source.flipped ? LONG_MIN : 0);
 		b->emitted[e].id = source.id;
+		b->emitted[e].one_sided = source.one_sided;
 		out[(*out_count)++] = e;
 		if (start + take >= source.count)
 			break;
@@ -1175,13 +1179,19 @@ static long build_3d(struct builder *b, long const *fragments, long count,
 		fail(b, "out of memory");
 		goto done;
 	}
+	front_pending[pending_count].count = 0;
+	back_pending[pending_count].count = 0;
 	for (i = 0; i < on_count; i++)
 	{
-		front_pending[pending_count].surfaces[i] = code_for(b, on[i], FALSE);
-		back_pending[pending_count].surfaces[i] = code_for(b, on[i], TRUE);
+		struct emitted const *e = &b->emitted[on[i]];
+		boolean faces_back = (e->designator & LONG_MIN) != 0;
+
+		/* a one-sided polygon only on the side it faces */
+		if (!e->one_sided || !faces_back)
+			front_pending[pending_count].surfaces[front_pending[pending_count].count++] = code_for(b, on[i], FALSE);
+		if (!e->one_sided || faces_back)
+			back_pending[pending_count].surfaces[back_pending[pending_count].count++] = code_for(b, on[i], TRUE);
 	}
-	front_pending[pending_count].count = on_count;
-	back_pending[pending_count].count = on_count;
 
 	node = b->out->node_count;
 	GROW(b, nodes, node_capacity, node + 1);
@@ -1363,6 +1373,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 		b.fragments[f].flipped = (designator & LONG_MIN) != 0;
 		b.fragments[f].shared = 0;
 		b.fragments[f].id = in->id;
+		b.fragments[f].one_sided = (in->flags & CR_TRIANGLE_ONE_SIDED) != 0;
 	}
 	if (b.failed)
 		goto failed;
@@ -1491,6 +1502,14 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 #undef CHIEFRIM_BLOCK
 
 	b.out->triangle_count = b.emitted_count; /* the fronts: surfaces 0..n-1 */
+	b.out->one_sided = (byte *)calloc((size_t)MAX(b.emitted_count, 1), 1);
+	if (!b.out->one_sided)
+	{
+		snprintf(error, (size_t)error_size, "out of memory");
+		goto fail;
+	}
+	for (i = 0; i < b.emitted_count; i++)
+		b.out->one_sided[i] = (byte)b.emitted[i].one_sided;
 	b.out->min_z = REAL_MAX;
 	for (i = 0; i < b.out->vertex_count; i++)
 		b.out->min_z = MIN(b.out->min_z, b.out->vertices[i].point.z);
@@ -1533,6 +1552,7 @@ void chiefrim_bsp_free(struct chiefrim_bsp *bsp)
 	free(bsp->structure_leaves);
 	free(bsp->clusters);
 	free(bsp->surface_ids);
+	free(bsp->one_sided);
 	free(bsp);
 }
 

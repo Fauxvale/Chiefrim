@@ -692,6 +692,7 @@ namespace chiefrim::Collision
 					for (int v = 0; v < 3; ++v) {
 						tri.v[v] = { t.v[v * 3], t.v[v * 3 + 1], t.v[v * 3 + 2] };
 					}
+					tri.flags = job.terrain ? CR_TRIANGLE_ONE_SIDED : 0;
 					out.tris.push_back(tri);
 				}
 			}

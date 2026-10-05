@@ -59,6 +59,8 @@ def terrain_height(dx, dy):
 
 
 HOLE = False
+GROUND_COUNT = 0
+CR_TRIANGLE_ONE_SIDED = 0x0001
 LEDGE = 0.0
 
 
@@ -77,6 +79,8 @@ def terrain_triangles(ox, oy, oz):
             v = [(ox + x, oy + y, oz + terrain_height(x, y)) for x, y in p]
             tris.append(v[0] + v[1] + v[2])
             tris.append(v[0] + v[2] + v[3])
+    global GROUND_COUNT
+    GROUND_COUNT = len(tris)  # the land: one-sided, as the plugin flags Skyrim's
     if ROUGH:  # rocks: boxes, rotated, scattered (not near the start)
         import random
         rng = random.Random(7)
@@ -110,17 +114,17 @@ def terrain_triangles(ox, oy, oz):
 
 def send_terrain(link, epoch, ox, oy, oz, generation=1):
     regions = {}
-    for t in terrain_triangles(ox, oy, oz):
+    for i, t in enumerate(terrain_triangles(ox, oy, oz)):
         cx, cy, cz = (t[0] + t[3] + t[6]) / 3, (t[1] + t[4] + t[7]) / 3, (t[2] + t[5] + t[8]) / 3
         key = (math.floor(cx / REGION_UNITS), math.floor(cy / REGION_UNITS), math.floor(cz / REGION_UNITS))
-        regions.setdefault(key, []).append(t)
+        regions.setdefault(key, []).append((t, CR_TRIANGLE_ONE_SIDED if i < GROUND_COUNT else 0))
     link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, generation))
     sent = 0
     for (rx, ry, rz), tris in regions.items():
         for first in range(0, max(len(tris), 1), TRIS_PER_MESSAGE):
             chunk = tris[first:first + TRIS_PER_MESSAGE]
             body = struct.pack("<IiiiIIII", epoch, rx, ry, rz, len(tris), first, len(chunk), 0)
-            body += b"".join(struct.pack("<9fHH", *t, 0, 0) for t in chunk)
+            body += b"".join(struct.pack("<9fHH", *t, 0, flags) for t, flags in chunk)
             while not link.push(RING_TO_HALO, MSG_COLLISION_TRIS, body):
                 time.sleep(0.01)
             link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))  # still here

@@ -203,8 +203,13 @@ typedef struct cr_triangle
 {
 	cr_vec3  v[3];
 	uint16_t material;   /* reserved: Skyrim material, 0 for now */
-	uint16_t flags;
+	uint16_t flags;      /* CR_TRIANGLE_* */
 } cr_triangle;
+
+/* Solid only from the front (the land: a height field, outside up). Halo
+gives it no back: where the land pokes up through a road or a floor, it
+mustn't push whoever stands on that down through it. */
+#define CR_TRIANGLE_ONE_SIDED 0x0001u
 
 typedef struct cr_msg_hello
 {

@@ -804,10 +804,14 @@ void chiefrim_frame(void)
 			object_get_origin(unit_index, &chief);
 		chiefrim_world_update(unit_index != NONE ? &chief : NULL);
 		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending &&
-			chiefrim_world_crossed_floor(&chiefrim.last_feet, &chief, chiefrim_chief_radius(unit_index)))
+			chiefrim_world_crossed_floor(&chiefrim.last_feet, &chief, chiefrim_chief_radius(unit_index)) &&
+			!chiefrim_world_floor_within(&chief, CHIEFRIM_STEP_UNITS / CR_SKY_UNITS_PER_WU))
 		{
 			/* Halo pushed him down through a floor (wedged against
-			something, mostly): back on top of it, his fall stopped */
+			something, mostly), with nothing to stand on below: back on top
+			of it, his fall stopped. With ground just below, it's layered
+			geometry (a road on terrain poking through it): Halo's to settle;
+			putting him back each frame made him stutter there. */
 			real_point3d back = chiefrim.last_feet;
 
 			back.z += 0.01f;
