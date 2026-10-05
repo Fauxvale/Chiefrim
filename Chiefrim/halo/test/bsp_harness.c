@@ -281,6 +281,58 @@ static void probe_below(struct chiefrim_bsp *bsp, real_point3d const *chief)
 	(void)i;
 }
 
+/* chiefrim.c's floor guard: a short drop through every floor (a surface
+facing up) must be seen, as a front-facing hit on a plane facing up. */
+static void floor_guard_test(struct chiefrim_bsp *bsp)
+{
+	long s, floors = 0, seen = 0, no_hit = 0, steep = 0, small = 0;
+
+	for (s = 0; s < bsp->surface_count; s++)
+	{
+		real_point3d points[8], centre = { 0.f, 0.f, 0.f };
+		short count = collision_surface_polygon(&bsp->bsp, s, points), p;
+		real_plane3d plane;
+		struct collision_bsp_test_vector_result result;
+		real_vector3d drop = { 0.f, 0.f, -0.1f };
+
+		if (count < 3)
+			continue;
+		bsp3d_get_plane_from_designator(&bsp->bsp.bsp3d, bsp->surfaces[s].plane_designator, &plane);
+		if (plane.n.k <= 0.7f)
+			continue;
+		for (p = 0; p < count; p++)
+		{
+			centre.x += points[p].x / count;
+			centre.y += points[p].y / count;
+			centre.z += points[p].z / count;
+		}
+		centre.z += 0.05f;
+		floors++;
+		if (collision_bsp_test_vector(1, &bsp->bsp, 0, NULL, &centre, &drop, REAL_MAX, &result))
+		{
+			real k = result.plane ? result.plane->n.k : 0.f;
+
+			if (result.plane_designator < 0)
+				k = -k;
+			seen += k > 0.7f;
+			steep += k <= 0.7f;
+		}
+		else
+		{
+			real_vector3d e1, e2;
+			real cross;
+
+			no_hit++;
+			e1.i = points[1].x - points[0].x; e1.j = points[1].y - points[0].y;
+			e2.i = points[2].x - points[0].x; e2.j = points[2].y - points[0].y;
+			cross = 0.5f * fabsf(e1.i * e2.j - e1.j * e2.i);
+			small += cross < 0.0005f;
+		}
+	}
+	printf("floor guard: %ld of %ld floors seen; %ld hit a steep surface first, %ld no hit (%ld of them tiny)\n",
+		seen, floors, steep, no_hit, small);
+}
+
 int main(int argc, char **argv)
 {
 	long capacity = 400000, n = 0, i, j;
@@ -411,6 +463,8 @@ build:
 		bsp->edge_count, bsp->max_depth, bsp->dropped_overlaps, bsp->duplicates, bsp->shared_fragments, now_ms() - start);
 	if (has_chief)
 		probe_below(bsp, &chief);
+	if (getenv("FLOOR_GUARD"))
+		floor_guard_test(bsp);
 	if (getenv("SELF_TEST"))
 		self_test(bsp);
 	chiefrim_bsp_free(bsp);

@@ -54,6 +54,8 @@ void chiefrim_world_message(int type, void const *message);
 void chiefrim_world_update(real_point3d const *chief); /* each frame; Chief or NULL */
 boolean chiefrim_world_below_collision(real_point3d const *point); /* below all of Skyrim's collision loaded */
 boolean chiefrim_world_has_skyrim_collision(void); /* not the stand-in floor */
+boolean chiefrim_world_crossed_floor(real_point3d const *from, real_point3d const *to); /* feet went down through a floor */
+boolean chiefrim_world_room_for(real_point3d const *feet, real height); /* nothing where his body would be */
 /* Once after the first build since the origin moved: TRUE, with the ground's
 height, if Chief is in the ground there (the stand-in floor was lower). */
 boolean chiefrim_world_settle(real_point3d const *chief, real *ground_z);

@@ -183,9 +183,16 @@ collision code.
     and he fell through);
   - after the origin moves, Chief stands on the stand-in floor until Skyrim's collision is built;
     if that ground turns out higher, he is lifted onto it;
-  - if Chief falls below all of the collision loaded around him, or dies and Halo respawns him at
-    the level's spawn point, he goes back to where he last stood on Skyrim's ground;
-  - builds slower than 1 s, failing ones, and the one Chief fell through are dumped to
+  - a floor guard: each frame, if Chief went down through a surface facing up (Halo can shove a
+    wedged biped through one), he is put back on top of it with his fall stopped. Offline, on real
+    Skyrim dumps, a short drop through ~95% of floors is seen; the rest have a steeper surface just
+    above them or are slivers;
+  - if Chief still falls below all of the collision loaded around him, or dies and Halo respawns
+    him at the level's spawn point, he goes back to where he last stood on Skyrim's ground with room
+    around him (a spot where he was wedged into something doesn't count);
+  - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
+    edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
+  - builds slower than 1 s (3 at most), failing ones, and the one Chief fell through are dumped to
     `build/collision-dumps/` (`CHIEFRIM_DUMP_DIR`, set by `tools/launch_halo.sh`; git-ignored,
     since they are Skyrim's shapes), and `tools/test_bsp.sh` replays them, probing under Chief;
     `tools/fake_skyrim.py` has `--recenter-every`, `--start-below` and `--hole` for these cases;

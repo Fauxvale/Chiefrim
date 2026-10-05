@@ -69,6 +69,9 @@ static struct
 	float placement_heading;
 	boolean lost_unit;            /* Chief died (or went): a respawn follows */
 	boolean have_safe;            /* where Chief last stood on ground (Skyrim units) */
+	boolean have_last_feet;       /* the floor guard's last position of Chief (world units) */
+	real_point3d last_feet;
+	long floor_guard_count;
 	cr_vec3 safe_position;
 	float safe_heading;
 	uint32_t ticks;
@@ -117,6 +120,7 @@ static void chiefrim_place_player(void)
 	player_teleport(player_index, NONE, &position);
 	player_control_set_facing(0, &forward);
 	chiefrim.placement_pending = FALSE;
+	chiefrim.have_last_feet = FALSE;
 	error(_error_silent, "chiefrim: placed Chief at (%.2f, %.2f, %.2f) wu, yaw %.3f",
 		position.x, position.y, position.z, yaw);
 }
@@ -339,9 +343,11 @@ static void chiefrim_publish_player(void)
 		struct biped_datum *biped = biped_get(unit_index);
 
 		state.on_ground = !TEST_FLAG(biped->biped.flags, _biped_airborne_bit);
-		if (state.on_ground && chiefrim_world_has_skyrim_collision())
+		if (state.on_ground && chiefrim_world_has_skyrim_collision() &&
+			chiefrim_world_room_for(&origin, biped_definition_get(biped->definition_index)->biped.collision_height_standing))
 		{
-			/* on Skyrim's ground, not the stand-in floor of a new origin */
+			/* on Skyrim's ground, not the stand-in floor of a new origin,
+			and clear of everything (not wedged into something) */
 			chiefrim.have_safe = TRUE;
 			chiefrim.safe_position = state.position;
 			chiefrim.safe_heading = state.yaw;
@@ -564,6 +570,28 @@ void chiefrim_frame(void)
 		if (unit_index != NONE)
 			object_get_origin(unit_index, &chief);
 		chiefrim_world_update(unit_index != NONE ? &chief : NULL);
+		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending &&
+			chiefrim_world_crossed_floor(&chiefrim.last_feet, &chief))
+		{
+			/* Halo pushed him down through a floor (wedged against
+			something, mostly): back on top of it, his fall stopped */
+			struct unit_datum *unit = unit_get(unit_index);
+			real_point3d back = chiefrim.last_feet;
+
+			back.z += 0.01f;
+			player_teleport(local_player_get_player_index(0), NONE, &back);
+			if (unit->object.translational_velocity.k < 0.f)
+				unit->object.translational_velocity.k = 0.f;
+			if (chiefrim.floor_guard_count++ % 50 == 0)
+			{
+				error(_error_silent, "chiefrim: Halo pushed Chief down through a floor at (%.2f, %.2f, %.2f) wu; put him back (%ld times)",
+					chief.x, chief.y, chief.z, chiefrim.floor_guard_count);
+			}
+			chief = back;
+		}
+		chiefrim.have_last_feet = unit_index != NONE;
+		if (unit_index != NONE)
+			chiefrim.last_feet = chief;
 		if (unit_index != NONE)
 		{
 			real ground_z;
@@ -574,6 +602,7 @@ void chiefrim_frame(void)
 
 				chief.z += lift;
 				player_teleport(local_player_get_player_index(0), NONE, &chief);
+				chiefrim.last_feet = chief;
 				error(_error_silent, "chiefrim: Skyrim's ground arrived above Chief's feet; lifted him %.2f wu onto it", lift);
 			}
 		}

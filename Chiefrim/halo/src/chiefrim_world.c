@@ -57,12 +57,13 @@ and builds are shared with the worker, so they use the C library's. */
 /* ---------- constants */
 
 #define REGION_SLOTS         4096     /* power of two */
-#define BUILD_RADIUS_XY      2        /* regions around Chief's, in a build */
+#define BUILD_RADIUS_XY      1        /* regions around Chief's, in a build: at least 1024 units ahead of him */
 #define BUILD_RADIUS_Z       1
 #define EVICT_RADIUS         5        /* regions further away are dropped */
 #define BUILD_INTERVAL_MS    250
 #define SUPPORT_PROBE_ABOVE  0.1f /* world units: a biped's ground, from just above its feet... */
 #define SUPPORT_PROBE_BELOW  0.2f /* ...to this far under them */
+#define FLOOR_GUARD_RAISE    0.05f /* world units: the floor guard's ray starts this far above the feet */
 #define SETTLE_REACH         0.5f /* world units (~107 Skyrim units) */
 #define DUMP_SLOWER_THAN_MS  1000 /* builds this slow (or failing) are dumped */
 #define FLOOR_HALF_SIZE      2000.0f  /* world units */
@@ -235,7 +236,7 @@ tools/launch_halo.sh puts them under build/, which git ignores. */
 static void chiefrim_world_dump(struct chiefrim_triangle const *triangles, long count,
 	real_point3d const *chief, char const *why)
 {
-	static long dump_count = 0;
+	static long dump_count = 0, slow_count = 0;
 	char const *directory = getenv("CHIEFRIM_DUMP_DIR");
 	char path[512];
 	long has_chief = chief ? 1 : 0;
@@ -243,7 +244,10 @@ static void chiefrim_world_dump(struct chiefrim_triangle const *triangles, long 
 	int file;
 	boolean written;
 
+	/* slow builds come in runs: a few of them, and room kept for falls */
 	if (!directory || !directory[0] || dump_count >= 20 || !triangles)
+		return;
+	if (!chief && slow_count++ >= 3)
 		return;
 	snprintf(path, sizeof(path), "%s/build-%ld-%ld.bin", directory, (long)getpid(), dump_count++);
 	file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -808,4 +812,49 @@ boolean chiefrim_world_settle(real_point3d const *chief, real *ground_z)
 boolean chiefrim_world_has_skyrim_collision(void)
 {
 	return world.current && !world.installed_floor;
+}
+
+/* Did a biped going from one point to the next (feet, world units) pass
+down through a floor (a surface facing up)? Only downward moves: going up
+steps and slopes is Halo's to do. */
+boolean chiefrim_world_crossed_floor(real_point3d const *from, real_point3d const *to)
+{
+	struct collision_bsp_test_vector_result result;
+	real_point3d start = *from;
+	real_vector3d move;
+
+	if (!world.current || world.installed_floor || to->z >= from->z)
+		return FALSE;
+	start.z += FLOOR_GUARD_RAISE;
+	move.i = to->x - from->x;
+	move.j = to->y - from->y;
+	move.k = to->z - from->z;
+	if (!collision_bsp_test_vector(FLAG(_collision_test_front_facing_surfaces_bit),
+		&world.current->bsp, 0, NULL, &start, &move, REAL_MAX, &result))
+	{
+		return FALSE;
+	}
+	{
+		real k = result.plane ? result.plane->n.k : 0.f;
+
+		if (result.plane_designator < 0)
+			k = -k;
+		return k > 0.7f; /* a floor, not a wall he slid down */
+	}
+}
+
+/* Room for Chief here (feet, world units): a ball the width of him, from
+his knees up, touches nothing. */
+boolean chiefrim_world_room_for(real_point3d const *feet, real height)
+{
+	static struct collision_bsp_test_sphere_result *sphere = NULL;
+	real_point3d centre = *feet;
+	real radius = 0.18f;
+
+	if (!world.current || world.installed_floor)
+		return TRUE;
+	if (!sphere && !(sphere = (struct collision_bsp_test_sphere_result *)malloc(sizeof(*sphere))))
+		return TRUE;
+	centre.z += MAX(height * 0.55f, radius + 0.1f);
+	return !collision_bsp_test_sphere(&world.current->bsp, 0, NULL, &centre, radius, sphere);
 }
