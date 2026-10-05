@@ -231,6 +231,77 @@ namespace chiefrim::Puppet
 			logger::info("Chief's radius {:.0f} units", context.chief_radius);
 		}
 
+		// Halo publishes at its frame rate, Skyrim draws at its own (uneven
+		// against Halo's): taking the latest state each frame, the player moved
+		// in uneven steps, stalling and lurching. States are kept with Halo's
+		// clock; the player is drawn where Chief was kDelayUs ago, between the
+		// two states about that moment. A jump between them (a teleport) cuts.
+		cr_player_state Interpolated(const cr_player_state& a_latest)
+		{
+			constexpr std::int64_t kDelayUs = 25000;
+			constexpr float kCutUnits = 150.0f;
+			struct Entry { std::uint32_t timeUs; cr_vec3 position; cr_vec3 eye; };
+			static std::array<Entry, 16> history{};
+			static std::size_t count = 0, head = 0;
+			static std::int64_t offsetUs = 0;  // our clock minus Halo's
+			static ULONGLONG offsetSince = 0;
+			static std::uint32_t lastTick = 0;
+
+			LARGE_INTEGER now{}, frequency{};
+			::QueryPerformanceCounter(&now);
+			::QueryPerformanceFrequency(&frequency);
+			const std::int64_t localUs = std::int64_t(double(now.QuadPart) * 1e6 / double(frequency.QuadPart));
+
+			if (a_latest.time_us == 0) {
+				return a_latest;  // a Halo that doesn't stamp its states
+			}
+			if (count == 0 || a_latest.tick != lastTick) {
+				head = (head + 1) % history.size();
+				history[head] = { a_latest.time_us, a_latest.position, a_latest.eye };
+				count = std::min(count + 1, history.size());
+				lastTick = a_latest.tick;
+				// the clocks' offset: the smallest seen lately (least delivery delay)
+				const std::int64_t offset = localUs - std::int64_t(a_latest.time_us);
+				const auto tickNow = ::GetTickCount64();
+				if (count == 1 || offset < offsetUs || tickNow - offsetSince > 2000) {
+					offsetUs = offset;
+					offsetSince = tickNow;
+				}
+			}
+			if (count < 2) {
+				return a_latest;
+			}
+			// Halo's time to draw, as an age before the newest state (wrap-safe)
+			const std::uint32_t target = std::uint32_t(localUs - offsetUs - kDelayUs);
+			const auto ageOf = [&](std::uint32_t a_time) { return std::int32_t(history[head].timeUs - a_time); };
+			const std::int32_t targetAge = ageOf(target);
+			if (targetAge <= 0) {
+				return a_latest;  // nothing newer to draw toward
+			}
+			for (std::size_t k = 0; k + 1 < count; ++k) {
+				const auto& newer = history[(head + history.size() - k) % history.size()];
+				const auto& older = history[(head + history.size() - k - 1) % history.size()];
+				const std::int32_t newerAge = ageOf(newer.timeUs), olderAge = ageOf(older.timeUs);
+				if (olderAge >= targetAge && newerAge <= targetAge) {
+					const float span = float(olderAge - newerAge);
+					const float t = span > 0.0f ? float(olderAge - targetAge) / span : 1.0f;
+					const float dx = newer.position.x - older.position.x, dy = newer.position.y - older.position.y,
+								dz = newer.position.z - older.position.z;
+					if (dx * dx + dy * dy + dz * dz > kCutUnits * kCutUnits) {
+						return a_latest;
+					}
+					cr_player_state result = a_latest;
+					const auto lerp = [t](const cr_vec3& a, const cr_vec3& b) {
+						return cr_vec3{ a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t };
+					};
+					result.position = lerp(older.position, newer.position);
+					result.eye = lerp(older.eye, newer.eye);
+					return result;
+				}
+			}
+			return a_latest;  // older than we keep: as it stands
+		}
+
 		// Per frame: did the player move evenly? Frames given no new state,
 		// frames that stalled or lurched against the recent speed, slow
 		// frames, and Skyrim's controller thinking it's in the air.
@@ -300,8 +371,9 @@ namespace chiefrim::Puppet
 				s.loggedStale = true;
 			}
 
-			const RE::NiPoint3 position{ a_state.position.x, a_state.position.y, a_state.position.z };
-			Measure(a_player, a_state, position);
+			const cr_player_state shown = Interpolated(a_state);
+			const RE::NiPoint3 position{ shown.position.x, shown.position.y, shown.position.z };
+			Measure(a_player, shown, position);
 			a_player->SetPosition(position, true);
 			a_player->data.angle.z = a_state.yaw;
 			a_player->data.angle.x = a_state.pitch;
@@ -309,9 +381,14 @@ namespace chiefrim::Puppet
 				// Halo moves the player: no momentum or fall damage of Skyrim's own.
 				controller->SetLinearVelocityImpl(RE::hkVector4(0.0f, 0.0f, 0.0f, 0.0f));
 				controller->fallStartHeight = position.z;
+				// on the ground when Chief is: placed every frame, Skyrim's
+				// controller otherwise counts itself in the air all along
+				if (shown.on_ground) {
+					controller->context.currentState = RE::hkpCharacterStateType::kOnGround;
+				}
 			}
 			s.lastPuppetPosition = position;
-			Camera::Drive(a_player, a_state);
+			Camera::Drive(a_player, shown);
 		}
 
 		void PerFrame(RE::PlayerCharacter* a_player)

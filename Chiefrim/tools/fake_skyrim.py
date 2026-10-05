@@ -442,7 +442,7 @@ def main():
             if now - last_print >= (PRINT_EVERY if options.drive else 0.5):
                 seq, payload = link.slot_read(SLOT_PLAYER, 88)
                 if payload and seq != last_seq:
-                    v = struct.unpack("<II3f2fI3f3f3f3f2I", payload)
+                    v = struct.unpack("<II3f2fI3f3f3f3f2I", payload)  # ..., time_us, reserved
                     tick, pose, px, py, pz, yaw, pitch, on_ground = v[0:8]
                     if on_ground:
                         last_position = (px, py, pz, yaw)

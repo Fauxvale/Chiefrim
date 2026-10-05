@@ -166,6 +166,13 @@ collision code.
     port draws Halo's frames, the published position and eye are a tick behind, blended between
     the last two ticks by `game_time_get_tick_fraction()`; a jump over 100 units cuts; view
     directions stay the latest;
+  - and on Skyrim's side: Halo stamps each state with its clock (`time_us`), the plugin keeps the
+    last 16 and draws the player where Chief was 25 ms ago, between the two states about then
+    (Skyrim draws unevenly against Halo's frames, 31-48 fps against 75 in the eighteenth test:
+    taking the latest state, the player stalled and lurched). Small bounces (under 30 units, while
+    on the ground or only just off it: Halo's biped leaves the ground for a tick on small rises)
+    are smoothed out of what Skyrim is sent with a 60 ms lag; Skyrim's controller is told it's on
+    the ground when Chief is (placed every frame, it counted itself in the air all along);
   - Halo never evicts every region it holds: that means Chief isn't where Skyrim's player is yet
     (at the level's spawn point before being placed), and Skyrim sends a region only once while its
     player stays near it (this was the fake-Skyrim test's startup flake, and could leave Chief

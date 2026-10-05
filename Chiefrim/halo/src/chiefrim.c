@@ -44,6 +44,13 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "units/unit_definitions.h"
 
 #include <math.h>
+#ifdef __linux__
+#include <pthread.h> /* struct timespec, which -D__STRICT_ANSI__ hides from time.h */
+#endif
+#include <time.h>
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1 /* Linux's; the build's -D__STRICT_ANSI__ hides it */
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,6 +64,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 
 #define CHIEFRIM_MINIMUM_RADIUS   0.13f /* world units (~28 Skyrim units) */
 #define CHIEFRIM_STEP_UNITS       48.0f /* Skyrim units: the step assist's highest ledge (a boardwalk's edge) */
+#define CHIEFRIM_BOUNCE_UNITS     30.0f /* Skyrim units: bumps smoothed for Skyrim; more is followed at once */
 #define CHIEFRIM_UNDER_LAND       0.15f /* world units (~32 Skyrim units) under the land: he's not where he belongs */
 #define CHIEFRIM_SMOOTH_CUT_UNITS 100.0f /* Skyrim units between ticks: further is a cut, not a glide */
 #define CHIEFRIM_SAFE_SPOTS       16
@@ -432,6 +440,43 @@ static void chiefrim_smooth_state(cr_player_state *state)
 	state->eye.z = smooth.eye[0].z + (smooth.eye[1].z - smooth.eye[0].z) * t;
 }
 
+static uint32_t chiefrim_now_us(void)
+{
+#ifdef __linux__
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint32_t)((uint64_t)now.tv_sec * 1000000u + (uint64_t)now.tv_nsec / 1000u);
+#else
+	return chiefrim_now_ms() * 1000u;
+#endif
+}
+
+/* On Skyrim's bumpy meshes Halo's biped leaves the ground for a tick or
+two on small rises (it counts as supported only on ticks it touches a
+walkable surface) and drops back: shown as it is, Chief bounced along. What
+Skyrim is sent rides over bumps under ~30 units with a 60 ms lag while he is
+on the ground or only just off it; a real jump or fall (airborne longer)
+and anything bigger is followed at once. */
+static void chiefrim_settle_bounces(cr_player_state *state)
+{
+	static boolean valid = FALSE;
+	static real z;
+	static uint32_t last_us;
+	uint32_t now = chiefrim_now_us();
+	real dz = state->position.z - z, dt = (real)(now - last_us) / 1000000.f;
+	boolean brief = state->on_ground || chiefrim_now_ms() - chiefrim.airborne_since_ms < 200;
+
+	if (!valid || !brief || fabsf(dz) > CHIEFRIM_BOUNCE_UNITS || dt > 0.25f)
+		z = state->position.z;
+	else
+		z += dz * (1.f - expf(-dt / 0.06f));
+	valid = TRUE;
+	last_us = now;
+	state->eye.z += z - state->position.z;
+	state->position.z = z;
+}
+
 static void chiefrim_publish_player(void)
 {
 	long unit_index = chiefrim_local_unit();
@@ -562,6 +607,8 @@ static void chiefrim_publish_player(void)
 	}
 
 	chiefrim_smooth_state(&state);
+	chiefrim_settle_bounces(&state);
+	state.time_us = chiefrim_now_us();
 	CR_SLOT_WRITE(&chiefrim.shm->player_state, state);
 }
 

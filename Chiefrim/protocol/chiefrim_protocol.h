@@ -139,7 +139,9 @@ typedef struct cr_player_state
 	float    vertical_fov;  /* radians */
 	float    body_fraction;   /* 0..1 */
 	float    shield_fraction; /* 0..1 */
-	uint32_t reserved[2];
+	uint32_t time_us;       /* Halo's clock when this state was taken (microseconds, wraps):
+	                           Skyrim draws the player a moment behind, between states */
+	uint32_t reserved;
 } cr_player_state;
 
 #define CR_POSE_STANDING  0u
