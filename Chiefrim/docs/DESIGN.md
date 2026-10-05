@@ -232,7 +232,9 @@ only raw keys are Chiefrim's own two hotkeys.
   shout, attack/block and toggle POV. They're switched back on when the link closes. Activate
   and Sneak stay on.
 - Menus open, dialogue, loading screens, console: routing is `Skyrim`, Halo gets neutral input,
-  and Skyrim gets everything as usual.
+  and Skyrim gets everything as usual. The plugin publishes neutral input the moment any menu
+  opens (PlayerCharacter::Update doesn't run while Skyrim is paused), and Halo treats input older
+  than 150 ms as none, so Chief never keeps walking on a stale key.
 
 ### Default mapping (`Chiefrim.ini`, `[Controls]`)
 
@@ -438,7 +440,7 @@ Each phase ends in something you can play.
 | # | Phase | "Done" when |
 |---|---|---|
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
-| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **built 2026-10-04, in-game test pending**), CameraDriver, CollisionField stage A through the runtime BSP compiler (§5.2). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
+| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver, CollisionField stage A through the runtime BSP compiler (§5.2). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |

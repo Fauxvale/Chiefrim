@@ -16,6 +16,10 @@ namespace chiefrim::Input
 	// and the actions published to Halo.
 	void Publish(RE::PlayerCharacter* a_player);
 
+	// A menu opened: Chief gets no input until Publish runs again in
+	// gameplay (PlayerCharacter::Update doesn't run while Skyrim is paused).
+	void PublishNeutral();
+
 	// The link opened (a new session: look totals restart) or closed
 	// (Skyrim's handlers back on).
 	void OnLinked();

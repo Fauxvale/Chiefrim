@@ -8,10 +8,13 @@ namespace chiefrim::Puppet
 {
 	namespace
 	{
-		// Further than this between where we last put the player and where
-		// Skyrim has him now, Skyrim moved him itself (fast travel, a script,
-		// coc): tell Halo instead of pulling him back.
-		constexpr float kSkyrimMovedDistance = 256.0f;
+		// Skyrim moved the player itself (fast travel, a door, a script, coc)
+		// when a loading screen closes, the world changes, or he is further
+		// than this, horizontally, from where we last put him: then Halo is
+		// told instead of pulling him back. Vertical pops don't count: until
+		// Halo collides with Skyrim's real ground (Phase 1), Skyrim lifts a
+		// player we put under a slope back onto it.
+		constexpr float kSkyrimMovedDistance = 1024.0f;
 
 		struct State
 		{
@@ -24,6 +27,7 @@ namespace chiefrim::Puppet
 			bool haveTick{ false };
 			ULONGLONG lastTickChange{ 0 };
 			bool loggedStale{ false };
+			bool loadingScreenClosed{ false };
 		} s;
 
 		bool GameplayIsRunning()
@@ -133,12 +137,17 @@ namespace chiefrim::Puppet
 
 			const auto position = a_player->GetPosition();
 			const bool worldChanged = !s.worldSent || id != s.worldId || interior != s.interior;
-			const bool skyrimMoved = s.lastPuppetPosition &&
-				s.lastPuppetPosition->GetDistance(position) > kSkyrimMovedDistance;
-			if (skyrimMoved && !worldChanged) {
+			const auto horizontal = [](const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) {
+				return std::hypot(a_a.x - a_b.x, a_a.y - a_b.y);
+			};
+			const bool loaded = std::exchange(s.loadingScreenClosed, false);
+			const bool skyrimMoved = loaded ||
+				(s.lastPuppetPosition && horizontal(*s.lastPuppetPosition, position) > kSkyrimMovedDistance);
+			if (skyrimMoved && !worldChanged && s.lastPuppetPosition) {
 				const auto& from = *s.lastPuppetPosition;
-				logger::info("Skyrim moved the player {:.0f} units by itself, from ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f})",
-					from.GetDistance(position), from.x, from.y, from.z, position.x, position.y, position.z);
+				logger::info("Skyrim moved the player{} {:.0f} units by itself, from ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f})",
+					loaded ? " (loading screen)" : "", from.GetDistance(position),
+					from.x, from.y, from.z, position.x, position.y, position.z);
 			}
 			if (worldChanged || skyrimMoved) {
 				SendWorld(a_player, id, interior);
@@ -165,8 +174,32 @@ namespace chiefrim::Puppet
 		};
 	}
 
+	namespace
+	{
+		class LoadingSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		{
+		public:
+			static LoadingSink* Get()
+			{
+				static LoadingSink sink;
+				return &sink;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+			{
+				if (a_event && !a_event->opening && a_event->menuName == RE::LoadingMenu::MENU_NAME) {
+					s.loadingScreenClosed = true;
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+	}
+
 	void Install()
 	{
+		if (auto* ui = RE::UI::GetSingleton()) {
+			ui->AddEventSink<RE::MenuOpenCloseEvent>(LoadingSink::Get());
+		}
 		REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_PlayerCharacter[0] };
 		PlayerUpdateHook::func = vtable.write_vfunc(0xAD, PlayerUpdateHook::thunk);
 		logger::info("hooked PlayerCharacter::Update");

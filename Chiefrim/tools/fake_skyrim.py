@@ -43,7 +43,8 @@ INPUT_FORMAT = "<IIII16Bffdd"  # cr_input (protocol v2)
 
 # (start s, end s, what): the --drive script, after a 2 s settle
 DRIVE = [(2, 4, "forward"), (4, 6, "strafe right"), (6, 8, "turn right"),
-         (8, 8.1, "jump"), (10, 12, "crouch"), (12, 13, "stop")]
+         (8, 8.1, "jump"), (10, 12, "crouch"), (12, 13, "forward"),
+         (13, 15, "stall"), (15, 16, "stop")]
 
 
 def drive_input(t, frame, presses, state):
@@ -208,8 +209,14 @@ def main():
             if not quiet:
                 link.set_u32(SKYRIM_HEARTBEAT, int(time.monotonic() * 1000))
             if options.drive:
-                frame += 1
-                link.slot_write(SLOT_INPUT, drive_input(time.monotonic() - started, frame, presses, drive_state))
+                t = time.monotonic() - started
+                stalled = any(start <= t < end and what == "stall" for start, end, what in DRIVE)
+                if stalled and drive_state.get("phase") != "stall":
+                    print("fake_skyrim: drive: stall (input stops, forward was held; Chief should stop)", flush=True)
+                    drive_state["phase"] = "stall"
+                if not stalled:  # a stalled Skyrim publishes nothing, heartbeat or not
+                    frame += 1
+                    link.slot_write(SLOT_INPUT, drive_input(t, frame, presses, drive_state))
             while (message := link.pop(RING_TO_SKYRIM)) is not None:
                 msg_type, body = message
                 if msg_type == MSG_HELLO:

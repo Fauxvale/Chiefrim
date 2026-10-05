@@ -9,6 +9,8 @@
 
 namespace chiefrim::Input
 {
+	void PublishNeutral();
+
 	namespace
 	{
 		// ---- configuration (Chiefrim.ini, next to the DLL)
@@ -410,7 +412,12 @@ namespace chiefrim::Input
 
 			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 			{
-				if (a_event && !a_event->opening && a_event->menuName == RE::JournalMenu::MENU_NAME && Link::Get().Connected()) {
+				if (!a_event || !Link::Get().Connected()) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				if (a_event->opening) {
+					PublishNeutral();
+				} else if (a_event->menuName == RE::JournalMenu::MENU_NAME) {
 					logger::info("Journal menu closed; Chief's controls now:");
 					LogBindings();
 				}
@@ -429,6 +436,18 @@ namespace chiefrim::Input
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuSink::Get());
 		}
 		logger::info("input bridge installed (Skyrim user events -> Chief)");
+	}
+
+	void PublishNeutral()
+	{
+		cr_input input{};
+		input.frame = ++s.frame;
+		input.session = s.session;
+		input.routing = CR_ROUTE_SKYRIM;
+		std::memcpy(input.presses, s.presses.data(), sizeof(input.presses));
+		input.yaw_total = s.yawTotal;
+		input.pitch_total = s.pitchTotal;
+		Link::Get().SendInput(input);
 	}
 
 	void OnLinked()

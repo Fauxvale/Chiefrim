@@ -25,6 +25,7 @@ carries a press counter per action.
 #include "chiefrim/chiefrim.h"
 #include "chiefrim/chiefrim_protocol.h"
 
+#include "cseries/cseries_windows.h"
 #include "halo_keyboard.h"
 
 /* ---------- globals */
@@ -37,7 +38,14 @@ static struct
 	double yaw_total;
 	double pitch_total;
 	boolean look_valid;
+	uint32_t last_frame;
+	unsigned long last_frame_change;
 } chiefrim_input;
+
+/* Skyrim publishes its input once a frame. Older than this, it stopped
+(a menu, a loading screen, a stall): Chief gets none rather than the last
+held keys. */
+#define CHIEFRIM_INPUT_STALE_MS 150
 
 /* ---------- private code */
 
@@ -50,6 +58,19 @@ static boolean chiefrim_input_read(short controller_index, cr_input *input)
 		return FALSE;
 	if (!CR_SLOT_READ(&shm->input, input))
 		return FALSE;
+	{
+		unsigned long now = system_milliseconds();
+
+		if (input->frame != chiefrim_input.last_frame)
+		{
+			chiefrim_input.last_frame = input->frame;
+			chiefrim_input.last_frame_change = now;
+		}
+		else if (now - chiefrim_input.last_frame_change > CHIEFRIM_INPUT_STALE_MS)
+		{
+			return FALSE;
+		}
+	}
 	return input->routing == CR_ROUTE_HALO;
 }
 
