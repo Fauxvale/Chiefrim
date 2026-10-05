@@ -41,6 +41,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "structures/structure_bsp_definitions.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#include "units/unit_definitions.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -90,6 +91,7 @@ static struct
 	boolean placement_pending;    /* move Chief once a unit exists */
 	boolean level_cleared;        /* the level's actors are gone */
 	boolean publishing;           /* the player state is going out */
+	real base_field_of_view;      /* Chief's unit's unzoomed camera FOV (radians) */
 	cr_vec3 placement_position;   /* Skyrim units */
 	float placement_heading;
 	uint32_t ticks;
@@ -353,9 +355,9 @@ static void chiefrim_apply_world(void)
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
 	chiefrim.world_valid = TRUE;
-	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f",
+	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f",
 		world.world_id, world.is_interior ? " (interior)" : "",
-		world.origin.x, world.origin.y, world.origin.z, world.floor_z);
+		world.origin.x, world.origin.y, world.origin.z, world.floor_z, world.field_of_view);
 
 	if (floor_moved && global_scenario_try_and_get())
 		chiefrim_install_floor();
@@ -457,6 +459,12 @@ static void chiefrim_publish_player(void)
 	halo.y = origin.y;
 	halo.z = origin.z;
 	state.position = cr_halo_to_sky(halo, chiefrim.world.origin);
+
+	{
+		struct unit_definition const *definition = unit_definition_get(unit_get(unit_index)->definition_index);
+
+		chiefrim.base_field_of_view = definition->unit.camera_field_of_view;
+	}
 
 	unit_get_aiming_vector(unit_index, &aim);
 	state.yaw = cr_halo_yaw_to_sky_heading(atan2f(aim.j, aim.i));
@@ -573,6 +581,20 @@ static void chiefrim_debug_collision(void)
 }
 
 /* ---------- public code */
+
+real chiefrim_field_of_view_tangent_scale(void)
+{
+	real base = chiefrim.base_field_of_view > 0.01f ? chiefrim.base_field_of_view : DEGREES_TO_RADIANS(70.f);
+
+	if (!chiefrim.active || !chiefrim.world_valid ||
+		chiefrim.world.field_of_view < 10.0f || chiefrim.world.field_of_view > 170.0f)
+	{
+		return 0.0f;
+	}
+	/* Skyrim's angle is horizontal for 4:3, as Halo's tangent is: the
+	unzoomed view gets exactly it, and zoom keeps Halo's magnification. */
+	return tangent(DEGREES_TO_RADIANS(chiefrim.world.field_of_view) * 0.5f) / tangent(base * 0.5f);
+}
 
 struct cr_shared *chiefrim_shared(void)
 {

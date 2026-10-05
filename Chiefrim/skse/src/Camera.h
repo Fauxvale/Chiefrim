@@ -15,6 +15,10 @@ namespace chiefrim::Camera
 	// Each frame while Chief drives the player: the view to show.
 	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state);
 
+	// Chief's unzoomed field of view for Halo ([Camera] fFieldOfView, degrees,
+	// horizontal for 4:3 as Skyrim measures it; 0 = Halo's own).
+	float FieldOfView();
+
 	// The link closed: Skyrim's own camera, FOV and arms back.
 	void Release(RE::PlayerCharacter* a_player);
 }

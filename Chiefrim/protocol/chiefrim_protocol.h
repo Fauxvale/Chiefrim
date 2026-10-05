@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 2u
+#define CR_PROTOCOL_VERSION 3u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -82,7 +82,9 @@ typedef struct cr_world_context
 	cr_vec3  origin;        /* Skyrim units; Halo (0,0,0) is here */
 	float    floor_z;       /* Phase 0: Skyrim Z of the temporary flat floor */
 	uint32_t generation;    /* bumps when the origin moves (load door etc.) */
-	uint32_t reserved[3];
+	float    field_of_view; /* Chief's unzoomed view, degrees, horizontal for 4:3 as
+	                           Skyrim measures it; zoom narrows it as in Halo. 0: Halo's own */
+	uint32_t reserved[2];
 } cr_world_context;
 
 /* Skyrim -> Halo. Chief's controls (docs §7). Skyrim's ControlMap has already

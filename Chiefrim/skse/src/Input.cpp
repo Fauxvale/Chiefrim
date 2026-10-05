@@ -27,8 +27,8 @@ namespace chiefrim::Input
 		// Skyrim's sneak state. Switch grenade and flashlight are hotkeys.
 		constexpr std::array kBindings{
 			ActionBinding{ CR_ACTION_JUMP, L"sJump", "Jump" },
-			ActionBinding{ CR_ACTION_FIRE, L"sFire", "Right Attack/Block" },
-			ActionBinding{ CR_ACTION_ZOOM, L"sZoom", "Left Attack/Block" },
+			ActionBinding{ CR_ACTION_FIRE, L"sFire", "Left Attack/Block" },    // left mouse button
+			ActionBinding{ CR_ACTION_ZOOM, L"sZoom", "Right Attack/Block" },   // right mouse button
 			ActionBinding{ CR_ACTION_RELOAD, L"sReload", "Ready Weapon" },
 			ActionBinding{ CR_ACTION_GRENADE, L"sThrowGrenade", "Shout" },
 			ActionBinding{ CR_ACTION_MELEE, L"sMelee", "Toggle POV" },

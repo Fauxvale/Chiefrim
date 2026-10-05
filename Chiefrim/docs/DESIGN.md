@@ -203,10 +203,12 @@ definition comes from that map. Chiefrim loads one **host map**.
      Chief's view direction, once a 3-second check has confirmed which columns of Skyrim's
      camera-root matrix are forward, up and right (until then Skyrim turns it, from the player's
      angles, which already follow Chief);
-   - FOV: Halo's observer FOV is horizontal for 4:3 and projected with 0.85 of its tangent, so
-     Halo publishes the vertical angle it really renders with (48.1° by default), and Skyrim's
-     setting becomes the horizontal 4:3 equivalent (61.5°). It follows Halo's zoom.
-     `[Camera] bUseHaloFov=0` keeps the player's own Skyrim FOV;
+   - FOV: Halo's observer FOV is horizontal for 4:3 and projected with 0.85 of its tangent (Halo's
+     own view is 61.5° as Skyrim measures FOV). `[Camera] fFieldOfView` (default 95) replaces that
+     0.85 with tan(95°/2) / tan(base/2), base being Chief's unzoomed camera FOV from his biped tag,
+     so his unzoomed view is 95° and zoom keeps Halo's magnification. Halo publishes the vertical
+     angle it renders with, and Skyrim's setting follows it. `bUseHaloFov=0` keeps the player's own
+     Skyrim FOV;
    - Skyrim's first-person arm and weapon meshes are hidden (only meshes, never nodes), and
      re-checked about once a second for newly equipped ones.
 
@@ -254,8 +256,8 @@ only raw keys are Chiefrim's own two hotkeys.
 | Look | Look (mouse, right stick) | Skyrim's sensitivity and invert-Y |
 | Jump | Jump (Space) | |
 | Crouch | *Skyrim's sneak state* (Sneak, Ctrl) | Stealth keeps working |
-| Fire | Right Attack/Block (LMB) | |
-| Zoom | Left Attack/Block (RMB) | |
+| Fire | Left Attack/Block (left mouse button) | |
+| Zoom | Right Attack/Block (right mouse button) | |
 | Reload | Ready Weapon (R) | |
 | Throw grenade | Shout (Z) | |
 | Melee | Toggle POV (F) | |

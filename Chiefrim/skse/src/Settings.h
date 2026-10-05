@@ -17,6 +17,13 @@ namespace chiefrim::Settings
 		return result.substr(0, result.find_last_of(L"\\/") + 1) + L"Chiefrim.ini";
 	}
 
+	inline float ReadFloat(const wchar_t* a_section, const wchar_t* a_key, float a_default)
+	{
+		wchar_t value[64]{};
+		::GetPrivateProfileStringW(a_section, a_key, L"", value, 64, IniPath().c_str());
+		return value[0] ? std::wcstof(value, nullptr) : a_default;
+	}
+
 	inline bool ReadBool(const wchar_t* a_section, const wchar_t* a_key, bool a_default)
 	{
 		return ::GetPrivateProfileIntW(a_section, a_key, a_default ? 1 : 0, IniPath().c_str()) != 0;

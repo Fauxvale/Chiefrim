@@ -130,6 +130,29 @@ index e35691e1..a1b87c1a 100644
  					collision_log_end_period();
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
+diff --git a/source/render/render_cameras.c b/source/render/render_cameras.c
+index bcd26cd0..176277d3 100644
+--- a/source/render/render_cameras.c
++++ b/source/render/render_cameras.c
+@@ -137,6 +137,7 @@ symbols in this file:
+ #include "render/render_cameras_internal.h"
+ #include "render/render_debug.h"
+ #include "structures/structure_visibility.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -298,7 +299,9 @@ void render_camera_screen_to_view(
+ real render_camera_get_adjusted_field_of_view_tangent(
+ 	real field_of_view)
+ {
+-	return tangent(field_of_view * 0.5f) * 0.85f;
++	real chiefrim_scale = chiefrim_field_of_view_tangent_scale(); /* CHIEFRIM: Chief's FOV from Skyrim */
++
++	return tangent(field_of_view * 0.5f) * (chiefrim_scale > 0.f ? chiefrim_scale : 0.85f);
+ }
+ 
+ boolean render_camera_world_to_screen(
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index 265149a3..c3387cee 100644
 --- a/source/scenario/scenario.c

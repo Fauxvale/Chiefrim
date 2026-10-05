@@ -30,6 +30,7 @@ namespace chiefrim::Camera
 			bool               axesRejected{ false };
 			// Skyrim's own settings while Chief drives
 			bool  useHaloFov{ true };   // [Camera] bUseHaloFov
+			float fieldOfView{ 95.0f }; // [Camera] fFieldOfView
 			bool  fovSaved{ false };
 			float savedWorldFov{ 0.0f };
 			std::vector<RE::NiPointer<RE::BSGeometry>> hiddenArms;
@@ -238,11 +239,12 @@ namespace chiefrim::Camera
 		}
 
 		s.useHaloFov = Settings::ReadBool(L"Camera", L"bUseHaloFov", true);
+		s.fieldOfView = Settings::ReadFloat(L"Camera", L"fFieldOfView", 95.0f);
 
 		REL::Relocation<std::uintptr_t> firstPerson{ RE::VTABLE_FirstPersonState[0] };
 		FirstPersonTranslationHook::func = firstPerson.write_vfunc(0x5, FirstPersonTranslationHook::thunk);
 		logger::info("camera hooks installed (PlayerCamera::Update at {} call site(s), first-person translation); FOV: {}",
-			sites.size(), s.useHaloFov ? "Halo's" : "Skyrim's own");
+			sites.size(), s.useHaloFov ? std::format("Chief's, {:.0f} unzoomed", s.fieldOfView) : std::string("Skyrim's own"));
 	}
 
 	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state)
@@ -277,6 +279,11 @@ namespace chiefrim::Camera
 		if (s.hiddenArms.empty() || ++frames % 60 == 0) {
 			HideArms(a_player, true);
 		}
+	}
+
+	float FieldOfView()
+	{
+		return s.fieldOfView;
 	}
 
 	void Release(RE::PlayerCharacter* a_player)

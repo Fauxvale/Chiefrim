@@ -66,6 +66,7 @@ namespace chiefrim::Puppet
 			context.origin = { position.x, position.y, position.z };
 			context.floor_z = position.z;
 			context.generation = ++s.generation;
+			context.field_of_view = Camera::FieldOfView();
 
 			auto& link = Link::Get();
 			link.SendWorldContext(context);

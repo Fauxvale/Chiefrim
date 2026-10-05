@@ -24,7 +24,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 2
+VERSION = 3
 RING_BYTES = 256 * 1024
 TOTAL_SIZE = 272 + 2 * (128 + RING_BYTES)
 
@@ -149,6 +149,7 @@ def main():
     parser.add_argument("--y", type=float, default=-7400.0)
     parser.add_argument("--z", type=float, default=-3650.0)
     parser.add_argument("--heading", type=float, default=0.0, help="degrees, 0 = north")
+    parser.add_argument("--fov", type=float, default=95.0, help="Chief's field of view, as Skyrim measures it (0: Halo's own)")
     parser.add_argument("--silence-at", type=float, default=0.0,
                         help="seconds in: stop the heartbeat, as a Skyrim that hangs (0: never)")
     parser.add_argument("--silence-for", type=float, default=5.0)
@@ -186,9 +187,9 @@ def main():
     link.set_u32(SKYRIM_STATE, SIDE_READY)
     link.push(RING_TO_HALO, MSG_HELLO,
         struct.pack("<II48s", VERSION, os.getpid(), b"fake_skyrim.py"))
-    # cr_world_context: world_id, is_interior, origin, floor_z, generation, reserved[3]
-    link.slot_write(SLOT_WORLD, struct.pack("<II3ffI3I",
-        TAMRIEL, 0, options.x, options.y, options.z, options.z, 1, 0, 0, 0))
+    # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, reserved[2]
+    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIf2I",
+        TAMRIEL, 0, options.x, options.y, options.z, options.z, 1, options.fov, 0, 0))
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, options.z, math.radians(options.heading)))
 

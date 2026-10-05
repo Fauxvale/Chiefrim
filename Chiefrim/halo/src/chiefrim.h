@@ -27,6 +27,10 @@ void chiefrim_frame(void);
 /* at exit (registered by chiefrim_initialize) */
 void chiefrim_dispose(void);
 
+/* render_cameras.c: the projection's tangent scale for Chief's field of view
+from Skyrim (docs §6), instead of Halo's 0.85; 0 when Halo's own applies. */
+real chiefrim_field_of_view_tangent_scale(void);
+
 /* The link, for the other Chiefrim files: NULL when Chiefrim mode is off. */
 struct cr_shared *chiefrim_shared(void);
 /* Skyrim has said hello and keeps its heartbeat. */
