@@ -265,6 +265,8 @@ def main():
                         help="with --terrain: a slab this many units high across the way north, like a road piece (the step assist)")
     parser.add_argument("--hole", action="store_true",
                         help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
+    parser.add_argument("--radius", type=float, default=0.0,
+                        help="Chief's collision radius in Skyrim units, as the plugin sends it (0: Halo's own)")
     parser.add_argument("--height", type=float, default=128.0,
                         help="Chief's height in Skyrim units, as the plugin sends it (0: Halo's own)")
     options = parser.parse_args()
@@ -301,8 +303,8 @@ def main():
         struct.pack("<II48s", VERSION, os.getpid(), b"fake_skyrim.py"))
     # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, chief_height, reserved
     start_z = options.z - options.start_below
-    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIffI",
-        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, 0))
+    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfff",
+        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius))
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, start_z, math.radians(options.heading)))
     if options.terrain:
@@ -353,8 +355,8 @@ def main():
                 px, py, pz, yaw = last_position
                 generation += 1
                 epoch += 1
-                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIffI",
-                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, 0))
+                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfff",
+                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius))
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
                 print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 if options.terrain:

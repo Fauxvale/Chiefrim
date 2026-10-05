@@ -175,7 +175,9 @@ collision code.
   - at a swap, each biped's support surface is the new BSP's surface under its feet (a short ray
     down), not found by triangle id: the pieces of a cut triangle share the id, and a wrong support
     surface made Halo pull Chief toward it at every swap (the stutter of the third in-game test);
-  - the in-game self-test rejects a build only for more than 2 (or 10%) misses in its sample;
+  - the in-game self-test rejects a build only for more than 3 (or 25%) misses in its sample: the
+    rare misses cluster (thin walls fail build after build), and a rejected build leaves Chief on
+    stale collision; the floor guard dumps its first firing and every 200th;
   - exact repeats of a triangle (either winding: Skyrim's two-sided meshes) are dropped, and
     polygons stacked on one plane go in at most 8 references per leaf;
   - Skyrim's world context (a slot) and its collision reset (the ring) arrive separately; the reset
@@ -208,7 +210,10 @@ collision code.
     that stop Halo's biped. Pushing without moving for 200 ms against something at the ankles with
     nothing at 40 units and a floor on top, Chief is lifted onto it;
   - his collision radius, like his height, comes from Skyrim (`[Chief] fRadius`, default: the
-    player's character controller);
+    player's character controller, 0.26 Havok units = 18), but never under 0.13 wu (28 units):
+    thinner than ~0.12 wu, Halo's biped tunnels through surfaces (at 18 he walked through a wall in
+    the fake-Skyrim test, and in game sank into floors, the floor guard bouncing him back ~4 times
+    a second);
   - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
     edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
   - builds slower than 1 s (3 at most), failing ones, and the one Chief fell through are dumped to

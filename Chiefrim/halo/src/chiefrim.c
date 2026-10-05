@@ -54,6 +54,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 
 /* ---------- globals */
 
+#define CHIEFRIM_MINIMUM_RADIUS   0.13f /* world units (~28 Skyrim units) */
 #define CHIEFRIM_STEP_UNITS       40.0f /* Skyrim units: the step assist's highest ledge */
 #define CHIEFRIM_SAFE_SPOTS       16
 #define CHIEFRIM_RETURN_RETRY_MS  5000 /* back again this soon: the spot was no good */
@@ -296,7 +297,10 @@ static void chiefrim_apply_chief_height(long unit_index)
 	target = PIN(target, 0.2f, 1.0f); /* a hobbit to an ogre, in world units */
 	scale = target / original[0];
 	radius = chiefrim.world.chief_radius > 1.0f ? chiefrim.world.chief_radius / CR_SKY_UNITS_PER_WU : original[4];
-	radius = PIN(radius, 0.05f, target * 0.45f);
+	/* thinner than ~0.12 wu (25 Skyrim units), Halo's biped tunnels
+	through surfaces: at 18 (Skyrim's own) he walked through walls and sank
+	into floors. CHIEFRIM_MINIMUM_RADIUS keeps a margin. */
+	radius = PIN(radius, CHIEFRIM_MINIMUM_RADIUS, MAX(target * 0.45f, CHIEFRIM_MINIMUM_RADIUS));
 	if (fabsf(definition->biped.collision_height_standing - original[0] * scale) < 0.0001f &&
 		fabsf(definition->biped.collision_radius - radius) < 0.0001f)
 	{
@@ -758,6 +762,8 @@ void chiefrim_frame(void)
 
 			back.z += 0.01f;
 			chiefrim_move_chief(unit_index, &back, TRUE);
+			if (chiefrim.floor_guard_count % 200 == 0)
+				chiefrim_world_dump_installed("floor guard");
 			if (chiefrim.floor_guard_count++ % 50 == 0)
 			{
 				error(_error_silent, "chiefrim: Halo pushed Chief down through a floor at (%.2f, %.2f, %.2f) wu; put him back (%ld times)",
