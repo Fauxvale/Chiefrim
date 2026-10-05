@@ -279,6 +279,31 @@ static void probe_below(struct chiefrim_bsp *bsp, real_point3d const *chief)
 	else
 		put("; down from PROBE_Z (or 2 above him): nothing");
 	put("\n");
+	/* PROBE_GRID=half,step (x1000 wu): rays straight down from PROBE_Z over a
+	grid around him; prints the hit heights (x1000), '-' for none */
+	if (getenv("PROBE_GRID") && getenv("PROBE_Z"))
+	{
+		long half = 0, step = 1, gx, gy;
+
+		sscanf(getenv("PROBE_GRID"), "%ld,%ld", &half, &step);
+		for (gy = half; gy >= -half; gy -= step)
+		{
+			for (gx = -half; gx <= half; gx += step)
+			{
+				real_point3d from = { chief->x + gx / 1000.f, chief->y + gy / 1000.f, atol(getenv("PROBE_Z")) / 1000.f };
+				real_vector3d drop = { 0.f, 0.f, -3.f };
+
+				if (collision_bsp_test_vector(1, &bsp->bsp, 0, NULL, &from, &drop, REAL_MAX, &result))
+				{
+					put(" ");
+					put_long((long)((from.z + drop.k * result.t) * 1000));
+				}
+				else
+					put("     -");
+			}
+			put("\n");
+		}
+	}
 	/* PROBE_SPHERE=r (x1000 wu): Halo's sphere query at his xy, centred at PROBE_Z + r */
 	if (getenv("PROBE_SPHERE") && getenv("PROBE_Z"))
 	{

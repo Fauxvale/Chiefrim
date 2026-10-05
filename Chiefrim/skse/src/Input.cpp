@@ -351,6 +351,34 @@ namespace chiefrim::Input
 				a_chiefHasThem ? "off: Chief has them" : "back on");
 		}
 
+		// Skyrim's controls kept something of their state while Chief had
+		// them (after unlinking, the player walked but couldn't jump or
+		// sprint, until the game was paused and unpaused): play them what
+		// pausing does, the journal menu opening and closing.
+		void ResetPlayerControls()
+		{
+			auto* controls = RE::PlayerControls::GetSingleton();
+			auto* ui = RE::UI::GetSingleton();
+			if (!controls || !ui) {
+				return;
+			}
+			auto* menuSink = static_cast<RE::BSTEventSink<RE::MenuOpenCloseEvent>*>(controls);
+			auto* modeSink = static_cast<RE::BSTEventSink<RE::MenuModeChangeEvent>*>(controls);
+			auto* menuSource = static_cast<RE::BSTEventSource<RE::MenuOpenCloseEvent>*>(ui);
+			auto* modeSource = static_cast<RE::BSTEventSource<RE::MenuModeChangeEvent>*>(ui);
+			for (const bool opening : { true, false }) {
+				RE::MenuOpenCloseEvent menu{};
+				menu.menuName = RE::JournalMenu::MENU_NAME;
+				menu.opening = opening;
+				menuSink->ProcessEvent(&menu, menuSource);
+				RE::MenuModeChangeEvent mode{};
+				mode.menu = RE::JournalMenu::MENU_NAME;
+				mode.mode = opening ? RE::MenuModeChangeEvent::Mode::kDisplayed : RE::MenuModeChangeEvent::Mode::kHidden;
+				modeSink->ProcessEvent(&mode, modeSource);
+			}
+			logger::info("Skyrim's player controls reset (as pausing does)");
+		}
+
 		bool InGameplay()
 		{
 			auto* ui = RE::UI::GetSingleton();
@@ -465,6 +493,7 @@ namespace chiefrim::Input
 		ReleaseAll();
 		s.gameplay = false;
 		SetSkyrimHandlers(false);
+		ResetPlayerControls();
 	}
 
 	void Publish(RE::PlayerCharacter* a_player)
