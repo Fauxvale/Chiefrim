@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Packs the built SKSE plugin as a mod archive for Vortex or MO2:
+# Packs the built SKSE plugin as a mod archive for a mod manager (Amethyst, MO2, Vortex):
 # build/dist/Chiefrim-<version>.zip with SKSE/Plugins/Chiefrim.dll, its
 # license (GPL-3.0-or-later) and the third-party notices.
 # Code only: no game files or assets go in it. A public release must also

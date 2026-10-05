@@ -79,7 +79,7 @@ shipped.
 
 ## Releasing binaries
 
-A binary release (for example the Vortex zip from `tools/package_skse.sh`) must:
+A binary release (for example the mod zip from `tools/package_skse.sh`) must:
 - include `LICENSE` and `THIRD-PARTY-NOTICES.md` (the zip does, as
   `SKSE/Plugins/Chiefrim-LICENSE.txt` and `Chiefrim-THIRD-PARTY-NOTICES.md`);
 - point to the **corresponding source**: this repository at the release's commit, including the

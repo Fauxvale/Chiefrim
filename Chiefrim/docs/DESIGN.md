@@ -52,7 +52,7 @@ spare message types (§10).
 |---|---|---|
 | Host OS | **Linux** (CachyOS) | Skyrim runs under Proton. Halo runs natively. |
 | Skyrim | **SE/AE 1.6.1170**, Steam, Proton Experimental | SKSE64 1.6.1170 and Address Library are installed. SkyCraft used 1.7.104; CommonLibSSE-NG covers both. |
-| Mod manager | Vortex | A heavy mod list (~250 files in `SKSE/Plugins`). No shader or ENB replacer is installed; Community Shaders has been removed. **SSE Display Tweaks** hooks the swap chain (§9, §15) |
+| Mod manager | Amethyst Mod Manager (Linux) | A heavy mod list (~250 files in `SKSE/Plugins`). No shader or ENB replacer is installed; Community Shaders has been removed. **SSE Display Tweaks** hooks the swap chain (§9, §15) |
 | Display | 1920x1080 borderless, VSync on | Set by SSE Display Tweaks (`FramerateLimit = 300`) |
 | SKSE plugin | C++23, CommonLibSSE-NG (git submodule), CMake | **Cross-compiled on Linux** to a Windows x64 DLL: clang-cl + lld-link against the MSVC CRT and Windows SDK fetched by xwin (`tools/setup_skse.sh`). Proved in Phase 0. CommonLib's dependencies come through CMake FetchContent instead of vcpkg (spdlog, rapidcsv, and DirectXTK's SimpleMath only, which avoids its shader compiler). The project path must not contain `[ ]` (CMake's `file(GLOB)` reads them as a pattern), which is why the folder is `Chiefrim-Project`. |
 | Halo | halo-ce-universal, **Linux 32-bit (i386) build**, OpenGL 4.5, SDL3 | `python configure.py && ninja linux`. 32-bit because the tag and cache data contain 32-bit pointers. |
