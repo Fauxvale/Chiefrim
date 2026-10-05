@@ -3,3 +3,5 @@ References/
 Chiefrim/halo/.work/
 Chiefrim/build/
 Chiefrim/.tools/
+__pycache__/
+*.pyc
