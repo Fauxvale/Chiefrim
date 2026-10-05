@@ -75,6 +75,7 @@ struct chiefrim_bsp
 	long max_depth;
 	long dropped_overlaps;               /* polygons overlapping on a plane, in extra references */
 	long duplicates;                     /* triangles dropped as repeats of earlier ones */
+	long shared_fragments;               /* polygons placed on both sides of a split they all but touch */
 };
 
 /* Builds a BSP from triangles. map_planes (the map's collision planes) are

@@ -61,6 +61,8 @@ offline, with Halo's own queries, under AddressSanitizer.
 #define CHIEFRIM_BSP_PLANE_DOT     0.9999995f /* planes this alike (and this close) are one: */
 #define CHIEFRIM_BSP_PLANE_D       0.0005f    /* a triangle moves onto it by a hair */
 #define CHIEFRIM_BSP_PLANE_CELL    0.001f     /* about the angle PLANE_DOT allows */
+#define CHIEFRIM_BSP_NEAR          0.0002f  /* fragments this near a split go to both sides */
+#define CHIEFRIM_BSP_SHARE_LIMIT   4        /* ...this many times on a path, at most */
 #define CHIEFRIM_BSP_WELD          0.002f   /* vertices this close are one */
 #define CHIEFRIM_BSP_CELL          64       /* polygons: up to this many, split on their planes */
 #define CHIEFRIM_BSP_AXIS_DEPTH    40       /* axis-aligned splits stop by this depth */
@@ -82,6 +84,7 @@ struct fragment
 	long count;
 	long plane;       /* index; its normal is the plane's, or negated */
 	boolean flipped;
+	long shared;      /* times it went to both sides of a split, on its path */
 	unsigned long id;
 };
 
@@ -1115,7 +1118,30 @@ static long build_3d(struct builder *b, long const *fragments, long count,
 		the other, or a ray meeting it there (in the other side's leaves)
 		would miss it */
 		fragment_extent(&b->fragments[f], &plane, &mn, &mx);
-		if (mn >= -CHIEFRIM_BSP_CUT_EPSILON)
+		if (mn > -CHIEFRIM_BSP_NEAR && mx < CHIEFRIM_BSP_NEAR)
+		{
+			/* all of it within a hair of the plane (two faces of Skyrim's
+			almost on top of each other): Halo's ray, in floats, may cross the
+			plane a hair after the polygon's own and look for it on the other
+			side. It goes to both, a few times on a path at most. */
+			if (b->fragments[f].shared < CHIEFRIM_BSP_SHARE_LIMIT)
+			{
+				long copy = new_fragment(b);
+
+				if (copy == NONE)
+					break;
+				b->fragments[f].shared++;
+				b->fragments[copy] = b->fragments[f];
+				front[front_count++] = f;
+				back[back_count++] = copy;
+				b->out->shared_fragments++;
+			}
+			else if (mn >= -CHIEFRIM_BSP_CUT_EPSILON)
+				front[front_count++] = f;
+			else
+				back[back_count++] = f;
+		}
+		else if (mn >= -CHIEFRIM_BSP_CUT_EPSILON)
 			front[front_count++] = f;
 		else if (mx <= CHIEFRIM_BSP_CUT_EPSILON)
 			back[back_count++] = f;
@@ -1335,6 +1361,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 		b.fragments[f].count = 3;
 		b.fragments[f].plane = designator & LONG_MAX;
 		b.fragments[f].flipped = (designator & LONG_MIN) != 0;
+		b.fragments[f].shared = 0;
 		b.fragments[f].id = in->id;
 	}
 	if (b.failed)

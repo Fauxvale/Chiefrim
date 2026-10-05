@@ -84,7 +84,9 @@ typedef struct cr_world_context
 	uint32_t generation;    /* bumps when the origin moves (load door etc.) */
 	float    field_of_view; /* Chief's unzoomed view, degrees, horizontal for 4:3 as
 	                           Skyrim measures it; zoom narrows it as in Halo. 0: Halo's own */
-	uint32_t reserved[2];
+	float    chief_height;  /* Skyrim units: Chief's standing height (collision and eyes
+	                           scale with it). 0: Halo's own */
+	uint32_t reserved;
 } cr_world_context;
 
 /* Skyrim -> Halo. Chief's controls (docs §7). Skyrim's ControlMap has already

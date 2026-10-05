@@ -168,6 +168,14 @@ collision code.
     synthetic Skyrim-like ground: 36,434 triangles build in ~0.9 s (depth 33); 160,519 of 160,530
     surfaces pass, the rest being coplanar overlaps where the ray finds the other surface. It also
     runs clean under AddressSanitizer;
+  - a fragment lying all but in a splitting plane (within 0.0002 wu: two of Skyrim's faces almost
+    on top of each other) goes to both sides, up to 4 times on a path: Halo's ray, in floats, may
+    cross that plane a hair after the fragment's own and look for it on the other side. On real
+    Skyrim dumps this took the misses from ~0.3% of surfaces to ~0.01%;
+  - at a swap, each biped's support surface is the new BSP's surface under its feet (a short ray
+    down), not found by triangle id: the pieces of a cut triangle share the id, and a wrong support
+    surface made Halo pull Chief toward it at every swap (the stutter of the third in-game test);
+  - the in-game self-test rejects a build only for more than 2 (or 10%) misses in its sample;
   - exact repeats of a triangle (either winding: Skyrim's two-sided meshes) are dropped, and
     polygons stacked on one plane go in at most 8 references per leaf;
   - a build is installed only for the origin it was made for: one still running when Skyrim moves
@@ -242,7 +250,11 @@ definition comes from that map. Chiefrim loads one **host map**.
    NPC targeting, detection and stealth, trigger volumes, quest location checks and projectile
    hits all keep working.
 3. **CameraDriver** forces Skyrim into first person and overwrites the camera with Halo's:
-   - the first-person camera state's translation is Chief's eye (crouch and jump included);
+   - the first-person camera state's translation is Chief's eye (crouch and jump included).
+     Chief's size comes from Skyrim (`[Chief] fHeight`, sent in the world context): Halo's Chief
+     is 0.7 wu (~150 Skyrim units), too tall for the doorways and ledges Skyrim's people pass
+     under, so by default his biped definition's collision and camera heights scale to the
+     player's own height (~128 for a Nord), and with them his eye;
    - after every `PlayerCamera::Update` (all its call sites are hooked), the camera root takes
      Chief's view direction, once a 3-second check has confirmed which columns of Skyrim's
      camera-root matrix are forward, up and right (until then Skyrim turns it, from the player's
@@ -496,7 +508,7 @@ Each phase ends in something you can play.
 | # | Phase | "Done" when |
 |---|---|---|
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
-| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver (§6: **done, verified in game 2026-10-04**; Skyrim's camera-root columns are right, forward, up), CollisionField through the runtime BSP builder (§5.2: built 2026-10-04; the first in-game test found failing builds; the chain fix froze Halo on real meshes, replaced 2026-10-05 by a clipping builder; **in-game retest pending**). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
+| 1 | **Walk Skyrim as Chief** | InputBridge (§7: Skyrim's own controls drive Chief; **done, verified in game 2026-10-04** including rebinding to the arrow keys), CameraDriver (§6: **done, verified in game 2026-10-04**; Skyrim's camera-root columns are right, forward, up), CollisionField through the runtime BSP builder (§5.2: built 2026-10-04; the first in-game test found failing builds; the chain fix froze Halo on real meshes, replaced 2026-10-05 by a clipping builder, which holds up in game; the swap stutter and Chief's height were fixed after the third test; **retest pending**). You can run, jump and crouch around Whiterun with Halo movement, and slopes and walls behave. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |

@@ -37,6 +37,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/bipeds.h"
+#include "units/biped_definitions.h"
 #include "units/units.h"
 #include "units/unit_definitions.h"
 
@@ -137,9 +138,9 @@ static void chiefrim_apply_world(void)
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
 	chiefrim.world_valid = TRUE;
-	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f",
+	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
 		world.world_id, world.is_interior ? " (interior)" : "",
-		world.origin.x, world.origin.y, world.origin.z, world.floor_z, world.field_of_view);
+		world.origin.x, world.origin.y, world.origin.z, world.floor_z, world.field_of_view, world.chief_height);
 
 	/* Placing Chief is the Teleport message's job (Skyrim sends one with each
 	new world), never a side effect of seeing the world again. */
@@ -214,6 +215,51 @@ static void chiefrim_pump_events(void)
 	}
 }
 
+/* Chief's size from Skyrim (docs §7): Halo's Chief is 0.7 wu (~150 Skyrim
+units, 7 ft in armour), too tall for doorways and ledges Skyrim's people walk
+under. His biped definition's heights scale to the height Skyrim asks for;
+Halo reads them every tick (bipeds.c), so collision, crouching and his eyes,
+and so Skyrim's camera, follow. The definition is the loaded map's tag data:
+its own values are kept, and taken again when a map load replaces them. */
+static void chiefrim_apply_chief_height(long unit_index)
+{
+	static struct biped_definition *scaled = NULL;
+	static real original[4];  /* standing and crouching collision, then camera */
+	static real written = -1.0f;
+	struct biped_definition *definition;
+	real target, scale;
+
+	if (unit_get(unit_index)->object.type != _object_type_biped)
+		return;
+	definition = biped_definition_get(biped_get(unit_index)->definition_index);
+	if (definition != scaled || definition->biped.collision_height_standing != written)
+	{
+		/* a definition we haven't touched (or the map reloaded it) */
+		original[0] = definition->biped.collision_height_standing;
+		original[1] = definition->biped.collision_height_crouching;
+		original[2] = definition->biped.standing_camera_height;
+		original[3] = definition->biped.crouching_camera_height;
+		scaled = definition;
+		written = original[0];
+	}
+	if (original[0] <= 0.01f)
+		return;
+
+	target = chiefrim.world.chief_height > 1.0f ? chiefrim.world.chief_height / CR_SKY_UNITS_PER_WU : original[0];
+	target = PIN(target, 0.2f, 1.0f); /* a hobbit to an ogre, in world units */
+	scale = target / original[0];
+	if (fabsf(definition->biped.collision_height_standing - original[0] * scale) < 0.0001f)
+		return;
+	definition->biped.collision_height_standing = original[0] * scale;
+	definition->biped.collision_height_crouching = original[1] * scale;
+	definition->biped.standing_camera_height = original[2] * scale;
+	definition->biped.crouching_camera_height = original[3] * scale;
+	written = definition->biped.collision_height_standing;
+	error(_error_silent, "chiefrim: Chief is %.0f Skyrim units tall (Halo's own: %.0f); eyes at %.0f",
+		target * CR_SKY_UNITS_PER_WU, original[0] * CR_SKY_UNITS_PER_WU,
+		definition->biped.standing_camera_height * CR_SKY_UNITS_PER_WU);
+}
+
 /* Places Chief where he last stood on ground (over a respawn or a fall). */
 static void chiefrim_return_to_safe(void)
 {
@@ -258,6 +304,8 @@ static void chiefrim_publish_player(void)
 		}
 		chiefrim.lost_unit = FALSE;
 	}
+
+	chiefrim_apply_chief_height(unit_index);
 
 	memset(&state, 0, sizeof(state));
 	state.tick = chiefrim.ticks;

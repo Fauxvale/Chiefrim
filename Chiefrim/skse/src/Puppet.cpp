@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Puppet.h"
+#include "Settings.h"
 
 #include "Camera.h"
 #include "Collision.h"
@@ -60,6 +61,22 @@ namespace chiefrim::Puppet
 			return true;
 		}
 
+		// Chief's standing height for Halo, in Skyrim units ([Chief] fHeight):
+		// -1 matches the player (race and scale), 0 keeps Halo's own (~150).
+		float ChiefHeight(RE::PlayerCharacter* a_player)
+		{
+			static const float setting = Settings::ReadFloat(L"Chief", L"fHeight", -1.0f);
+			if (setting >= 0.0f) {
+				return setting;
+			}
+			const float height = a_player->GetHeight();
+			if (!(height >= 60.0f && height <= 250.0f)) {
+				logger::warn("the player's height reads {:.0f}; Chief is 128 units tall", height);
+				return 128.0f;
+			}
+			return height;
+		}
+
 		// Phase 0: the origin and the flat floor are where the player stands
 		// when the world (re)starts (docs §4, §5.1).
 		void SendWorld(RE::PlayerCharacter* a_player, RE::FormID a_id, bool a_interior)
@@ -72,6 +89,7 @@ namespace chiefrim::Puppet
 			context.floor_z = position.z;
 			context.generation = ++s.generation;
 			context.field_of_view = Camera::FieldOfView();
+			context.chief_height = ChiefHeight(a_player);
 
 			auto& link = Link::Get();
 			link.SendWorldContext(context);
@@ -85,8 +103,8 @@ namespace chiefrim::Puppet
 			s.haveTick = false;
 			s.awaitingTeleport = position;
 			s.awaitingSince = ::GetTickCount64();
-			logger::info("world {:08X}{}: origin and floor at ({:.0f}, {:.0f}, {:.0f})",
-				a_id, a_interior ? " (interior)" : "", position.x, position.y, position.z);
+			logger::info("world {:08X}{}: origin and floor at ({:.0f}, {:.0f}, {:.0f}); Chief {:.0f} units tall",
+				a_id, a_interior ? " (interior)" : "", position.x, position.y, position.z, context.chief_height);
 		}
 
 		// Applies Halo's latest state every frame, new or not: between Halo's
