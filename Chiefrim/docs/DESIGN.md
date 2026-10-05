@@ -161,6 +161,11 @@ collision code.
     mesh's open border) is split into two edges, each with one surface on both sides: Halo makes
     every edge whose two surfaces' planes differ a collision feature (`collision_features.c`), and
     a surface and its twin always differ, so ~60% of real floors' edges stood up as ridges;
+  - what Skyrim is sent is smoothed: Halo moves Chief 30 times a second while Skyrim draws at 60
+    and more, so the player and the camera held still and then jumped ~13 units, on and on. As the
+    port draws Halo's frames, the published position and eye are a tick behind, blended between
+    the last two ticks by `game_time_get_tick_fraction()`; a jump over 100 units cuts; view
+    directions stay the latest;
   - Halo never evicts every region it holds: that means Chief isn't where Skyrim's player is yet
     (at the level's spawn point before being placed), and Skyrim sends a region only once while its
     player stays near it (this was the fake-Skyrim test's startup flake, and could leave Chief
@@ -220,6 +225,11 @@ collision code.
     edges). Offline, on real
     Skyrim dumps, a short drop through ~95% of floors is seen; the rest have a steeper surface just
     above them or are slivers;
+  - the land rule (exteriors): the exporter also flags the land's triangles `CR_TRIANGLE_LAND`,
+    and Halo keeps their heights in a grid (0.5 wu cells). With his feet more than 0.15 wu (~32
+    units) under the land, Chief is put on top of it. The land has no underside, so once Halo had
+    squeezed him through it (a rock mesh overlapping a hillside), nothing pushed him back: he
+    stood or wandered in the void under it until he fell (the seventeenth test's marked spots);
   - if Chief still falls below all of the collision loaded around him, he goes back to one of the
     last 16 spots where he stood on a floor of Skyrim's with room around him; back again within 5 s,
     that spot was no good (pushed out of an interior, he can stand on something in the void) and the

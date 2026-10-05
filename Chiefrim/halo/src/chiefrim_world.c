@@ -119,6 +119,13 @@ static struct
 	boolean installed_floor;
 	struct chiefrim_triangle *installed_triangles; /* current's input, for a dump */
 	long installed_triangle_count;
+	struct
+	{
+		real min_x, min_y;
+		long nx, ny;
+		long *cell_first;   /* nx * ny + 1: where each cell's triangles start in items */
+		long *items;        /* indices into installed_triangles */
+	} land;                 /* the land's triangles by cell (installed_triangles' with CR_TRIANGLE_LAND) */
 	boolean have_chief;
 	real_point3d chief;         /* last seen, world units */
 	boolean settle_pending;     /* the first build since the origin moved has landed */
@@ -335,6 +342,131 @@ static void *chiefrim_world_worker(void *unused)
 	return NULL;
 }
 #endif
+
+/* ---------- the land's heights */
+
+#define LAND_CELL 0.5f /* world units */
+
+/* The land's triangles of the installed build, by cell, for heights. */
+static void chiefrim_world_index_land(void)
+{
+	struct chiefrim_triangle const *t = world.installed_triangles;
+	long n = world.installed_triangle_count, i, cells, total = 0;
+	real max_x = -REAL_MAX, max_y = -REAL_MAX;
+	long *fill = NULL;
+
+	free(world.land.cell_first);
+	free(world.land.items);
+	memset(&world.land, 0, sizeof(world.land));
+	world.land.min_x = world.land.min_y = REAL_MAX;
+	for (i = 0; i < n; i++)
+	{
+		long k;
+
+		if (!(t[i].flags & CR_TRIANGLE_LAND))
+			continue;
+		for (k = 0; k < 3; k++)
+		{
+			world.land.min_x = MIN(world.land.min_x, t[i].v[k].x);
+			world.land.min_y = MIN(world.land.min_y, t[i].v[k].y);
+			max_x = MAX(max_x, t[i].v[k].x);
+			max_y = MAX(max_y, t[i].v[k].y);
+		}
+	}
+	if (max_x < world.land.min_x)
+		return; /* no land (an interior) */
+	world.land.nx = (long)((max_x - world.land.min_x) / LAND_CELL) + 1;
+	world.land.ny = (long)((max_y - world.land.min_y) / LAND_CELL) + 1;
+	cells = world.land.nx * world.land.ny;
+	world.land.cell_first = (long *)calloc((size_t)cells + 1, sizeof(long));
+	fill = (long *)calloc((size_t)cells + 1, sizeof(long));
+	if (!world.land.cell_first || !fill)
+		goto fail;
+	/* count, then place */
+	for (i = 0; i < n; i++)
+	{
+		long x0, x1, y0, y1, x, y;
+
+		if (!(t[i].flags & CR_TRIANGLE_LAND))
+			continue;
+		x0 = (long)((MIN(MIN(t[i].v[0].x, t[i].v[1].x), t[i].v[2].x) - world.land.min_x) / LAND_CELL);
+		x1 = (long)((MAX(MAX(t[i].v[0].x, t[i].v[1].x), t[i].v[2].x) - world.land.min_x) / LAND_CELL);
+		y0 = (long)((MIN(MIN(t[i].v[0].y, t[i].v[1].y), t[i].v[2].y) - world.land.min_y) / LAND_CELL);
+		y1 = (long)((MAX(MAX(t[i].v[0].y, t[i].v[1].y), t[i].v[2].y) - world.land.min_y) / LAND_CELL);
+		for (y = y0; y <= y1; y++)
+			for (x = x0; x <= x1; x++)
+				world.land.cell_first[y * world.land.nx + x + 1]++;
+	}
+	for (i = 0; i < cells; i++)
+		world.land.cell_first[i + 1] += world.land.cell_first[i];
+	total = world.land.cell_first[cells];
+	world.land.items = (long *)malloc(sizeof(long) * (size_t)MAX(total, 1));
+	if (!world.land.items)
+		goto fail;
+	for (i = 0; i < n; i++)
+	{
+		long x0, x1, y0, y1, x, y;
+
+		if (!(t[i].flags & CR_TRIANGLE_LAND))
+			continue;
+		x0 = (long)((MIN(MIN(t[i].v[0].x, t[i].v[1].x), t[i].v[2].x) - world.land.min_x) / LAND_CELL);
+		x1 = (long)((MAX(MAX(t[i].v[0].x, t[i].v[1].x), t[i].v[2].x) - world.land.min_x) / LAND_CELL);
+		y0 = (long)((MIN(MIN(t[i].v[0].y, t[i].v[1].y), t[i].v[2].y) - world.land.min_y) / LAND_CELL);
+		y1 = (long)((MAX(MAX(t[i].v[0].y, t[i].v[1].y), t[i].v[2].y) - world.land.min_y) / LAND_CELL);
+		for (y = y0; y <= y1; y++)
+		{
+			for (x = x0; x <= x1; x++)
+			{
+				long cell = y * world.land.nx + x;
+
+				world.land.items[world.land.cell_first[cell] + fill[cell]++] = i;
+			}
+		}
+	}
+	free(fill);
+	return;
+
+fail:
+	free(fill);
+	free(world.land.cell_first);
+	free(world.land.items);
+	memset(&world.land, 0, sizeof(world.land));
+}
+
+/* The land's height at this point (world units): the highest land triangle
+over it. FALSE where there is none. */
+boolean chiefrim_world_land_height(real_point3d const *point, real *z)
+{
+	long x, y, k;
+	boolean found = FALSE;
+
+	if (!world.land.items || world.installed_floor)
+		return FALSE;
+	x = (long)floorf((point->x - world.land.min_x) / LAND_CELL);
+	y = (long)floorf((point->y - world.land.min_y) / LAND_CELL);
+	if (x < 0 || y < 0 || x >= world.land.nx || y >= world.land.ny)
+		return FALSE;
+	for (k = world.land.cell_first[y * world.land.nx + x]; k < world.land.cell_first[y * world.land.nx + x + 1]; k++)
+	{
+		struct chiefrim_triangle const *t = &world.installed_triangles[world.land.items[k]];
+		real_point3d const *a = &t->v[0], *b = &t->v[1], *c = &t->v[2];
+		real d = (b->y - c->y) * (a->x - c->x) + (c->x - b->x) * (a->y - c->y);
+		real l1, l2, l3, h;
+
+		if (fabsf(d) < 1e-12f)
+			continue;
+		l1 = ((b->y - c->y) * (point->x - c->x) + (c->x - b->x) * (point->y - c->y)) / d;
+		l2 = ((c->y - a->y) * (point->x - c->x) + (a->x - c->x) * (point->y - c->y)) / d;
+		l3 = 1.f - l1 - l2;
+		if (l1 < -1e-5f || l2 < -1e-5f || l3 < -1e-5f)
+			continue;
+		h = l1 * a->z + l2 * b->z + l3 * c->z;
+		if (!found || h > *z)
+			*z = h;
+		found = TRUE;
+	}
+	return found;
+}
 
 /* ---------- checks and swaps (main thread) */
 
@@ -676,6 +808,7 @@ static void chiefrim_world_collect_result(void)
 		free(world.installed_triangles);
 		world.installed_triangles = job.triangles;
 		world.installed_triangle_count = job.triangle_count;
+		chiefrim_world_index_land();
 		job.triangles = NULL;
 	}
 	free(job.triangles);

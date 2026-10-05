@@ -211,6 +211,9 @@ faces of closed shapes (boxes, capsules, convex hulls, wound outward). Halo
 gives them no back: where the land pokes up through a road, or someone dips
 into a slab, a back would push them down through it. */
 #define CR_TRIANGLE_ONE_SIDED 0x0001u
+/* The land itself (Skyrim's height field): Halo keeps its heights and puts
+Chief back on top if he ends up under it. */
+#define CR_TRIANGLE_LAND      0x0002u
 
 typedef struct cr_msg_hello
 {

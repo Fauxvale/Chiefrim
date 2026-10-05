@@ -37,6 +37,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "game/cheats.h"
+#include "game/game.h"
 #include "units/bipeds.h"
 #include "units/biped_definitions.h"
 #include "units/units.h"
@@ -56,6 +57,8 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 
 #define CHIEFRIM_MINIMUM_RADIUS   0.13f /* world units (~28 Skyrim units) */
 #define CHIEFRIM_STEP_UNITS       48.0f /* Skyrim units: the step assist's highest ledge (a boardwalk's edge) */
+#define CHIEFRIM_UNDER_LAND       0.15f /* world units (~32 Skyrim units) under the land: he's not where he belongs */
+#define CHIEFRIM_SMOOTH_CUT_UNITS 100.0f /* Skyrim units between ticks: further is a cut, not a glide */
 #define CHIEFRIM_SAFE_SPOTS       16
 #define CHIEFRIM_RETURN_RETRY_MS  5000 /* back again this soon: the spot was no good */
 
@@ -80,6 +83,7 @@ static struct
 	long floor_guard_count;
 	long recent_steps, recent_guards, recent_returns; /* moves of Chief's since the last summary */
 	long recent_blips, recent_long_frames, recent_frames;
+	long land_count, recent_land;
 	uint32_t airborne_since_ms, last_frame_ms;
 	boolean was_airborne;
 	uint32_t summary_ms;
@@ -385,6 +389,49 @@ static void chiefrim_return_to_safe(void)
 	chiefrim.placement_pending = TRUE;
 }
 
+/* Halo moves Chief 30 times a second, Skyrim draws at 60 and more: sent as
+it stands, the player and the camera held still for a frame or two and then
+jumped ~13 units, on and on. As the port draws Halo's own frames, Skyrim
+gets them a tick behind, blended between the last two ticks by how far
+into the next one this frame is. A jump further than a tick's motion (a
+placement, a teleport) cuts instead. View directions stay the latest. */
+static void chiefrim_smooth_state(cr_player_state *state)
+{
+	static struct
+	{
+		boolean valid, has_previous;
+		long tick;
+		cr_vec3 position[2], eye[2]; /* previous, latest */
+	} smooth;
+	long tick = game_time_get();
+	real t, dx, dy, dz;
+
+	if (!smooth.valid || tick != smooth.tick)
+	{
+		smooth.has_previous = smooth.valid;
+		smooth.position[0] = smooth.position[1];
+		smooth.eye[0] = smooth.eye[1];
+		smooth.position[1] = state->position;
+		smooth.eye[1] = state->eye;
+		smooth.tick = tick;
+		smooth.valid = TRUE;
+	}
+	if (!smooth.has_previous)
+		return;
+	dx = smooth.position[1].x - smooth.position[0].x;
+	dy = smooth.position[1].y - smooth.position[0].y;
+	dz = smooth.position[1].z - smooth.position[0].z;
+	if (!(dx * dx + dy * dy + dz * dz <= CHIEFRIM_SMOOTH_CUT_UNITS * CHIEFRIM_SMOOTH_CUT_UNITS))
+		return; /* a cut: as it stands */
+	t = PIN(game_time_get_tick_fraction(), 0.f, 1.f);
+	state->position.x = smooth.position[0].x + dx * t;
+	state->position.y = smooth.position[0].y + dy * t;
+	state->position.z = smooth.position[0].z + dz * t;
+	state->eye.x = smooth.eye[0].x + (smooth.eye[1].x - smooth.eye[0].x) * t;
+	state->eye.y = smooth.eye[0].y + (smooth.eye[1].y - smooth.eye[0].y) * t;
+	state->eye.z = smooth.eye[0].z + (smooth.eye[1].z - smooth.eye[0].z) * t;
+}
+
 static void chiefrim_publish_player(void)
 {
 	long unit_index = chiefrim_local_unit();
@@ -514,6 +561,7 @@ static void chiefrim_publish_player(void)
 			0.75f * render_camera_get_adjusted_field_of_view_tangent(camera->field_of_view), 1.0f);
 	}
 
+	chiefrim_smooth_state(&state);
 	CR_SLOT_WRITE(&chiefrim.shm->player_state, state);
 }
 
@@ -874,6 +922,29 @@ void chiefrim_frame(void)
 		}
 		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending)
 			chiefrim_step_assist(unit_index, &chief);
+		if (unit_index != NONE && !chiefrim.world.is_interior && !chiefrim.placement_pending)
+		{
+			/* under the land: Halo squeezed him through it (a rock mesh
+			overlapping a hillside, mostly). The land has no underside to
+			push him back; on top of it, where he belongs. */
+			real land_z;
+
+			if (chiefrim_world_land_height(&chief, &land_z) && chief.z < land_z - CHIEFRIM_UNDER_LAND)
+			{
+				real_point3d up = chief;
+
+				up.z = land_z + 0.02f;
+				chiefrim_move_chief(unit_index, &up, TRUE);
+				if (chiefrim.land_count++ % 50 == 0)
+				{
+					error(_error_silent, "chiefrim: Chief was %.0f units under the land at (%.2f, %.2f) wu; put him on top (%ld times)",
+						(land_z - chief.z) * CR_SKY_UNITS_PER_WU, chief.x, chief.y, chiefrim.land_count);
+				}
+				chiefrim.recent_land++;
+				chief = up;
+				chiefrim.last_feet = up;
+			}
+		}
 		if (chiefrim_input_mark() && unit_index != NONE)
 			chiefrim_report_stuck(unit_index, "marked stuck by the player");
 		chiefrim.have_last_feet = unit_index != NONE;
@@ -904,10 +975,10 @@ void chiefrim_frame(void)
 			chiefrim.summary_ms = now;
 		if (now - chiefrim.summary_ms >= 30000)
 		{
-			if (chiefrim.recent_steps || chiefrim.recent_guards || chiefrim.recent_returns)
+			if (chiefrim.recent_steps || chiefrim.recent_guards || chiefrim.recent_returns || chiefrim.recent_land)
 			{
-				error(_error_silent, "chiefrim: last 30 s, Chiefrim moved Chief: %ld step-ups, %ld floor-guard put-backs, %ld returns",
-					chiefrim.recent_steps, chiefrim.recent_guards, chiefrim.recent_returns);
+				error(_error_silent, "chiefrim: last 30 s, Chiefrim moved Chief: %ld step-ups, %ld floor-guard put-backs, %ld returns, %ld from under the land",
+					chiefrim.recent_steps, chiefrim.recent_guards, chiefrim.recent_returns, chiefrim.recent_land);
 			}
 			if (chiefrim.recent_frames)
 			{
@@ -915,7 +986,7 @@ void chiefrim_frame(void)
 					"%ld frames over 40 ms of %ld",
 					chiefrim.recent_blips, chiefrim.recent_long_frames, chiefrim.recent_frames);
 			}
-			chiefrim.recent_steps = chiefrim.recent_guards = chiefrim.recent_returns = 0;
+			chiefrim.recent_steps = chiefrim.recent_guards = chiefrim.recent_returns = chiefrim.recent_land = 0;
 			chiefrim.recent_blips = chiefrim.recent_long_frames = chiefrim.recent_frames = 0;
 			chiefrim.summary_ms = now;
 		}

@@ -79,6 +79,7 @@ def add_box(tris, corners):
             SOLID.add(len(tris))
             tris.append(t)
 CR_TRIANGLE_ONE_SIDED = 0x0001
+CR_TRIANGLE_LAND = 0x0002
 LEDGE = 0.0
 PLANK = False
 
@@ -131,7 +132,8 @@ def send_terrain(link, epoch, ox, oy, oz, generation=1):
     for i, t in enumerate(terrain_triangles(ox, oy, oz)):
         cx, cy, cz = (t[0] + t[3] + t[6]) / 3, (t[1] + t[4] + t[7]) / 3, (t[2] + t[5] + t[8]) / 3
         key = (math.floor(cx / REGION_UNITS), math.floor(cy / REGION_UNITS), math.floor(cz / REGION_UNITS))
-        regions.setdefault(key, []).append((t, CR_TRIANGLE_ONE_SIDED if i < GROUND_COUNT or i in SOLID else 0))
+        regions.setdefault(key, []).append((t, (CR_TRIANGLE_ONE_SIDED | CR_TRIANGLE_LAND) if i < GROUND_COUNT else
+                                              CR_TRIANGLE_ONE_SIDED if i in SOLID else 0))
     link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, generation))
     sent = 0
     for (rx, ry, rz), tris in regions.items():
@@ -283,6 +285,8 @@ def main():
                         help="with --terrain: a slab this many units high across the way north, like a road piece (the step assist)")
     parser.add_argument("--plank", action="store_true",
                         help="with --ledge: the slab is a board 4 units thick, open below (a boardwalk's edge)")
+    parser.add_argument("--sink-at", type=float, default=0.0,
+                        help="seconds in: put Chief 100 units under the ground (a test of the land rule)")
     parser.add_argument("--hole", action="store_true",
                         help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
     parser.add_argument("--radius", type=float, default=0.0,
@@ -384,6 +388,11 @@ def main():
                 if options.terrain:
                     send_terrain(link, epoch, options.x, options.y, options.z, generation)
                 last_recenter = time.monotonic()
+            if options.sink_at and not drive_state.get("sunk") and time.monotonic() - started >= options.sink_at and last_position:
+                px, py, pz, yaw = last_position
+                link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz - 100.0, yaw))
+                print(f"fake_skyrim: sink: Chief to 100 units under ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
+                drive_state["sunk"] = True
             if link.u32(HALO_STATE) == SIDE_CLOSING:
                 print("fake_skyrim: Halo is closing")
                 break

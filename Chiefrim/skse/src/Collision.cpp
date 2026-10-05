@@ -696,6 +696,9 @@ namespace chiefrim::Collision
 					// The land, and closed shapes' faces, are solid only from outside:
 					// a back would pull whoever dips into them further in.
 					tri.flags = (job.terrain || t.solid) ? CR_TRIANGLE_ONE_SIDED : 0;
+					if (job.terrain) {
+						tri.flags |= CR_TRIANGLE_LAND;
+					}
 					out.tris.push_back(tri);
 				}
 			}
