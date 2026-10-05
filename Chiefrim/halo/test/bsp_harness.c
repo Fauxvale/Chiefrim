@@ -19,6 +19,8 @@ a cliff and a wall. Prints the build's size, depth and time.
 #include <stdlib.h>
 #include <time.h>
 
+#undef fopen /* the port's translates Xbox paths and isn't linked here */
+
 #undef malloc
 #undef free
 
@@ -252,6 +254,33 @@ static void self_test(struct chiefrim_bsp *bsp)
 		passed, tested, fail_front, fail_back, fail_sphere);
 }
 
+/* What is under Chief, where he fell through: a ray straight down, and the
+triangles of the input around him. */
+static void probe_below(struct chiefrim_bsp *bsp, real_point3d const *chief)
+{
+	struct collision_bsp_test_vector_result result;
+	real_point3d start = *chief;
+	real_vector3d down = { 0.f, 0.f, -20.f };
+	long i;
+
+	put("chief at (x1000 wu) ");
+	put_long((long)(chief->x * 1000)); put(" "); put_long((long)(chief->y * 1000)); put(" "); put_long((long)(chief->z * 1000));
+	put(", lowest collision ");
+	put_long((long)(bsp->min_z * 1000));
+	start.z += 2.f;
+	if (collision_bsp_test_vector(3, &bsp->bsp, 0, NULL, &start, &down, REAL_MAX, &result))
+	{
+		put("; down from 2 wu above, a hit at t x1000 ");
+		put_long((long)(result.t * 1000));
+		put(", surface ");
+		put_long(result.surface_index);
+	}
+	else
+		put("; down from 2 wu above: nothing");
+	put("\n");
+	(void)i;
+}
+
 int main(int argc, char **argv)
 {
 	long capacity = 400000, n = 0, i, j;
@@ -266,6 +295,8 @@ int main(int argc, char **argv)
 	char error[160];
 	double start;
 	const float k = 1.f / 213.36f;
+	long has_chief = 0;
+	real_point3d chief;
 
 	memset(&map, 0, sizeof(map));
 	memset(&leaf, 0, sizeof(leaf));
@@ -281,20 +312,25 @@ int main(int argc, char **argv)
 		t[n].v[2].x = (cx) * k; t[n].v[2].y = (cy) * k; t[n].v[2].z = (cz) * k; \
 		t[n].id = (unsigned long)n; n++; } while (0)
 
-	/* --replay FILE: a build Halo dumped (chiefrim_world.c); no strcmp or
-	memcmp, which Halo's headers send to its own (unlinked) versions */
+	/* --replay FILE: a build Halo dumped (chiefrim_world.c), with where
+	Chief was if he fell through it; no strcmp or memcmp, which Halo's
+	headers send to its own (unlinked) versions */
 	if (argc > 2 && argv[1][0] == '-' && argv[1][1] == '-' && argv[1][2] == 'r')
 	{
 		FILE *file = fopen(argv[2], "rb");
 		char magic[8];
 
-		if (!file || fread(magic, 1, 8, file) != 8 || magic[0] != 'C' || magic[1] != 'R' || magic[6] != '1' ||
+		if (!file || fread(magic, 1, 8, file) != 8 || magic[0] != 'C' || magic[1] != 'R' ||
 			fread(&n, sizeof(n), 1, file) != 1 || n < 0 || n > capacity ||
 			fread(t, sizeof(*t), (size_t)n, file) != (size_t)n)
 		{
 			printf("can't read the dump %s\n", argv[2]);
 			return 1;
 		}
+		if (magic[6] == '2' && fread(&has_chief, sizeof(has_chief), 1, file) == 1 && has_chief)
+			has_chief = fread(&chief, sizeof(chief), 1, file) == 1;
+		else
+			has_chief = 0;
 		fclose(file);
 		goto build;
 	}
@@ -330,6 +366,34 @@ int main(int argc, char **argv)
 			TRI(c[q[m][0]][0], c[q[m][0]][1], c[q[m][0]][2], c[q[m][2]][0], c[q[m][2]][1], c[q[m][2]][2], c[q[m][3]][0], c[q[m][3]][1], c[q[m][3]][2]);
 		}
 	}
+	/* what Skyrim's meshes have and plain ground hasn't: two-sided meshes
+	(every rock again, reversed), exact repeats, and flat pieces stacked on
+	one plane like floorboards and road pieces */
+	{
+		long rock_triangles = n - (long)(2 * half / 64) * (long)(2 * half / 64) * 2, first = n - rock_triangles, m;
+
+		for (m = 0; m < rock_triangles && n + 2 < capacity; m++)
+		{
+			struct chiefrim_triangle const *r = &t[first + m];
+
+			TRI(r->v[0].x / k, r->v[0].y / k, r->v[0].z / k, r->v[2].x / k, r->v[2].y / k, r->v[2].z / k, r->v[1].x / k, r->v[1].y / k, r->v[1].z / k);
+			if (m % 7 == 0)
+				TRI(r->v[0].x / k, r->v[0].y / k, r->v[0].z / k, r->v[1].x / k, r->v[1].y / k, r->v[1].z / k, r->v[2].x / k, r->v[2].y / k, r->v[2].z / k);
+		}
+	}
+	for (i = 0; i < rocks / 2; i++)
+	{
+		float cx = uniform(-half / 2, half / 2), cy = uniform(-half / 2, half / 2), z = 600.f;
+		float hx = uniform(30, 200), hy = uniform(10, 60), a = uniform(0, 3.14159f);
+		float ca = cosf(a), sa = sinf(a);
+		float x0 = cx - hx * ca + hy * sa, y0 = cy - hx * sa - hy * ca;
+		float x1 = cx + hx * ca + hy * sa, y1 = cy + hx * sa - hy * ca;
+		float x2 = cx + hx * ca - hy * sa, y2 = cy + hx * sa + hy * ca;
+		float x3 = cx - hx * ca - hy * sa, y3 = cy - hx * sa + hy * ca;
+
+		TRI(x0, y0, z, x1, y1, z, x2, y2, z);
+		TRI(x0, y0, z, x2, y2, z, x3, y3, z);
+	}
 	TRI(-2000, -800, 0, 2000, -800, 0, 2000, -800, 400);
 	TRI(-2000, -800, 0, 2000, -800, 400, -2000, -800, 400);
 
@@ -342,9 +406,11 @@ build:
 		printf("FAILED after %.0f ms: %s\n", now_ms() - start, error);
 		return 1;
 	}
-	printf("%ld triangles -> %ld kept, %ld nodes, %ld leaves, %ld references, %ld 2D nodes, %ld edges, depth %ld, overlaps %ld: %.0f ms\n",
+	printf("%ld triangles -> %ld kept, %ld nodes, %ld leaves, %ld references, %ld 2D nodes, %ld edges, depth %ld, overlaps %ld, duplicates %ld: %.0f ms\n",
 		n, bsp->triangle_count, bsp->node_count, bsp->leaf_count, bsp->reference_count, bsp->node2d_count,
-		bsp->edge_count, bsp->max_depth, bsp->dropped_overlaps, now_ms() - start);
+		bsp->edge_count, bsp->max_depth, bsp->dropped_overlaps, bsp->duplicates, now_ms() - start);
+	if (has_chief)
+		probe_below(bsp, &chief);
 	if (getenv("SELF_TEST"))
 		self_test(bsp);
 	chiefrim_bsp_free(bsp);

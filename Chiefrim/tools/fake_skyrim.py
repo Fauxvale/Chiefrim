@@ -58,6 +58,9 @@ def terrain_height(dx, dy):
     return h
 
 
+HOLE = False
+
+
 def terrain_triangles(ox, oy, oz):
     """(triangle as 9 floats) list, world coordinates, wound counter-clockwise from above"""
     tris = []
@@ -67,6 +70,8 @@ def terrain_triangles(ox, oy, oz):
         for j in range(n):
             x0, y0 = -half + i * step, -half + j * step
             x1, y1 = x0 + step, y0 + step
+            if HOLE and abs(x0 + step / 2) < 200 and abs(y0 + step / 2) < 200:
+                continue  # a hole in the ground where the player starts
             p = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
             v = [(ox + x, oy + y, oz + terrain_height(x, y)) for x, y in p]
             tris.append(v[0] + v[1] + v[2])
@@ -243,6 +248,14 @@ def main():
                         help="with --terrain: bumpy ground (a plane per triangle, like Skyrim's) and boxes like rocks")
     parser.add_argument("--drive", action="store_true",
                         help="script Chief through the input slot: forward, strafe right, turn right, jump, crouch")
+    parser.add_argument("--recenter-every", type=float, default=0.0,
+                        help="seconds: move the world origin to Chief, as Skyrim does on a load or a door"
+                             " (a new world context, a Teleport where he is, the collision again)")
+    parser.add_argument("--start-below", type=float, default=0.0,
+                        help="Skyrim units: start the player (and the floor) this far under the terrain,"
+                             " as when Skyrim's ground is higher than the stand-in floor")
+    parser.add_argument("--hole", action="store_true",
+                        help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
     options = parser.parse_args()
 
     print(f"fake_skyrim: waiting for {PATH}", flush=True)
@@ -276,13 +289,15 @@ def main():
     link.push(RING_TO_HALO, MSG_HELLO,
         struct.pack("<II48s", VERSION, os.getpid(), b"fake_skyrim.py"))
     # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, reserved[2]
+    start_z = options.z - options.start_below
     link.slot_write(SLOT_WORLD, struct.pack("<II3ffIf2I",
-        TAMRIEL, 0, options.x, options.y, options.z, options.z, 1, options.fov, 0, 0))
+        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, 0, 0))
     link.push(RING_TO_HALO, MSG_TELEPORT,
-        struct.pack("<4f", options.x, options.y, options.z, math.radians(options.heading)))
+        struct.pack("<4f", options.x, options.y, start_z, math.radians(options.heading)))
     if options.terrain:
-        global ROUGH
+        global ROUGH, HOLE
         ROUGH = options.rough
+        HOLE = options.hole
         send_terrain(link, 1, options.x, options.y, options.z)
 
     last_print = 0.0
@@ -293,6 +308,9 @@ def main():
     frame = 0
     presses = [0] * 16
     drive_state = {"yaw": 0.0, "terrain": options.terrain}
+    generation, epoch = 1, 1
+    last_recenter = time.monotonic()
+    last_position = None
     try:
         while time.monotonic() < deadline:
             quiet = options.silence_at > 0 and 0 <= time.monotonic() - started - options.silence_at < options.silence_for
@@ -317,6 +335,19 @@ def main():
                     print(f"fake_skyrim: Halo says hello (protocol {version}, pid {pid}, {text(body[8:56])})", flush=True)
                 elif msg_type == MSG_LOG:
                     print(f"halo: {text(body)}", flush=True)
+            if (options.recenter_every > 0 and last_position and
+                    time.monotonic() - last_recenter >= options.recenter_every):
+                # wherever a build is: the race between a build and a new origin
+                px, py, pz, yaw = last_position
+                generation += 1
+                epoch += 1
+                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIf2I",
+                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, 0, 0))
+                link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
+                print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
+                if options.terrain:
+                    send_terrain(link, epoch, options.x, options.y, options.z)
+                last_recenter = time.monotonic()
             if link.u32(HALO_STATE) == SIDE_CLOSING:
                 print("fake_skyrim: Halo is closing")
                 break
@@ -326,6 +357,8 @@ def main():
                 if payload and seq != last_seq:
                     v = struct.unpack("<II3f2fI3f3f3f3f2I", payload)
                     tick, pose, px, py, pz, yaw, pitch, on_ground = v[0:8]
+                    if on_ground:
+                        last_position = (px, py, pz, yaw)
                     ex, ey, ez = v[8:11]
                     fov, body, shield = v[17], v[18], v[19]
                     rate = "" if last_tick is None else f" ({(tick - last_tick) / (now - last_print):.0f} frames/s)"

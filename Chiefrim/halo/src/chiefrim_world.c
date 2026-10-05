@@ -40,6 +40,7 @@ Skyrim's shape as Halo's collision (Chiefrim/docs/DESIGN.md §5):
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+#undef open /* the port's translates Xbox paths; dumps go to a host path */
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1 /* Linux's; the build's -D__STRICT_ANSI__ hides it */
 #endif
@@ -60,6 +61,7 @@ and builds are shared with the worker, so they use the C library's. */
 #define BUILD_RADIUS_Z       1
 #define EVICT_RADIUS         5        /* regions further away are dropped */
 #define BUILD_INTERVAL_MS    250
+#define SETTLE_REACH         0.5f /* world units (~107 Skyrim units) */
 #define DUMP_SLOWER_THAN_MS  1000 /* builds this slow (or failing) are dumped */
 #define FLOOR_HALF_SIZE      2000.0f  /* world units */
 #define SELF_TEST_SAMPLES    48
@@ -82,6 +84,7 @@ struct build_job
 	struct chiefrim_triangle *triangles;
 	long triangle_count;
 	unsigned long map_generation;
+	unsigned long origin_generation; /* the origin its triangles are relative to */
 	boolean floor;
 };
 
@@ -98,6 +101,7 @@ static struct
 	long center[3];             /* Chief's region at the last build */
 
 	cr_vec3 origin;             /* Skyrim units: Halo (0,0,0) */
+	unsigned long origin_generation; /* counts origin changes */
 	real floor_z;               /* world units */
 	boolean world_valid;
 
@@ -108,6 +112,12 @@ static struct
 	struct chiefrim_bsp *current;
 	struct chiefrim_bsp *previous;
 	boolean installed_floor;
+	struct chiefrim_triangle *installed_triangles; /* current's input, for a dump */
+	long installed_triangle_count;
+	boolean have_chief;
+	real_point3d chief;         /* last seen, world units */
+	boolean settle_pending;     /* the first build since the origin moved has landed */
+	boolean awaiting_first_build;
 
 #ifdef __linux__
 	pthread_t thread;
@@ -215,35 +225,41 @@ static long chiefrim_world_clock_ms(void)
 	return (long)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
 
-/* A slow or failed build's input, to replay offline (halo/test/bsp_harness
---replay): CHIEFRIM_DUMP_DIR/build-<pid>-<n>.bin, "CRDUMP1" then the count
-and the triangles as they are in memory (i386). These are Skyrim's shapes:
+/* A build's input, to replay offline (halo/test/bsp_harness --replay), when
+it was slow or failed, or Chief fell through what it built:
+CHIEFRIM_DUMP_DIR/build-<pid>-<n>.bin, "CRDUMP2", the count, the triangles
+as they are in memory (i386), then whether Chief's position follows, and it. These are Skyrim's shapes:
 tools/launch_halo.sh puts them under build/, which git ignores. */
-static void chiefrim_world_dump(struct build_job const *job, long milliseconds, char const *error)
+static void chiefrim_world_dump(struct chiefrim_triangle const *triangles, long count,
+	real_point3d const *chief, char const *why)
 {
 	static long dump_count = 0;
 	char const *directory = getenv("CHIEFRIM_DUMP_DIR");
 	char path[512];
-	long count = job->triangle_count;
+	long has_chief = chief ? 1 : 0;
+	real_point3d none = { 0.f, 0.f, 0.f };
 	int file;
+	boolean written;
 
-	if (!directory || !directory[0] || dump_count >= 20)
+	if (!directory || !directory[0] || dump_count >= 20 || !triangles)
 		return;
 	snprintf(path, sizeof(path), "%s/build-%ld-%ld.bin", directory, (long)getpid(), dump_count++);
 	file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (file < 0)
 		return;
-	if (write(file, "CRDUMP1", 8) != 8 ||
-		write(file, &count, sizeof(count)) != (ssize_t)sizeof(count) ||
-		write(file, job->triangles, sizeof(*job->triangles) * (size_t)count) != (ssize_t)(sizeof(*job->triangles) * (size_t)count))
+	written =
+		write(file, "CRDUMP2", 8) == 8 &&
+		write(file, &count, sizeof(count)) == (ssize_t)sizeof(count) &&
+		write(file, triangles, sizeof(*triangles) * (size_t)count) == (ssize_t)(sizeof(*triangles) * (size_t)count) &&
+		write(file, &has_chief, sizeof(has_chief)) == (ssize_t)sizeof(has_chief) &&
+		write(file, chief ? chief : &none, sizeof(none)) == (ssize_t)sizeof(none);
+	close(file);
+	if (!written)
 	{
-		close(file);
 		unlink(path);
 		return;
 	}
-	close(file);
-	fprintf(stderr, "chiefrim: dumped a %s build (%ld triangles, %ld ms) to %s\n",
-		error[0] ? "failed" : "slow", count, milliseconds, path);
+	fprintf(stderr, "chiefrim: dumped a build's input (%s, %ld triangles) to %s\n", why, count, path);
 }
 
 static void *chiefrim_world_worker(void *unused)
@@ -275,7 +291,7 @@ static void *chiefrim_world_worker(void *unused)
 			map_structure, map_structure->collision_materials.count > 0 ? 0 : NONE, error, sizeof(error));
 		elapsed = chiefrim_world_clock_ms() - started;
 		if (!bsp || elapsed > DUMP_SLOWER_THAN_MS)
-			chiefrim_world_dump(&job, elapsed, error);
+			chiefrim_world_dump(job.triangles, job.triangle_count, NULL, bsp ? "slow" : "failed");
 
 		pthread_mutex_lock(&world.lock);
 		world.result = bsp;
@@ -515,6 +531,7 @@ static void chiefrim_world_start_build(long cx, long cy, long cz)
 	world.job.triangles = triangles;
 	world.job.triangle_count = n;
 	world.job.map_generation = world.map_generation;
+	world.job.origin_generation = world.origin_generation;
 	world.job.floor = FALSE;
 	world.job_pending = TRUE;
 	world.dirty = FALSE;
@@ -552,8 +569,11 @@ static void chiefrim_world_collect_result(void)
 
 	if (!bsp)
 		error(_error_silent, "chiefrim: collision build failed: %s", message);
-	else if (job.map_generation != world.map_generation || !world.world_valid)
-		chiefrim_bsp_free(bsp); /* built for a map or world that is gone */
+	else if (job.map_generation != world.map_generation || job.origin_generation != world.origin_generation ||
+		!world.world_valid)
+	{
+		chiefrim_bsp_free(bsp); /* built for a map, world or origin that is gone */
+	}
 	else if (!chiefrim_world_self_test(bsp))
 		chiefrim_bsp_free(bsp);
 	else
@@ -568,6 +588,15 @@ static void chiefrim_world_collect_result(void)
 		}
 		chiefrim_world_install(bsp);
 		world.installed_floor = FALSE;
+		if (world.awaiting_first_build)
+		{
+			world.awaiting_first_build = FALSE;
+			world.settle_pending = TRUE;
+		}
+		free(world.installed_triangles);
+		world.installed_triangles = job.triangles;
+		world.installed_triangle_count = job.triangle_count;
+		job.triangles = NULL;
 	}
 	free(job.triangles);
 #endif
@@ -627,6 +656,9 @@ void chiefrim_world_map_loaded(void)
 void chiefrim_world_reset(cr_vec3 origin, real floor_z)
 {
 	world.origin = origin;
+	world.origin_generation++; /* builds in flight were for the old origin */
+	world.awaiting_first_build = TRUE;
+	world.settle_pending = FALSE;
 	world.floor_z = floor_z;
 	world.world_valid = TRUE;
 	/* The regions are in Skyrim units, whatever the origin: only Skyrim's
@@ -688,6 +720,9 @@ void chiefrim_world_update(real_point3d const *chief)
 	if (!world.initialized || !world.world_valid || !world.map_structure)
 		return;
 	chiefrim_world_collect_result();
+	world.have_chief = chief != NULL;
+	if (chief)
+		world.chief = *chief;
 	if (!chief || !world.have_regions)
 		return;
 
@@ -713,4 +748,49 @@ void chiefrim_world_update(real_point3d const *chief)
 	{
 		chiefrim_world_start_build(cx, cy, cz);
 	}
+}
+
+boolean chiefrim_world_below_collision(real_point3d const *point)
+{
+	/* half a world unit (~100 Skyrim units) of slack: a body resting on the
+	lowest ground is above it anyway */
+	return world.current && !world.installed_floor && point->z < world.current->min_z - 0.5f;
+}
+
+void chiefrim_world_dump_installed(char const *why)
+{
+#ifdef __linux__
+	if (!world.installed_floor)
+	{
+		chiefrim_world_dump(world.installed_triangles, world.installed_triangle_count,
+			world.have_chief ? &world.chief : NULL, why);
+	}
+#else
+	(void)why;
+#endif
+}
+
+boolean chiefrim_world_settle(real_point3d const *chief, real *ground_z)
+{
+	struct collision_bsp_test_vector_result result;
+	real_point3d start;
+	real_vector3d down = { 0.f, 0.f, -(SETTLE_REACH + 0.1f) };
+
+	if (!world.settle_pending || !world.current || world.installed_floor)
+		return FALSE;
+	world.settle_pending = FALSE;
+	/* Chief stood on the stand-in floor until now: if Skyrim's ground is
+	a little higher there, he is in it. From a knee's height above him (not
+	so high as to find a roof), down to just under his feet. */
+	start = *chief;
+	start.z += SETTLE_REACH;
+	if (!collision_bsp_test_vector(3, &world.current->bsp, 0, NULL, &start, &down, REAL_MAX, &result))
+		return FALSE;
+	*ground_z = start.z + down.k * result.t;
+	return *ground_z > chief->z + 0.01f;
+}
+
+boolean chiefrim_world_has_skyrim_collision(void)
+{
+	return world.current && !world.installed_floor;
 }

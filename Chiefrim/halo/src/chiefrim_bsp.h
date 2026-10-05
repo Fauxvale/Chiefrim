@@ -71,8 +71,10 @@ struct chiefrim_bsp
 	unsigned long *surface_ids;          /* the triangle's id; | 0x80000000 for its back */
 	long triangle_count;                 /* kept after dropping degenerate ones: surfaces
 	                                        0..n-1 are their fronts, n..2n-1 their twins */
+	real min_z;                          /* the lowest point of any triangle */
 	long max_depth;
-	long dropped_overlaps;               /* triangles overlapping on a plane, in extra references */
+	long dropped_overlaps;               /* polygons overlapping on a plane, in extra references */
+	long duplicates;                     /* triangles dropped as repeats of earlier ones */
 };
 
 /* Builds a BSP from triangles. map_planes (the map's collision planes) are

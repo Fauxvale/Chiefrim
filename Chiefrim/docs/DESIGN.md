@@ -168,9 +168,19 @@ collision code.
     synthetic Skyrim-like ground: 36,434 triangles build in ~0.9 s (depth 33); 160,519 of 160,530
     surfaces pass, the rest being coplanar overlaps where the ray finds the other surface. It also
     runs clean under AddressSanitizer;
-  - builds slower than 1 s, or failing, are dumped to `build/collision-dumps/`
-    (`CHIEFRIM_DUMP_DIR`, set by `tools/launch_halo.sh`; git-ignored, since they are Skyrim's
-    shapes), and `tools/test_bsp.sh` replays them;
+  - exact repeats of a triangle (either winding: Skyrim's two-sided meshes) are dropped, and
+    polygons stacked on one plane go in at most 8 references per leaf;
+  - a build is installed only for the origin it was made for: one still running when Skyrim moves
+    the origin (a load, a door, `coc`) is thrown away (installing it shifted the ground under Chief
+    and he fell through);
+  - after the origin moves, Chief stands on the stand-in floor until Skyrim's collision is built;
+    if that ground turns out higher, he is lifted onto it;
+  - if Chief falls below all of the collision loaded around him, or dies and Halo respawns him at
+    the level's spawn point, he goes back to where he last stood on Skyrim's ground;
+  - builds slower than 1 s, failing ones, and the one Chief fell through are dumped to
+    `build/collision-dumps/` (`CHIEFRIM_DUMP_DIR`, set by `tools/launch_halo.sh`; git-ignored,
+    since they are Skyrim's shapes), and `tools/test_bsp.sh` replays them, probing under Chief;
+    `tools/fake_skyrim.py` has `--recenter-every`, `--start-below` and `--hole` for these cases;
   - the map's clusters are copied without fog planes (b30's sea made Chief "underwater").
 
 **Winding:** a surface's edges run **counter-clockwise in its 2D projection**. That is the winding

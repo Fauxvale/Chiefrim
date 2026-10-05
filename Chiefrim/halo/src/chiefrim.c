@@ -66,6 +66,10 @@ static struct
 	real base_field_of_view;      /* Chief's unit's unzoomed camera FOV (radians) */
 	cr_vec3 placement_position;   /* Skyrim units */
 	float placement_heading;
+	boolean lost_unit;            /* Chief died (or went): a respawn follows */
+	boolean have_safe;            /* where Chief last stood on ground (Skyrim units) */
+	cr_vec3 safe_position;
+	float safe_heading;
 	uint32_t ticks;
 	uint32_t last_skyrim_heartbeat;
 	uint32_t last_skyrim_heartbeat_change;
@@ -195,6 +199,9 @@ static void chiefrim_pump_events(void)
 			chiefrim.placement_position = teleport->position;
 			chiefrim.placement_heading = teleport->yaw;
 			chiefrim.placement_pending = TRUE;
+			chiefrim.have_safe = TRUE;
+			chiefrim.safe_position = teleport->position;
+			chiefrim.safe_heading = teleport->yaw;
 			break;
 		}
 		case CR_MSG_COLLISION_RESET:
@@ -205,6 +212,15 @@ static void chiefrim_pump_events(void)
 			break;
 		}
 	}
+}
+
+/* Places Chief where he last stood on ground (over a respawn or a fall). */
+static void chiefrim_return_to_safe(void)
+{
+	chiefrim.placement_position = chiefrim.safe_position;
+	chiefrim.placement_position.z += 16.0f; /* settle onto it, not into it */
+	chiefrim.placement_heading = chiefrim.safe_heading;
+	chiefrim.placement_pending = TRUE;
 }
 
 static void chiefrim_publish_player(void)
@@ -223,6 +239,7 @@ static void chiefrim_publish_player(void)
 			error(_error_silent, "chiefrim: stopped publishing the player (%s)",
 				unit_index == NONE ? "no unit" : "no world");
 			chiefrim.publishing = FALSE;
+			chiefrim.lost_unit = unit_index == NONE;
 		}
 		return;
 	}
@@ -230,6 +247,16 @@ static void chiefrim_publish_player(void)
 	{
 		error(_error_silent, "chiefrim: publishing the player");
 		chiefrim.publishing = TRUE;
+		if (chiefrim.lost_unit && chiefrim.have_safe && !chiefrim.placement_pending)
+		{
+			/* Halo respawned Chief at the level's own spawn point, which the
+			Skyrim player would follow: back to the ground he last stood on */
+			error(_error_silent, "chiefrim: Chief is back; returning him to where he last stood");
+			chiefrim.lost_unit = FALSE;
+			chiefrim_return_to_safe();
+			return;
+		}
+		chiefrim.lost_unit = FALSE;
 	}
 
 	memset(&state, 0, sizeof(state));
@@ -264,6 +291,22 @@ static void chiefrim_publish_player(void)
 		struct biped_datum *biped = biped_get(unit_index);
 
 		state.on_ground = !TEST_FLAG(biped->biped.flags, _biped_airborne_bit);
+		if (state.on_ground && chiefrim_world_has_skyrim_collision())
+		{
+			/* on Skyrim's ground, not the stand-in floor of a new origin */
+			chiefrim.have_safe = TRUE;
+			chiefrim.safe_position = state.position;
+			chiefrim.safe_heading = state.yaw;
+		}
+		else if (chiefrim.have_safe && !chiefrim.placement_pending && chiefrim_world_below_collision(&origin))
+		{
+			/* below every triangle loaded around him: he fell through a hole
+			in the collision. Catch him before Halo kills him. */
+			error(_error_silent, "chiefrim: Chief fell through the collision (%.0f units below where he last stood); returning him",
+				chiefrim.safe_position.z - state.position.z);
+			chiefrim_world_dump_installed("fell through");
+			chiefrim_return_to_safe();
+		}
 		if (!state.on_ground)
 			state.pose = CR_POSE_AIRBORNE;
 		else if (biped->biped.crouch > 0.5f)
@@ -473,6 +516,19 @@ void chiefrim_frame(void)
 		if (unit_index != NONE)
 			object_get_origin(unit_index, &chief);
 		chiefrim_world_update(unit_index != NONE ? &chief : NULL);
+		if (unit_index != NONE)
+		{
+			real ground_z;
+
+			if (chiefrim_world_settle(&chief, &ground_z))
+			{
+				real lift = ground_z + 0.05f - chief.z;
+
+				chief.z += lift;
+				player_teleport(local_player_get_player_index(0), NONE, &chief);
+				error(_error_silent, "chiefrim: Skyrim's ground arrived above Chief's feet; lifted him %.2f wu onto it", lift);
+			}
+		}
 	}
 
 	chiefrim_debug_collision();

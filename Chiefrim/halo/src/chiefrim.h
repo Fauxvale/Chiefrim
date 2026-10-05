@@ -52,6 +52,12 @@ void chiefrim_world_map_loaded(void);             /* a structure BSP loaded */
 void chiefrim_world_reset(cr_vec3 origin, real floor_z); /* a new world; floor in world units */
 void chiefrim_world_message(int type, void const *message);
 void chiefrim_world_update(real_point3d const *chief); /* each frame; Chief or NULL */
+boolean chiefrim_world_below_collision(real_point3d const *point); /* below all of Skyrim's collision loaded */
+boolean chiefrim_world_has_skyrim_collision(void); /* not the stand-in floor */
+/* Once after the first build since the origin moved: TRUE, with the ground's
+height, if Chief is in the ground there (the stand-in floor was lower). */
+boolean chiefrim_world_settle(real_point3d const *chief, real *ground_z);
+void chiefrim_world_dump_installed(char const *why); /* the installed build's input, to build/collision-dumps */
 
 /* scenario.c, right after a structure BSP becomes the global one. Replaces
 the map's collision BSP with Chiefrim's (docs §5.1). */

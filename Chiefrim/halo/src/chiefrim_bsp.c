@@ -70,6 +70,7 @@ offline, with Halo's own queries, under AddressSanitizer.
 #define CHIEFRIM_FRAGMENT_POINTS   16       /* a piece being cut */
 #define CHIEFRIM_SURFACE_POINTS    8        /* MAXIMUM_VERTICES_PER_COLLISION_SURFACE */
 #define CHIEFRIM_LEAF_TWO_SIDED    0x0001   /* _collision_leaf_contains_two_sided_bit */
+#define CHIEFRIM_BSP_OVERLAP_ROUNDS 8  /* references to one plane in one leaf, at most */
 #define CHIEFRIM_TWIN              0x40000000L /* in pending lists: the emitted polygon's twin */
 
 /* ---------- structures */
@@ -136,6 +137,7 @@ struct builder
 	struct hash_table plane_table;
 	struct hash_table vertex_table;
 	struct hash_table edge_table;
+	struct hash_table triangle_table;
 	boolean failed;
 	char const *failure;
 
@@ -615,6 +617,13 @@ static long code_for(struct builder const *b, long e, boolean negative)
 
 /* ---------- 2D BSPs (one per leaf reference) */
 
+static int compare_projected(void const *a, void const *z)
+{
+	long x = ((struct projected const *)a)->surface, y = ((struct projected const *)z)->surface;
+
+	return x < y ? -1 : x > y ? 1 : 0;
+}
+
 static void add_overflow(struct builder *b, struct projected const *items, long count)
 {
 	long i;
@@ -809,7 +818,7 @@ static long make_leaf(struct builder *b, struct pending const *pending, long pen
 {
 	long leaf = b->out->leaf_count;
 	long first = b->out->reference_count;
-	long count = 0, p;
+	long count = 0, p, rounds;
 
 	GROW(b, leaves, leaf_capacity, leaf + 1);
 	if (b->failed)
@@ -828,6 +837,7 @@ static long make_leaf(struct builder *b, struct pending const *pending, long pen
 			return NONE;
 		/* one reference, and another to the same plane for whatever overlaps
 		on it */
+		rounds = 0;
 		while (item_count > 0 && !b->failed)
 		{
 			long root, reference;
@@ -842,10 +852,22 @@ static long make_leaf(struct builder *b, struct pending const *pending, long pen
 			b->out->references[reference].plane_designator = pending[p].designator;
 			b->out->references[reference].root_index = root; /* codes: fixed up at the end */
 			count++;
-			b->out->dropped_overlaps += b->overflow_count;
-			if (b->overflow_count)
-				memcpy(items, b->overflow, sizeof(struct projected) * (size_t)b->overflow_count);
-			item_count = b->overflow_count;
+			/* a polygon spanning a 2D split can overflow on both sides:
+			once each, so the next round is no bigger than this one */
+			qsort(b->overflow, (size_t)b->overflow_count, sizeof(struct projected), compare_projected);
+			{
+				long unique = 0, i;
+
+				for (i = 0; i < b->overflow_count; i++)
+				{
+					if (unique == 0 || b->overflow[i].surface != items[unique - 1].surface)
+						items[unique++] = b->overflow[i];
+				}
+				b->out->dropped_overlaps += unique;
+				item_count = unique;
+			}
+			if (++rounds >= CHIEFRIM_BSP_OVERLAP_ROUNDS)
+				break; /* stacked deeper than this: the rest go untested */
 		}
 		free(items);
 		if (b->failed)
@@ -1186,6 +1208,51 @@ static void fix_codes(struct builder *b)
 	}
 }
 
+/* ---------- duplicate triangles */
+
+static unsigned long vertex_key(real_point3d const *point)
+{
+	unsigned long key[3];
+
+	key[0] = quantize(point->x, CHIEFRIM_BSP_WELD);
+	key[1] = quantize(point->y, CHIEFRIM_BSP_WELD);
+	key[2] = quantize(point->z, CHIEFRIM_BSP_WELD);
+	return hash_key(key) ^ key[0] * 2654435761u;
+}
+
+static void sort3(unsigned long k[3])
+{
+	unsigned long t;
+
+	if (k[0] > k[1]) { t = k[0]; k[0] = k[1]; k[1] = t; }
+	if (k[1] > k[2]) { t = k[1]; k[1] = k[2]; k[2] = t; }
+	if (k[0] > k[1]) { t = k[0]; k[0] = k[1]; k[1] = t; }
+}
+
+/* TRUE if the same three corners (in any order: either winding) came
+before. Skyrim's two-sided meshes repeat triangles reversed, and every
+triangle gets a reversed twin anyway; a repeat would only overlap itself. */
+static boolean duplicate_triangle(struct builder *b, struct chiefrim_triangle const *in)
+{
+	unsigned long key[3];
+	struct hash_entry *entry;
+
+	if (!hash_reserve(&b->triangle_table))
+	{
+		fail(b, "out of memory");
+		return FALSE;
+	}
+	key[0] = vertex_key(&in->v[0]);
+	key[1] = vertex_key(&in->v[1]);
+	key[2] = vertex_key(&in->v[2]);
+	sort3(key);
+	entry = hash_slot(&b->triangle_table, key);
+	if (entry->used)
+		return TRUE;
+	hash_put(entry, key, 0, &b->triangle_table);
+	return FALSE;
+}
+
 /* ---------- public code */
 
 struct chiefrim_bsp *chiefrim_bsp_build(
@@ -1208,7 +1275,8 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 	if (!b.out ||
 		!hash_init(&b.plane_table, 1024 + map_plane_count) ||
 		!hash_init(&b.vertex_table, 1024) ||
-		!hash_init(&b.edge_table, 1024))
+		!hash_init(&b.edge_table, 1024) ||
+		!hash_init(&b.triangle_table, 1024))
 	{
 		snprintf(error, (size_t)error_size, "out of memory");
 		goto fail;
@@ -1235,6 +1303,11 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 
 		if (!polygon_plane(in->v, 3, &plane))
 			continue; /* degenerate */
+		if (duplicate_triangle(&b, in))
+		{
+			b.out->duplicates++;
+			continue;
+		}
 		designator = add_plane(&b, &plane);
 		if (designator == NONE)
 			break;
@@ -1391,12 +1464,16 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 #undef CHIEFRIM_BLOCK
 
 	b.out->triangle_count = b.emitted_count; /* the fronts: surfaces 0..n-1 */
+	b.out->min_z = REAL_MAX;
+	for (i = 0; i < b.out->vertex_count; i++)
+		b.out->min_z = MIN(b.out->min_z, b.out->vertices[i].point.z);
 	free(b.fragments);
 	free(b.emitted);
 	free(b.overflow);
 	hash_dispose(&b.plane_table);
 	hash_dispose(&b.vertex_table);
 	hash_dispose(&b.edge_table);
+	hash_dispose(&b.triangle_table);
 	return b.out;
 
 failed:
@@ -1409,6 +1486,7 @@ fail:
 	hash_dispose(&b.plane_table);
 	hash_dispose(&b.vertex_table);
 	hash_dispose(&b.edge_table);
+	hash_dispose(&b.triangle_table);
 	chiefrim_bsp_free(b.out);
 	return NULL;
 }

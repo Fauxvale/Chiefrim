@@ -41,8 +41,9 @@ else
 	wrap="gamescope --backend headless -W 1280 -H 720 --"
 fi
 
+mkdir -p "$root/build/collision-dumps"
 (
-	CHIEFRIM=1 \
+	CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 	HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \
 	HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false \
 	HALO_HIDDEN_WINDOW=false HALO_EXIT_AFTER="$seconds" \
