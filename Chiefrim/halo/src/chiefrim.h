@@ -45,6 +45,7 @@ unsigned long chiefrim_input_keyboard_actions(short controller_index);
 boolean chiefrim_input_movement(short controller_index, real *forward, real *strafe);
 boolean chiefrim_input_look(short gamepad_index, real *yaw, real *pitch);
 boolean chiefrim_input_driving(short gamepad_index);
+boolean chiefrim_input_mark(void); /* the "mark stuck" hotkey, once per press */
 
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
 void chiefrim_world_initialize(void);

@@ -220,6 +220,10 @@ collision code.
     a second);
   - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
     edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
+  - when Chief is stuck (a second pushing without moving, no ledge to step onto; once a place) or
+    the player presses Chiefrim's "mark stuck" hotkey (`iMarkStuckKey`, F8; the input slot's
+    `CR_ACTION_MARK`), his state goes to the log and the collision around him is saved; the
+    harness's `PROBE_AHEAD=x,y` casts rays that way from heights above his feet;
   - builds slower than 1 s (3 at most), failing ones, and the one Chief fell through are dumped to
     `build/collision-dumps/` (`CHIEFRIM_DUMP_DIR`, set by `tools/launch_halo.sh`; git-ignored,
     since they are Skyrim's shapes), and `tools/test_bsp.sh` replays them, probing under Chief;

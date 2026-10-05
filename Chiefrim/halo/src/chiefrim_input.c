@@ -95,6 +95,22 @@ static unsigned long chiefrim_keyboard_bit(unsigned long action)
 
 /* ---------- public code */
 
+/* TRUE once for each press of Chiefrim's "mark stuck" hotkey. */
+boolean chiefrim_input_mark(void)
+{
+	static boolean valid = FALSE;
+	static uint8_t last;
+	cr_input input;
+	boolean pressed;
+
+	if (!chiefrim_input_read(0, &input))
+		return FALSE;
+	pressed = valid && input.presses[CR_ACTION_MARK] != last;
+	last = input.presses[CR_ACTION_MARK];
+	valid = TRUE;
+	return pressed;
+}
+
 unsigned long chiefrim_input_keyboard_actions(short controller_index)
 {
 	cr_input input;

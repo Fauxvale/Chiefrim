@@ -238,7 +238,7 @@ it was slow or failed, or Chief fell through what it built:
 CHIEFRIM_DUMP_DIR/build-<pid>-<n>.bin, "CRDUMP2", the count, the triangles
 as they are in memory (i386), then whether Chief's position follows, and it. These are Skyrim's shapes:
 tools/launch_halo.sh puts them under build/, which git ignores. */
-static void chiefrim_world_dump(struct chiefrim_triangle const *triangles, long count,
+static char const *chiefrim_world_dump(struct chiefrim_triangle const *triangles, long count,
 	real_point3d const *chief, char const *why)
 {
 	static long dump_count = 0, slow_count = 0;
@@ -250,14 +250,15 @@ static void chiefrim_world_dump(struct chiefrim_triangle const *triangles, long 
 	boolean written;
 
 	/* slow builds come in runs: a few of them, and room kept for falls */
-	if (!directory || !directory[0] || dump_count >= 20 || !triangles)
-		return;
+	if (!directory || !directory[0] || dump_count >= 40 || !triangles)
+		return NULL;
 	if (!chief && slow_count++ >= 3)
-		return;
+		return NULL;
 	snprintf(path, sizeof(path), "%s/build-%ld-%ld.bin", directory, (long)getpid(), dump_count++);
+	static char last_path[512];
 	file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (file < 0)
-		return;
+		return NULL;
 	written =
 		write(file, "CRDUMP2", 8) == 8 &&
 		write(file, &count, sizeof(count)) == (ssize_t)sizeof(count) &&
@@ -268,9 +269,11 @@ static void chiefrim_world_dump(struct chiefrim_triangle const *triangles, long 
 	if (!written)
 	{
 		unlink(path);
-		return;
+		return NULL;
 	}
 	fprintf(stderr, "chiefrim: dumped a build's input (%s, %ld triangles) to %s\n", why, count, path);
+	csstrncpy(last_path, path, sizeof(last_path) - 1);
+	return last_path;
 }
 
 static void *chiefrim_world_worker(void *unused)
@@ -830,8 +833,15 @@ void chiefrim_world_dump_installed(char const *why)
 #ifdef __linux__
 	if (!world.installed_floor)
 	{
-		chiefrim_world_dump(world.installed_triangles, world.installed_triangle_count,
+		char const *path = chiefrim_world_dump(world.installed_triangles, world.installed_triangle_count,
 			world.have_chief ? &world.chief : NULL, why);
+
+		if (path)
+		{
+			char const *name = strrchr(path, '/');
+
+			error(_error_silent, "chiefrim: saved the collision around Chief (%s) as %s", why, name ? name + 1 : path);
+		}
 	}
 #else
 	(void)why;

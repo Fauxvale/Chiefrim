@@ -79,6 +79,8 @@ static struct
 	real_point3d last_feet;
 	long floor_guard_count;
 	long stuck_samples;           /* step assist: 100 ms samples pushing without moving */
+	boolean have_stuck_report;
+	real_point3d last_stuck_report;
 	uint32_t stuck_sample_ms;
 	real_point3d stuck_sample;
 	long step_count;
@@ -648,6 +650,31 @@ void chiefrim_initialize(void)
 	error(_error_silent, "chiefrim: active, %s ready (protocol %u)", CR_SHM_LINUX_PATH, CR_PROTOCOL_VERSION);
 }
 
+/* Chief's state, for the log, with the collision around him saved: when
+he seems stuck, or the player says he is (the "mark stuck" hotkey). */
+static void chiefrim_report_stuck(long unit_index, char const *why)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	real_point3d position;
+	char state[160];
+
+	object_get_origin(unit_index, &position);
+	csstrncpy(state, "", sizeof(state));
+	if (unit->object.type == _object_type_biped)
+	{
+		struct biped_datum *biped = biped_get(unit_index);
+
+		snprintf(state, sizeof(state), "%s, support surface %ld, crouch %.2f, ",
+			TEST_FLAG(biped->biped.flags, _biped_airborne_bit) ? "airborne" : "on ground",
+			biped->biped.support_surface_index, biped->biped.crouch);
+	}
+	error(_error_silent, "chiefrim: %s at (%.3f, %.3f, %.3f) wu: %svelocity (%.3f, %.3f, %.3f); floor guard %ld, steps %ld so far",
+		why, position.x, position.y, position.z, state,
+		unit->object.translational_velocity.i, unit->object.translational_velocity.j, unit->object.translational_velocity.k,
+		chiefrim.floor_guard_count, chiefrim.step_count);
+	chiefrim_world_dump_installed(why);
+}
+
 /* The radius of Chief's pill (world units). */
 static real chiefrim_chief_radius(long unit_index)
 {
@@ -699,6 +726,19 @@ static void chiefrim_step_assist(long unit_index, real_point3d *chief)
 	}
 	if (++chiefrim.stuck_samples < 2)
 		return;
+	if (chiefrim.stuck_samples == 10)
+	{
+		/* a second of pushing without moving, and no ledge to step up:
+		stuck. Reported once a place. */
+		real dx = chief->x - chiefrim.last_stuck_report.x, dy = chief->y - chiefrim.last_stuck_report.y;
+
+		if (!chiefrim.have_stuck_report || dx * dx + dy * dy > 0.5f * 0.5f)
+		{
+			chiefrim_report_stuck(unit_index, "Chief seems stuck");
+			chiefrim.last_stuck_report = *chief;
+			chiefrim.have_stuck_report = TRUE;
+		}
+	}
 
 	unit_get_aiming_vector(unit_index, &aim);
 	aim.k = 0.f;
@@ -783,6 +823,8 @@ void chiefrim_frame(void)
 		}
 		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending)
 			chiefrim_step_assist(unit_index, &chief);
+		if (chiefrim_input_mark() && unit_index != NONE)
+			chiefrim_report_stuck(unit_index, "marked stuck by the player");
 		chiefrim.have_last_feet = unit_index != NONE;
 		if (unit_index != NONE)
 			chiefrim.last_feet = chief;

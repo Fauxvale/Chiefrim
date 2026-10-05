@@ -103,7 +103,8 @@ keys: rebinding a Skyrim action rebinds Chief's with it. */
 #define CR_ACTION_SWITCH_WEAPON  8u
 #define CR_ACTION_SWITCH_GRENADE 9u
 #define CR_ACTION_FLASHLIGHT     10u
-#define CR_ACTION_COUNT          11u
+#define CR_ACTION_MARK           11u /* not Halo's: "Chief is stuck here", for the logs */
+#define CR_ACTION_COUNT          12u
 #define CR_ACTION_SLOTS          16u /* room to grow */
 
 typedef struct cr_input

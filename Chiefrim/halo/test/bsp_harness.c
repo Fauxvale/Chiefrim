@@ -278,6 +278,32 @@ static void probe_below(struct chiefrim_bsp *bsp, real_point3d const *chief)
 	else
 		put("; down from PROBE_Z (or 2 above him): nothing");
 	put("\n");
+	/* PROBE_AHEAD=x,y (x1000): rays that way from heights above his feet, 1 wu long */
+	if (getenv("PROBE_AHEAD"))
+	{
+		long ax = 0, ay = 0, h;
+
+		sscanf(getenv("PROBE_AHEAD"), "%ld,%ld", &ax, &ay);
+		for (h = 0; h <= 60; h += 5)
+		{
+			real_vector3d ahead = { (real)ax / 1000.f, (real)ay / 1000.f, 0.f };
+
+			start = *chief;
+			start.z += (real)h / 100.f;
+			put("  ahead from +"); put_long(h); put("/100 wu: ");
+			if (collision_bsp_test_vector(1, &bsp->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result))
+			{
+				real k = result.plane->n.k, j = result.plane->n.j, ii = result.plane->n.i;
+
+				if (result.plane_designator < 0) { k = -k; j = -j; ii = -ii; }
+				put("hit at t x1000 "); put_long((long)(result.t * 1000)); put(", surface "); put_long(result.surface_index);
+				put(", normal x1000 "); put_long((long)(ii * 1000)); put(" "); put_long((long)(j * 1000)); put(" "); put_long((long)(k * 1000));
+			}
+			else
+				put("clear");
+			put("\n");
+		}
+	}
 	(void)i;
 }
 

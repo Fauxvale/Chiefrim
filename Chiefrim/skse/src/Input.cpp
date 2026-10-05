@@ -38,7 +38,7 @@ namespace chiefrim::Input
 
 		constexpr std::array kActionNames{
 			"jump", "crouch", "fire", "zoom", "reload", "throw grenade", "melee",
-			"action", "switch weapon", "switch grenade", "flashlight"
+			"action", "switch weapon", "switch grenade", "flashlight", "mark stuck"
 		};
 		static_assert(kActionNames.size() == CR_ACTION_COUNT);
 
@@ -54,6 +54,7 @@ namespace chiefrim::Input
 			std::vector<std::pair<std::string, std::uint32_t>> eventActions;  // user event -> action
 			Hotkey switchGrenade{ CR_ACTION_SWITCH_GRENADE, 0x22, 0 };          // G
 			Hotkey flashlight{ CR_ACTION_FLASHLIGHT, 0x2F, 0 };                 // V
+			Hotkey mark{ CR_ACTION_MARK, 0x42, 0 };                             // F8
 			float  lookSensitivity{ 1.0f };   // times Halo's own mouse feel
 			float  stickLookSpeed{ 3.0f };    // radians per second at full right-stick
 		} config;
@@ -113,6 +114,8 @@ namespace chiefrim::Input
 			config.switchGrenade.button = ReadUInt(path, L"iSwitchGrenadeButton", 0);
 			config.flashlight.key = ReadUInt(path, L"iFlashlightKey", 0x2F);
 			config.flashlight.button = ReadUInt(path, L"iFlashlightButton", 0);
+			config.mark.key = ReadUInt(path, L"iMarkStuckKey", 0x42);
+			config.mark.button = ReadUInt(path, L"iMarkStuckButton", 0);
 			config.lookSensitivity = ReadFloat(path, L"fLookSensitivity", 1.0f);
 			config.stickLookSpeed = ReadFloat(path, L"fStickLookSpeed", 3.0f);
 			logger::info("controls: {} Skyrim user events mapped; switch grenade key 0x{:02X}, flashlight key 0x{:02X}, look x{:.2f}",
@@ -263,7 +266,7 @@ namespace chiefrim::Input
 
 				// Chiefrim's own hotkeys: raw keys (the only ones).
 				const auto device = a_button.GetDevice();
-				for (const auto* hotkey : { &config.switchGrenade, &config.flashlight }) {
+				for (const auto* hotkey : { &config.switchGrenade, &config.flashlight, &config.mark }) {
 					const bool match =
 						(device == RE::INPUT_DEVICE::kKeyboard && hotkey->key && a_button.GetIDCode() == hotkey->key) ||
 						(device == RE::INPUT_DEVICE::kGamepad && hotkey->button && a_button.GetIDCode() == hotkey->button);
@@ -373,7 +376,7 @@ namespace chiefrim::Input
 					kActionNames[action], eventName, key(eventName, RE::INPUT_DEVICE::kKeyboard),
 					key(eventName, RE::INPUT_DEVICE::kMouse), key(eventName, RE::INPUT_DEVICE::kGamepad));
 			}
-			for (const auto* hotkey : { &config.switchGrenade, &config.flashlight }) {
+			for (const auto* hotkey : { &config.switchGrenade, &config.flashlight, &config.mark }) {
 				if (!hotkey->key) {
 					continue;
 				}
