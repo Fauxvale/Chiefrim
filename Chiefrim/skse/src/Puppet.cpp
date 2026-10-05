@@ -2,6 +2,7 @@
 #include "Puppet.h"
 
 #include "Camera.h"
+#include "Collision.h"
 #include "Input.h"
 #include "Link.h"
 
@@ -71,6 +72,7 @@ namespace chiefrim::Puppet
 			auto& link = Link::Get();
 			link.SendWorldContext(context);
 			link.SendTeleport(position, a_player->data.angle.z);
+			Collision::Reset();  // Halo forgets the old world's collision
 
 			s.worldSent = true;
 			s.worldId = a_id;
@@ -161,6 +163,7 @@ namespace chiefrim::Puppet
 			if (auto state = link.ReadPlayerState()) {
 				Follow(a_player, *state);
 			}
+			Collision::Update(a_player);
 		}
 
 		struct PlayerUpdateHook

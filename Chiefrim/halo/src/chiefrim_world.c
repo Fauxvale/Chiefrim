@@ -567,8 +567,10 @@ void chiefrim_world_reset(cr_vec3 origin, real floor_z)
 	world.origin = origin;
 	world.floor_z = floor_z;
 	world.world_valid = TRUE;
-	region_clear_all();
-	world.dirty = FALSE;
+	/* The regions are in Skyrim units, whatever the origin: only Skyrim's
+	collision reset (with each new world) drops them. Until a build for the
+	new origin lands, the floor. */
+	world.dirty = world.have_regions;
 	if (world.map_structure)
 		chiefrim_world_install_floor();
 }

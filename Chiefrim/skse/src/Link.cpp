@@ -167,6 +167,11 @@ namespace chiefrim
 		Push(CR_MSG_TELEPORT, &teleport, sizeof(teleport));
 	}
 
+	bool Link::PushRaw(std::uint16_t a_type, const void* a_message, std::uint32_t a_size)
+	{
+		return shm_ && cr_ring_push(&shm_->to_halo, a_type, a_message, a_size);
+	}
+
 	void Link::SendInput(const cr_input& a_input)
 	{
 		if (shm_) {

@@ -23,6 +23,9 @@ namespace chiefrim
 		void SendTeleport(const RE::NiPoint3& a_position, float a_heading);
 		void SendInput(const cr_input& a_input);
 
+		// Pushes a message onto the ring to Halo; false if it's full now.
+		bool PushRaw(std::uint16_t a_type, const void* a_message, std::uint32_t a_size);
+
 		// The latest player state; nullopt until Halo publishes one.
 		std::optional<cr_player_state> ReadPlayerState();
 

@@ -53,9 +53,14 @@ Halo links the user's own SDL3, glibc, OpenGL and audio libraries as system libr
 ## Design reference
 
 Chiefrim's architecture follows [SkyCraft](https://github.com/chasmlol/SkyCraft) (MIT,
-Copyright (c) 2026 chasmlol). Two small patterns in `Chiefrim/skse/src` are adapted from
-SkyCraft's SKSE plugin: the log setup, and the `PlayerCharacter::Update` hook. SkyCraft's
-license:
+Copyright (c) 2026 chasmlol). Parts of `Chiefrim/skse/src` are adapted from SkyCraft's SKSE
+plugin:
+- the log setup and the `PlayerCharacter::Update` hook;
+- the camera hooks (`Camera.cpp`);
+- the Havok collision harvesting (`Collision.cpp`): gathering the world's bodies, walking their
+  shape trees, primitives as triangles, and the fault guards.
+
+SkyCraft's license:
 
 > MIT License
 >
