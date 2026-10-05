@@ -382,6 +382,49 @@ static void floor_guard_test(struct chiefrim_bsp *bsp)
 		seen, floors, steep, no_hit, small);
 }
 
+/* As the plugin's Subdivide: split at the longest edge's middle while an
+edge is over 256 units; emit (Skyrim units in, world units out). */
+static void subdivide_emit(struct chiefrim_triangle *t, long *n, long capacity, float const *v, float k_unused)
+{
+	float best = 0.f;
+	int edge = 0, e, a, b, j;
+	float first[9], second[9];
+
+	(void)k_unused;
+	for (e = 0; e < 3; e++)
+	{
+		float const *p = v + e * 3, *q = v + ((e + 1) % 3) * 3;
+		float d = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]) + (q[2] - p[2]) * (q[2] - p[2]);
+
+		if (d > best) { best = d; edge = e; }
+	}
+	if (best <= 256.f * 256.f || *n >= capacity - 2)
+	{
+		for (j = 0; j < 3; j++)
+		{
+			t[*n].v[j].x = v[j * 3] / 213.36f;
+			t[*n].v[j].y = v[j * 3 + 1] / 213.36f;
+			t[*n].v[j].z = v[j * 3 + 2] / 213.36f;
+		}
+		t[*n].id = (unsigned long)*n;
+		(*n)++;
+		return;
+	}
+	a = edge;
+	b = (edge + 1) % 3;
+	for (j = 0; j < 9; j++)
+		first[j] = second[j] = v[j];
+	for (j = 0; j < 3; j++)
+	{
+		float m = (v[a * 3 + j] + v[b * 3 + j]) * 0.5f;
+
+		first[b * 3 + j] = m;
+		second[a * 3 + j] = m;
+	}
+	subdivide_emit(t, n, capacity, first, 0.f);
+	subdivide_emit(t, n, capacity, second, 0.f);
+}
+
 int main(int argc, char **argv)
 {
 	long capacity = 400000, n = 0, i, j;
@@ -496,6 +539,43 @@ int main(int argc, char **argv)
 
 		TRI(x0, y0, z, x1, y1, z, x2, y2, z);
 		TRI(x0, y0, z, x2, y2, z, x3, y3, z);
+	}
+	/* SUBDIVIDE=1: big tilted floor slabs (boxes) split as the plugin splits
+	triangles over 256 units (at the longest edge's middle) */
+	if (getenv("SUBDIVIDE"))
+	{
+		long slab;
+
+		for (slab = 0; slab < 12; slab++)
+		{
+			float cx = uniform(-half / 2, half / 2), cy = uniform(-half / 2, half / 2), cz = 300.f + slab * 40.f;
+			float hx = uniform(300, 1200), hy = uniform(300, 1200), hz = uniform(2, 30), a = uniform(0, 3.14159f), tilt = uniform(-0.05f, 0.05f);
+			float c[8][3];
+			static int const q[6][4] = { { 0, 1, 3, 2 }, { 4, 6, 7, 5 }, { 0, 4, 5, 1 }, { 2, 3, 7, 6 }, { 0, 2, 6, 4 }, { 1, 5, 7, 3 } };
+			long m;
+
+			for (m = 0; m < 8; m++)
+			{
+				float lx = (m & 1) ? hx : -hx, ly = (m & 2) ? hy : -hy, lz = (m & 4) ? hz : -hz;
+				c[m][0] = cx + lx * cosf(a) - ly * sinf(a);
+				c[m][1] = cy + lx * sinf(a) + ly * cosf(a);
+				c[m][2] = cz + lz + lx * tilt;
+			}
+			for (m = 0; m < 6; m++)
+			{
+				float tri[2][9];
+				long h;
+				int const *k = q[m];
+
+				for (h = 0; h < 3; h++)
+				{
+					tri[0][h] = c[k[0]][h]; tri[0][3 + h] = c[k[1]][h]; tri[0][6 + h] = c[k[2]][h];
+					tri[1][h] = c[k[0]][h]; tri[1][3 + h] = c[k[2]][h]; tri[1][6 + h] = c[k[3]][h];
+				}
+				for (h = 0; h < 2; h++)
+					subdivide_emit(t, &n, capacity, tri[h], 0.f);
+			}
+		}
 	}
 	TRI(-2000, -800, 0, 2000, -800, 0, 2000, -800, 400);
 	TRI(-2000, -800, 0, 2000, -800, 400, -2000, -800, 400);

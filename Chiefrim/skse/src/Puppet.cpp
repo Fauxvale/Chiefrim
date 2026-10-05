@@ -39,6 +39,8 @@ namespace chiefrim::Puppet
 			bool haveSnapshot{ false };
 			std::uint32_t snapshotFlags{ 0 };
 			std::uint32_t snapshotState{ 0 };
+			ULONGLONG watchUntil{ 0 };
+			ULONGLONG nextWatch{ 0 };
 		} s;
 
 		using Flags = RE::CHARACTER_FLAGS;
@@ -51,6 +53,14 @@ namespace chiefrim::Puppet
 			a_player->GetGraphVariableBool("bInJumpState", inJump);
 			a_player->GetGraphVariableBool("IsSprinting", sprinting);
 			a_player->GetGraphVariableBool("bAnimationDriven", animationDriven);
+			const auto* map = RE::ControlMap::GetSingleton();
+			const auto* controls = RE::PlayerControls::GetSingleton();
+			const bool jumpHandler = controls && controls->jumpHandler && controls->jumpHandler->IsInputEventHandlingEnabled();
+			const bool sprintHandler = controls && controls->sprintHandler && controls->sprintHandler->IsInputEventHandlingEnabled();
+			logger::info("player {}: z {:.1f}, midair {}, controls 0x{:08X} (jumping {}), handlers jump {} sprint {}",
+				a_when, a_player->GetPosition().z, a_player->IsInMidair(),
+				map ? map->GetRuntimeData().enabledControls.underlying() : 0u,
+				map && map->IsJumpingControlsEnabled(), jumpHandler, sprintHandler);
 			logger::info("player {}: controller state {}, flags 0x{:08X} (can jump {}, jumping {}, support {}); graph: in jump {}, sprinting {}, animation driven {}",
 				a_when,
 				controller ? static_cast<std::uint32_t>(controller->context.currentState) : 99u,
@@ -92,7 +102,28 @@ namespace chiefrim::Puppet
 				a_player->NotifyAnimationGraph("JumpLand");
 			}
 			s.haveSnapshot = false;
+			// Halo's floor can sit a hair under Skyrim's: a little up, so
+			// Skyrim's physics lands the player and finds its footing again.
+			auto position = a_player->GetPosition();
+			position.z += 5.0f;
+			a_player->SetPosition(position, true);
 			LogMovementState(a_player, "after putting it back");
+			s.watchUntil = ::GetTickCount64() + 10000;
+			s.nextWatch = ::GetTickCount64() + 2000;
+		}
+
+		// For a while after Chief lets go: is Skyrim's player itself again?
+		void WatchAfterUnlink(RE::PlayerCharacter* a_player)
+		{
+			const auto now = ::GetTickCount64();
+			if (!s.watchUntil || now < s.nextWatch) {
+				return;
+			}
+			LogMovementState(a_player, "after Chief let go");
+			s.nextWatch = now + 2000;
+			if (now >= s.watchUntil) {
+				s.watchUntil = 0;
+			}
 		}
 
 		bool GameplayIsRunning()
@@ -231,6 +262,7 @@ namespace chiefrim::Puppet
 					Camera::Release(a_player);
 					RestoreController(a_player);
 				}
+				WatchAfterUnlink(a_player);
 				return;
 			}
 			if (!wasConnected) {

@@ -222,9 +222,11 @@ collision code.
     also deathless (`cheat.deathless_player`) until deaths follow Skyrim's;
   - a step assist: Skyrim's characters step up onto ledges (a road piece's lip, a boardwalk's
     edge) that stop Halo's biped, or worse: walking into a board's edge 35 units up, Halo pushed him
-    down and under it. Every 100 ms while he is pushing a way, if something is in the way below 48
-    units (rays every 3 units: boards are 4 thick), nothing at 48, and a floor on top, he is lifted
-    onto it. A second pushing without moving is reported as stuck. If the floor guard fires 8 times
+    down and under it. Checked every 100 ms while he is pushing a way: something in the way below
+    48 units (rays every 3 units: boards are 4 thick), nothing at 48, a floor on top. A board's
+    edge (open below) lifts him as he reaches it; an ordinary ledge only once he has stopped
+    against it (lifting him ahead of every ledge made walking jumpy: 30 lifts in 3 minutes).
+    Every 30 s Halo logs how often it moved Chief itself (step-ups, guard put-backs, returns). A second pushing without moving is reported as stuck. If the floor guard fires 8 times
     in 2 s, Chief goes back to where he last stood well;
   - his collision radius, like his height, comes from Skyrim (`[Chief] fRadius`, default: the
     player's character controller, 0.26 Havok units = 18), but never under 0.13 wu (28 units):
@@ -233,9 +235,11 @@ collision code.
     a second);
   - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
     edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
-  - known: on the latest Skyrim dumps 0.5-1.5% of surfaces miss Halo's ray query (sphere queries
-    all hit), clustered where many planes meet nearly at a point; wider near-plane sharing didn't
-    help. Rays matter for shots and the floor guard, not movement;
+  - open: on the latest Skyrim dumps 0.5-1.5% of surfaces miss Halo's ray query (sphere queries
+    all hit), clustered where many planes meet nearly at a point. Not the near-plane band, closed
+    meshes, one-sided faces or the exporter's subdivision (all tested). Chief falling through a
+    road and the land at once, and through a gap in Riverwood's inn floorboards, suggests these are
+    holes for him too;
   - still on the stand-in floor 3 s after a load, Halo logs why (regions, generations, builds);
   - when Chief is stuck (a second pushing without moving, no ledge to step onto; once a place) or
     the player presses Chiefrim's "mark stuck" hotkey (`iMarkStuckKey`, F8; the input slot's

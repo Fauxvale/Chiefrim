@@ -61,7 +61,7 @@ boolean chiefrim_world_room_for(real_point3d const *feet, real height); /* nothi
 boolean chiefrim_world_floor_beneath(real_point3d const *feet); /* a floor right under the feet */
 boolean chiefrim_world_floor_within(real_point3d const *feet, real reach); /* a floor up to reach below */
 boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const *direction, real radius,
-	real max_step, real *top_z); /* a ledge ahead to step up onto */
+	real max_step, real *top_z, boolean *overhang); /* a ledge ahead to step up onto; overhang: open below it */
 /* Once after the first build since the origin moved: TRUE, with the ground's
 height, if Chief is in the ground there (the stand-in floor was lower). */
 boolean chiefrim_world_settle(real_point3d const *chief, real *ground_z);

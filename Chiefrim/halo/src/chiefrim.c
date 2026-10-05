@@ -78,6 +78,8 @@ static struct
 	boolean have_last_feet;       /* the floor guard's last position of Chief (world units) */
 	real_point3d last_feet;
 	long floor_guard_count;
+	long recent_steps, recent_guards, recent_returns; /* moves of Chief's since the last summary */
+	uint32_t summary_ms;
 	uint32_t guard_window_ms;     /* the floor guard's firings in the last 2 s */
 	long guard_window_count;
 	long stuck_samples;           /* step assist: 100 ms samples pushing without moving */
@@ -362,6 +364,7 @@ static void chiefrim_return_to_safe(void)
 	if (chiefrim.last_return_ms && now - chiefrim.last_return_ms < CHIEFRIM_RETURN_RETRY_MS && chiefrim.spot_count > 0)
 		chiefrim.spot_count--;
 	chiefrim.last_return_ms = now;
+	chiefrim.recent_returns++;
 	if (chiefrim.spot_count > 0)
 	{
 		chiefrim.placement_position = chiefrim.spots[chiefrim.spot_count - 1];
@@ -696,6 +699,7 @@ static void chiefrim_step_assist(long unit_index, real_point3d *chief)
 	struct unit_datum *unit = unit_get(unit_index);
 	struct biped_datum *biped;
 	real forward, strafe, moved, radius, top_z;
+	boolean overhang = FALSE;
 	uint32_t now = chiefrim_now_ms();
 	real_vector3d aim, direction;
 
@@ -752,7 +756,12 @@ static void chiefrim_step_assist(long unit_index, real_point3d *chief)
 	if (normalize3d(&direction) == 0.f)
 		return;
 	radius = biped_definition_get(biped->definition_index)->biped.collision_radius;
-	if (!chiefrim_world_step_ahead(chief, &direction, radius, CHIEFRIM_STEP_UNITS / CR_SKY_UNITS_PER_WU, &top_z))
+	if (!chiefrim_world_step_ahead(chief, &direction, radius, CHIEFRIM_STEP_UNITS / CR_SKY_UNITS_PER_WU, &top_z, &overhang))
+		return;
+	/* An ordinary ledge only once he has stopped against it (lifting him
+	ahead of every ledge made walking jumpy); a board's edge, open below,
+	ahead of time: walking into it, Halo pushes him down and under it. */
+	if (!overhang && chiefrim.stuck_samples == 0)
 		return;
 	{
 		real_point3d up = *chief;
@@ -763,11 +772,8 @@ static void chiefrim_step_assist(long unit_index, real_point3d *chief)
 		if (!chiefrim_world_room_for(&up, biped_definition_get(biped->definition_index)->biped.collision_height_standing))
 			return;
 		chiefrim_move_chief(unit_index, &up, TRUE);
-		if (chiefrim.step_count++ % 100 == 0)
-		{
-			error(_error_silent, "chiefrim: stepped Chief up a %.0f-unit ledge (%ld times)",
-				(top_z - chief->z) * CR_SKY_UNITS_PER_WU, chiefrim.step_count);
-		}
+		chiefrim.step_count++;
+		chiefrim.recent_steps++;
 		*chief = up;
 		chiefrim.stuck_samples = 0;
 		chiefrim.stuck_sample_ms = 0;
@@ -823,6 +829,7 @@ void chiefrim_frame(void)
 			}
 			back.z += 0.01f;
 			chiefrim_move_chief(unit_index, &back, TRUE);
+			chiefrim.recent_guards++;
 			if (++chiefrim.guard_window_count >= 8)
 			{
 				/* Halo keeps pushing him down here (wedged under something):
@@ -861,6 +868,23 @@ void chiefrim_frame(void)
 				chiefrim.last_feet = chief;
 				error(_error_silent, "chiefrim: Skyrim's ground arrived above Chief's feet; lifted him %.2f wu onto it", lift);
 			}
+		}
+	}
+
+	{
+		/* every 30 s, how often Chiefrim moved Chief itself (each one a
+		jump in his movement): to match against how walking felt */
+		uint32_t now = chiefrim_now_ms();
+
+		if (now - chiefrim.summary_ms >= 30000)
+		{
+			if (chiefrim.recent_steps || chiefrim.recent_guards || chiefrim.recent_returns)
+			{
+				error(_error_silent, "chiefrim: last 30 s, Chiefrim moved Chief: %ld step-ups, %ld floor-guard put-backs, %ld returns",
+					chiefrim.recent_steps, chiefrim.recent_guards, chiefrim.recent_returns);
+			}
+			chiefrim.recent_steps = chiefrim.recent_guards = chiefrim.recent_returns = 0;
+			chiefrim.summary_ms = now;
 		}
 	}
 

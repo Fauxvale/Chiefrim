@@ -982,7 +982,7 @@ direction in world units, direction flat and of unit length): something in
 the way below max_step, nothing at it, and a floor on top no higher.
 TRUE with the top's height. */
 boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const *direction, real radius,
-	real max_step, real *top_z)
+	real max_step, real *top_z, boolean *overhang)
 {
 	struct collision_bsp_test_vector_result result;
 	real reach = radius + 0.2f; /* a 100 ms sample ahead of his walk */
@@ -1005,6 +1005,7 @@ boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const 
 			start = *feet;
 			start.z += height;
 			blocked = collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result);
+			*overhang = blocked && height > 0.03f; /* open below what's in the way: a board's edge */
 		}
 		if (!blocked)
 			return FALSE; /* nothing in the way: not a ledge */
