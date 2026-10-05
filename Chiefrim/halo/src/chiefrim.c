@@ -648,6 +648,16 @@ void chiefrim_initialize(void)
 	error(_error_silent, "chiefrim: active, %s ready (protocol %u)", CR_SHM_LINUX_PATH, CR_PROTOCOL_VERSION);
 }
 
+/* The radius of Chief's pill (world units). */
+static real chiefrim_chief_radius(long unit_index)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+
+	if (unit->object.type != _object_type_biped)
+		return 0.05f;
+	return biped_definition_get(biped_get(unit_index)->definition_index)->biped.collision_radius;
+}
+
 /* Lifts Chief onto a low ledge he is pushing against without moving
 (Skyrim's characters step up; Halo's biped doesn't). */
 static void chiefrim_step_assist(long unit_index, real_point3d *chief)
@@ -754,7 +764,7 @@ void chiefrim_frame(void)
 			object_get_origin(unit_index, &chief);
 		chiefrim_world_update(unit_index != NONE ? &chief : NULL);
 		if (unit_index != NONE && chiefrim.have_last_feet && !chiefrim.placement_pending &&
-			chiefrim_world_crossed_floor(&chiefrim.last_feet, &chief))
+			chiefrim_world_crossed_floor(&chiefrim.last_feet, &chief, chiefrim_chief_radius(unit_index)))
 		{
 			/* Halo pushed him down through a floor (wedged against
 			something, mostly): back on top of it, his fall stopped */

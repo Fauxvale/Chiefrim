@@ -195,7 +195,11 @@ collision code.
     swapping the stand-in out for them dropped him through), or 6 s have passed; if that ground
     turns out higher, he is lifted onto it;
   - a floor guard: each frame, if Chief went down through a surface facing up (Halo can shove a
-    wedged biped through one), he is put back on top of it with his fall stopped. Offline, on real
+    wedged biped through one), he is put back on top of it with his fall stopped. It looks along the
+    path of his pill's lower sphere's centre, not his feet (Halo's biped origin is the bottom of
+    that sphere): rolling off an edge, the feet dip below the edge's height while still over it,
+    and a guard on the feet put him back on every frame (he caught on road pieces' and floors'
+    edges). Offline, on real
     Skyrim dumps, a short drop through ~95% of floors is seen; the rest have a steeper surface just
     above them or are slivers;
   - if Chief still falls below all of the collision loaded around him, he goes back to one of the

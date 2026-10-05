@@ -63,7 +63,6 @@ and builds are shared with the worker, so they use the C library's. */
 #define BUILD_INTERVAL_MS    250
 #define SUPPORT_PROBE_ABOVE  0.1f /* world units: a biped's ground, from just above its feet... */
 #define SUPPORT_PROBE_BELOW  0.2f /* ...to this far under them */
-#define FLOOR_GUARD_RAISE    0.05f /* world units: the floor guard's ray starts this far above the feet */
 #define AWAIT_GROUND_MS      6000 /* after a load: at most this long on the stand-in floor */
 #define SETTLE_REACH         0.5f /* world units (~107 Skyrim units) */
 #define DUMP_SLOWER_THAN_MS  1000 /* builds this slow (or failing) are dumped */
@@ -123,6 +122,7 @@ static struct
 	boolean have_chief;
 	real_point3d chief;         /* last seen, world units */
 	boolean settle_pending;     /* the first build since the origin moved has landed */
+	boolean logged_await;
 	boolean awaiting_ground;    /* since the origin moved: keep the stand-in floor until a build has ground under Chief */
 	unsigned long reset_ms;
 	boolean awaiting_first_build;
@@ -621,6 +621,12 @@ static void chiefrim_world_collect_result(void)
 		/* Skyrim's collision is still arriving after a load, and not yet
 		under Chief: swapping out the stand-in floor now would drop him
 		through the gap. The next build, with more regions, tries again. */
+		if (!world.logged_await)
+		{
+			error(_error_silent, "chiefrim: collision #%lu has nothing under Chief yet (at %.2f, %.2f, %.2f wu); keeping the stand-in floor",
+				world.builds + 1, world.chief.x, world.chief.y, world.chief.z);
+			world.logged_await = TRUE;
+		}
 		chiefrim_bsp_free(bsp);
 		world.dirty = TRUE;
 	}
@@ -713,6 +719,7 @@ void chiefrim_world_reset(cr_vec3 origin, real floor_z)
 	world.settle_pending = FALSE;
 	world.awaiting_ground = TRUE;
 	world.reset_ms = system_milliseconds();
+	world.logged_await = FALSE;
 	world.floor_z = floor_z;
 	world.world_valid = TRUE;
 	/* The regions are in Skyrim units, whatever the origin: only Skyrim's
@@ -858,8 +865,10 @@ boolean chiefrim_world_has_skyrim_collision(void)
 
 /* Did a biped going from one point to the next (feet, world units) pass
 down through a floor (a surface facing up)? Only downward moves: going up
-steps and slopes is Halo's to do. */
-boolean chiefrim_world_crossed_floor(real_point3d const *from, real_point3d const *to)
+steps and slopes is Halo's to do. Tested at the centre of its lower sphere
+(raise: its radius): the feet (the bottom of the sphere) legitimately dip
+below an edge's height while still over it, as the sphere rolls off it. */
+boolean chiefrim_world_crossed_floor(real_point3d const *from, real_point3d const *to, real raise)
 {
 	struct collision_bsp_test_vector_result result;
 	real_point3d start = *from;
@@ -867,7 +876,7 @@ boolean chiefrim_world_crossed_floor(real_point3d const *from, real_point3d cons
 
 	if (!world.current || world.installed_floor || to->z >= from->z)
 		return FALSE;
-	start.z += FLOOR_GUARD_RAISE;
+	start.z += raise;
 	move.i = to->x - from->x;
 	move.j = to->y - from->y;
 	move.k = to->z - from->z;
