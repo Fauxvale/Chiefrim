@@ -196,9 +196,19 @@ collision code.
     wedged biped through one), he is put back on top of it with his fall stopped. Offline, on real
     Skyrim dumps, a short drop through ~95% of floors is seen; the rest have a steeper surface just
     above them or are slivers;
-  - if Chief still falls below all of the collision loaded around him, or dies and Halo respawns
-    him at the level's spawn point, he goes back to where he last stood on Skyrim's ground with room
-    around him (a spot where he was wedged into something doesn't count);
+  - if Chief still falls below all of the collision loaded around him, he goes back to one of the
+    last 16 spots where he stood on a floor of Skyrim's with room around him; back again within 5 s,
+    that spot was no good (pushed out of an interior, he can stand on something in the void) and the
+    one before is tried, down to where Skyrim put him in this world;
+  - Chief is moved as Halo's `player_teleport` does (`biped_fix_position`), but where Halo finds no
+    valid spot he is put there anyway: Halo's teleport would kill the player, and a campaign death
+    waits for a checkpoint revert Chiefrim never makes (Chief never came back). While linked he is
+    also deathless (`cheat.deathless_player`) until deaths follow Skyrim's;
+  - a step assist: Skyrim's characters step up onto ledges up to ~40 units (a road piece's lip)
+    that stop Halo's biped. Pushing without moving for 200 ms against something at the ankles with
+    nothing at 40 units and a floor on top, Chief is lifted onto it;
+  - his collision radius, like his height, comes from Skyrim (`[Chief] fRadius`, default: the
+    player's character controller);
   - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
     edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
   - builds slower than 1 s (3 at most), failing ones, and the one Chief fell through are dumped to

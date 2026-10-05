@@ -59,6 +59,7 @@ def terrain_height(dx, dy):
 
 
 HOLE = False
+LEDGE = 0.0
 
 
 def terrain_triangles(ox, oy, oz):
@@ -93,6 +94,12 @@ def terrain_triangles(ox, oy, oz):
                 a0, a1, a2, a3 = (corners[i] for i in q)
                 tris.append(a0 + a1 + a2)
                 tris.append(a0 + a2 + a3)
+    if LEDGE:  # a slab like a road piece across the way north, LEDGE units up, from y 80 to 200
+        corners = [(ox + (300 if k & 1 else -300), oy + (200 if k & 2 else 80), oz + (LEDGE if k & 4 else -10)) for k in range(8)]
+        for q in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+            a0, a1, a2, a3 = (corners[i] for i in q)
+            tris.append(a0 + a1 + a2)
+            tris.append(a0 + a2 + a3)
     # a wall south of the start, 400 high, facing north
     a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
     c, d = (ox + 2000, oy - 800, oz + 400), (ox - 2000, oy - 800, oz + 400)
@@ -254,6 +261,8 @@ def main():
     parser.add_argument("--start-below", type=float, default=0.0,
                         help="Skyrim units: start the player (and the floor) this far under the terrain,"
                              " as when Skyrim's ground is higher than the stand-in floor")
+    parser.add_argument("--ledge", type=float, default=0.0,
+                        help="with --terrain: a slab this many units high across the way north, like a road piece (the step assist)")
     parser.add_argument("--hole", action="store_true",
                         help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
     parser.add_argument("--height", type=float, default=128.0,
@@ -297,9 +306,10 @@ def main():
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, start_z, math.radians(options.heading)))
     if options.terrain:
-        global ROUGH, HOLE
+        global ROUGH, HOLE, LEDGE
         ROUGH = options.rough
         HOLE = options.hole
+        LEDGE = options.ledge
         send_terrain(link, 1, options.x, options.y, options.z)
 
     last_print = 0.0

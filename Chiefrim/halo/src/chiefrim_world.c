@@ -903,3 +903,68 @@ void chiefrim_world_generation(unsigned long generation)
 {
 	world.world_generation = generation;
 }
+
+/* A floor (a surface facing up) right under these feet (world units)? */
+boolean chiefrim_world_floor_beneath(real_point3d const *feet)
+{
+	struct collision_bsp_test_vector_result result;
+	real_point3d start = *feet;
+	real_vector3d down = { 0.f, 0.f, -0.3f };
+
+	if (!world.current || world.installed_floor)
+		return FALSE;
+	start.z += 0.1f;
+	if (!collision_bsp_test_vector(FLAG(_collision_test_front_facing_surfaces_bit),
+		&world.current->bsp, 0, NULL, &start, &down, REAL_MAX, &result))
+	{
+		return FALSE;
+	}
+	{
+		real k = result.plane ? result.plane->n.k : 0.f;
+
+		if (result.plane_designator < 0)
+			k = -k;
+		return k > 0.5f;
+	}
+}
+
+/* Skyrim's characters step up onto ledges (a road piece's lip, a stair)
+that stop Halo's biped dead. A ledge ahead (feet and direction in world
+units, direction flat and of unit length): something in the way at the
+ankles, nothing at max_step, and a floor on top no higher than max_step.
+TRUE with the top's height. */
+boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const *direction, real radius,
+	real max_step, real *top_z)
+{
+	struct collision_bsp_test_vector_result result;
+	real reach = radius + 0.12f;
+	real_point3d start;
+	real_vector3d ahead = { direction->i * reach, direction->j * reach, 0.f };
+	real_vector3d down = { 0.f, 0.f, -(max_step + 0.05f) };
+	unsigned long flags = FLAG(_collision_test_front_facing_surfaces_bit);
+
+	if (!world.current || world.installed_floor)
+		return FALSE;
+	start = *feet;
+	start.z += 0.02f;
+	if (!collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result))
+		return FALSE; /* nothing at the ankles: not a ledge */
+	start = *feet;
+	start.z += max_step;
+	if (collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result))
+		return FALSE; /* a wall, not a ledge */
+	start.x += ahead.i;
+	start.y += ahead.j;
+	if (!collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &down, REAL_MAX, &result))
+		return FALSE;
+	{
+		real k = result.plane ? result.plane->n.k : 0.f;
+
+		if (result.plane_designator < 0)
+			k = -k;
+		if (k < 0.5f)
+			return FALSE; /* no floor on top */
+	}
+	*top_z = start.z + down.k * result.t;
+	return *top_z > feet->z + 0.005f && *top_z <= feet->z + max_step;
+}

@@ -77,6 +77,28 @@ namespace chiefrim::Puppet
 			return height;
 		}
 
+		// Chief's collision radius for Halo, in Skyrim units ([Chief] fRadius):
+		// -1 matches the player's character controller, 0 keeps Halo's own (~43).
+		float ChiefRadius(RE::PlayerCharacter* a_player)
+		{
+			static const float setting = Settings::ReadFloat(L"Chief", L"fRadius", -1.0f);
+			if (setting >= 0.0f) {
+				return setting;
+			}
+			const auto* controller = a_player->GetCharController();
+			if (!controller) {
+				return 0.0f;
+			}
+			// the controller's capsule is in Havok units (1/69.99 of Skyrim's)
+			float radius = controller->radius;
+			if (radius > 0.0f && radius < 5.0f) {
+				radius *= 69.99f;
+			}
+			logger::info("the player's character controller: radius {:.2f}, height {:.2f}, scale {:.2f} -> Chief's radius {:.0f}",
+				controller->radius, controller->height, controller->scale, radius);
+			return radius >= 10.0f && radius <= 60.0f ? radius : 0.0f;
+		}
+
 		// Phase 0: the origin and the flat floor are where the player stands
 		// when the world (re)starts (docs §4, §5.1).
 		void SendWorld(RE::PlayerCharacter* a_player, RE::FormID a_id, bool a_interior)
@@ -90,6 +112,7 @@ namespace chiefrim::Puppet
 			context.generation = ++s.generation;
 			context.field_of_view = Camera::FieldOfView();
 			context.chief_height = ChiefHeight(a_player);
+			context.chief_radius = ChiefRadius(a_player);
 
 			auto& link = Link::Get();
 			link.SendWorldContext(context);
@@ -105,6 +128,7 @@ namespace chiefrim::Puppet
 			s.awaitingSince = ::GetTickCount64();
 			logger::info("world {:08X}{}: origin and floor at ({:.0f}, {:.0f}, {:.0f}); Chief {:.0f} units tall",
 				a_id, a_interior ? " (interior)" : "", position.x, position.y, position.z, context.chief_height);
+			logger::info("Chief's radius {:.0f} units", context.chief_radius);
 		}
 
 		// Applies Halo's latest state every frame, new or not: between Halo's

@@ -57,6 +57,9 @@ boolean chiefrim_world_below_collision(real_point3d const *point); /* below all 
 boolean chiefrim_world_has_skyrim_collision(void); /* not the stand-in floor */
 boolean chiefrim_world_crossed_floor(real_point3d const *from, real_point3d const *to); /* feet went down through a floor */
 boolean chiefrim_world_room_for(real_point3d const *feet, real height); /* nothing where his body would be */
+boolean chiefrim_world_floor_beneath(real_point3d const *feet); /* a floor right under the feet */
+boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const *direction, real radius,
+	real max_step, real *top_z); /* a ledge ahead to step up onto */
 /* Once after the first build since the origin moved: TRUE, with the ground's
 height, if Chief is in the ground there (the stand-in floor was lower). */
 boolean chiefrim_world_settle(real_point3d const *chief, real *ground_z);
