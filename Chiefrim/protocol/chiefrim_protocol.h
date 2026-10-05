@@ -206,9 +206,10 @@ typedef struct cr_triangle
 	uint16_t flags;      /* CR_TRIANGLE_* */
 } cr_triangle;
 
-/* Solid only from the front (the land: a height field, outside up). Halo
-gives it no back: where the land pokes up through a road or a floor, it
-mustn't push whoever stands on that down through it. */
+/* Solid only from the front: the land (a height field, outside up) and the
+faces of closed shapes (boxes, capsules, convex hulls, wound outward). Halo
+gives them no back: where the land pokes up through a road, or someone dips
+into a slab, a back would push them down through it. */
 #define CR_TRIANGLE_ONE_SIDED 0x0001u
 
 typedef struct cr_msg_hello

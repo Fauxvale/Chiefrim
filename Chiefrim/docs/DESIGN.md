@@ -148,8 +148,11 @@ collision code.
   in between ticks (`chiefrim_world.c`). Skyrim's collision is an open triangle soup, so:
   - no solid leaves: every leaf is "two-sided", so Halo's ray query tests every plane it crosses,
     exactly;
-  - the land (Skyrim's height-field terrain, flagged `CR_TRIANGLE_ONE_SIDED` by the exporter) is
-    one-sided: its twin is in no leaf. Where terrain pokes up through a road or a floor mesh, its
+  - the land (Skyrim's height-field terrain) and the faces of closed shapes (boxes, capsules,
+    convex hulls, wound outward), flagged `CR_TRIANGLE_ONE_SIDED` by the exporter, are one-sided:
+    their twins are in no leaf. Inside a two-sided solid every face pulls inward too: Chief dipping
+    into a road chunk's top was pushed down through it (the twelfth test: Halo's sphere query
+    touched 18-46 surfaces inside a 48-unit chunk). Havok mesh triangles stay two-sided (sheets). Where terrain pokes up through a road or a floor mesh, its
     back would push whoever stands on the road down through it (the tenth in-game test: Chief in a
     stack of 2-4 layers within 60 units, the floor guard fighting Halo);
   - each triangle is two surfaces, itself and a reversed twin (the sphere query matches surfaces to

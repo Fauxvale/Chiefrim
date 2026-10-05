@@ -170,7 +170,6 @@ namespace chiefrim::Input
 			std::uint32_t frame{ 0 };
 			LARGE_INTEGER lastPublish{};
 			bool          handlersOff{ false };
-			std::array<bool, 11> savedHandlerStates{};
 		} s;
 
 		void Press(std::uint32_t a_action, bool a_down, bool a_pressed)
@@ -334,10 +333,17 @@ namespace chiefrim::Input
 					continue;
 				}
 				if (a_chiefHasThem) {
-					s.savedHandlerStates[i] = handler->IsInputEventHandlingEnabled();
+					if (!handler->IsInputEventHandlingEnabled()) {
+						static constexpr std::array kNames{ "movement", "look", "sprint", "ready weapon", "auto move",
+							"toggle run", "jump", "shout", "attack/block", "run", "toggle POV" };
+						logger::info("Skyrim's {} handler was already off when Chief took over", kNames[i]);
+					}
 					handler->SetInputEventHandlingEnabled(false);
 				} else {
-					handler->SetInputEventHandlingEnabled(s.savedHandlerStates[i]);
+					// On, whatever it was when Chief took over: taken over right
+					// after a load, jump and sprint were briefly off, and putting
+					// that back left the player unable to jump or sprint.
+					handler->SetInputEventHandlingEnabled(true);
 				}
 			}
 			s.handlersOff = a_chiefHasThem;

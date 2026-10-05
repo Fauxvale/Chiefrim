@@ -279,6 +279,28 @@ static void probe_below(struct chiefrim_bsp *bsp, real_point3d const *chief)
 	else
 		put("; down from PROBE_Z (or 2 above him): nothing");
 	put("\n");
+	/* PROBE_SPHERE=r (x1000 wu): Halo's sphere query at his xy, centred at PROBE_Z + r */
+	if (getenv("PROBE_SPHERE") && getenv("PROBE_Z"))
+	{
+		static struct collision_bsp_test_sphere_result sphere;
+		real r = (real)atol(getenv("PROBE_SPHERE")) / 1000.f;
+		real_point3d centre = *chief;
+		long k;
+
+		centre.z = (real)atol(getenv("PROBE_Z")) / 1000.f + r;
+		put("  sphere r x1000 "); put_long((long)(r * 1000)); put(" at z x1000 "); put_long((long)(centre.z * 1000)); put(": ");
+		if (collision_bsp_test_sphere(&bsp->bsp, 0, NULL, &centre, r, &sphere))
+		{
+			put_long(sphere.surface_count); put(" surfaces:");
+			for (k = 0; k < sphere.surface_count && k < 8; k++)
+			{
+				put(" "); put_long(sphere.surface_indices[k]);
+			}
+		}
+		else
+			put("nothing");
+		put("\n");
+	}
 	/* PROBE_AHEAD=x,y (x1000): rays that way from heights above his feet, 1 wu long */
 	if (getenv("PROBE_AHEAD"))
 	{

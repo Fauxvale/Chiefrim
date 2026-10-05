@@ -60,6 +60,23 @@ def terrain_height(dx, dy):
 
 HOLE = False
 GROUND_COUNT = 0
+SOLID = set()  # indices of closed shapes' faces (one-sided, wound outward)
+
+
+def add_box(tris, corners):
+    """a box's 12 triangles, wound outward from its centre, marked solid"""
+    centre = [sum(c[k] for c in corners) / 8 for k in range(3)]
+    for q in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+        a0, a1, a2, a3 = (corners[i] for i in q)
+        for t in (a0 + a1 + a2, a0 + a2 + a3):
+            e1 = [t[3 + k] - t[k] for k in range(3)]
+            e2 = [t[6 + k] - t[k] for k in range(3)]
+            n = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+            mid = [(t[k] + t[3 + k] + t[6 + k]) / 3 - centre[k] for k in range(3)]
+            if sum(n[k] * mid[k] for k in range(3)) < 0:
+                t = t[0:3] + t[6:9] + t[3:6]
+            SOLID.add(len(tris))
+            tris.append(t)
 CR_TRIANGLE_ONE_SIDED = 0x0001
 LEDGE = 0.0
 
@@ -67,6 +84,7 @@ LEDGE = 0.0
 def terrain_triangles(ox, oy, oz):
     """(triangle as 9 floats) list, world coordinates, wound counter-clockwise from above"""
     tris = []
+    SOLID.clear()
     step, half = 64.0, 3072.0
     n = int(2 * half / step)
     for i in range(n):
@@ -94,16 +112,10 @@ def terrain_triangles(ox, oy, oz):
             for k in range(8):
                 lx, ly, lz = (hx if k & 1 else -hx), (hy if k & 2 else -hy), (hz if k & 4 else -hz)
                 corners.append((ox + cx + lx * math.cos(a) - ly * math.sin(a), oy + cy + lx * math.sin(a) + ly * math.cos(a), base + lz))
-            for q in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
-                a0, a1, a2, a3 = (corners[i] for i in q)
-                tris.append(a0 + a1 + a2)
-                tris.append(a0 + a2 + a3)
+            add_box(tris, corners)
     if LEDGE:  # a slab like a road piece across the way north, LEDGE units up, from y 80 to 200
         corners = [(ox + (300 if k & 1 else -300), oy + (200 if k & 2 else 80), oz + (LEDGE if k & 4 else -10)) for k in range(8)]
-        for q in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
-            a0, a1, a2, a3 = (corners[i] for i in q)
-            tris.append(a0 + a1 + a2)
-            tris.append(a0 + a2 + a3)
+        add_box(tris, corners)
     # a wall south of the start, 400 high, facing north
     a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
     c, d = (ox + 2000, oy - 800, oz + 400), (ox - 2000, oy - 800, oz + 400)
@@ -117,7 +129,7 @@ def send_terrain(link, epoch, ox, oy, oz, generation=1):
     for i, t in enumerate(terrain_triangles(ox, oy, oz)):
         cx, cy, cz = (t[0] + t[3] + t[6]) / 3, (t[1] + t[4] + t[7]) / 3, (t[2] + t[5] + t[8]) / 3
         key = (math.floor(cx / REGION_UNITS), math.floor(cy / REGION_UNITS), math.floor(cz / REGION_UNITS))
-        regions.setdefault(key, []).append((t, CR_TRIANGLE_ONE_SIDED if i < GROUND_COUNT else 0))
+        regions.setdefault(key, []).append((t, CR_TRIANGLE_ONE_SIDED if i < GROUND_COUNT or i in SOLID else 0))
     link.push(RING_TO_HALO, MSG_COLLISION_RESET, struct.pack("<II", epoch, generation))
     sent = 0
     for (rx, ry, rz), tris in regions.items():

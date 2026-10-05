@@ -28,7 +28,8 @@ namespace chiefrim::Collision
 
 		struct Tri
 		{
-			float v[9];  // Skyrim world units
+			float v[9];          // Skyrim world units
+			bool  solid{ false };  // a face of a closed shape (box, capsule, convex hull), wound outward
 		};
 
 		struct Body
@@ -437,7 +438,7 @@ namespace chiefrim::Collision
 			const float* centre = nullptr;
 			const float* outward = nullptr;
 			auto emit = [&](const float* a, const float* b, const float* c) {
-				Tri t{ { a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2] } };
+				Tri t{ { a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2] }, true };
 				float e1[3], e2[3], n[3];
 				Sub(b, a, e1);
 				Sub(c, a, e2);
@@ -692,7 +693,9 @@ namespace chiefrim::Collision
 					for (int v = 0; v < 3; ++v) {
 						tri.v[v] = { t.v[v * 3], t.v[v * 3 + 1], t.v[v * 3 + 2] };
 					}
-					tri.flags = job.terrain ? CR_TRIANGLE_ONE_SIDED : 0;
+					// The land, and closed shapes' faces, are solid only from outside:
+					// a back would pull whoever dips into them further in.
+					tri.flags = (job.terrain || t.solid) ? CR_TRIANGLE_ONE_SIDED : 0;
 					out.tris.push_back(tri);
 				}
 			}
