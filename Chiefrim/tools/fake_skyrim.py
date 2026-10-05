@@ -79,6 +79,7 @@ def add_box(tris, corners):
             tris.append(t)
 CR_TRIANGLE_ONE_SIDED = 0x0001
 LEDGE = 0.0
+PLANK = False
 
 
 def terrain_triangles(ox, oy, oz):
@@ -114,7 +115,7 @@ def terrain_triangles(ox, oy, oz):
                 corners.append((ox + cx + lx * math.cos(a) - ly * math.sin(a), oy + cy + lx * math.sin(a) + ly * math.cos(a), base + lz))
             add_box(tris, corners)
     if LEDGE:  # a slab like a road piece across the way north, LEDGE units up, from y 80 to 200
-        corners = [(ox + (300 if k & 1 else -300), oy + (200 if k & 2 else 80), oz + (LEDGE if k & 4 else -10)) for k in range(8)]
+        corners = [(ox + (300 if k & 1 else -300), oy + (200 if k & 2 else 80), oz + (LEDGE if k & 4 else (LEDGE - 4 if PLANK else -10))) for k in range(8)]
         add_box(tris, corners)
     # a wall south of the start, 400 high, facing north
     a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
@@ -279,6 +280,8 @@ def main():
                              " as when Skyrim's ground is higher than the stand-in floor")
     parser.add_argument("--ledge", type=float, default=0.0,
                         help="with --terrain: a slab this many units high across the way north, like a road piece (the step assist)")
+    parser.add_argument("--plank", action="store_true",
+                        help="with --ledge: the slab is a board 4 units thick, open below (a boardwalk's edge)")
     parser.add_argument("--hole", action="store_true",
                         help="with --terrain: no ground under the start, so Chief falls through (a test of the catch)")
     parser.add_argument("--radius", type=float, default=0.0,
@@ -328,6 +331,8 @@ def main():
         ROUGH = options.rough
         HOLE = options.hole
         LEDGE = options.ledge
+        global PLANK
+        PLANK = options.plank
         send_terrain(link, 1, options.x, options.y, options.z)
 
     last_print = 0.0

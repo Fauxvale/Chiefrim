@@ -509,9 +509,9 @@ build:
 		printf("FAILED after %.0f ms: %s\n", now_ms() - start, error);
 		return 1;
 	}
-	printf("%ld triangles -> %ld kept, %ld nodes, %ld leaves, %ld references, %ld 2D nodes, %ld edges, depth %ld, overlaps %ld, duplicates %ld, shared %ld: %.0f ms\n",
+	printf("%ld triangles -> %ld kept, %ld nodes, %ld leaves, %ld references, %ld 2D nodes, %ld edges, depth %ld, overlaps %ld, duplicates %ld, shared %ld, closed %ld: %.0f ms\n",
 		n, bsp->triangle_count, bsp->node_count, bsp->leaf_count, bsp->reference_count, bsp->node2d_count,
-		bsp->edge_count, bsp->max_depth, bsp->dropped_overlaps, bsp->duplicates, bsp->shared_fragments, now_ms() - start);
+		bsp->edge_count, bsp->max_depth, bsp->dropped_overlaps, bsp->duplicates, bsp->shared_fragments, bsp->closed_triangles, now_ms() - start);
 	if (has_chief)
 		probe_below(bsp, &chief);
 	if (getenv("FLOOR_GUARD"))

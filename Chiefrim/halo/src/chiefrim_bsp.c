@@ -1289,6 +1289,198 @@ static boolean duplicate_triangle(struct builder *b, struct chiefrim_triangle co
 	return FALSE;
 }
 
+/* ---------- closed meshes */
+
+struct mesh_edge
+{
+	long from;        /* the first triangle's direction: from -> the other end */
+	long triangles[2];
+	long count;
+};
+
+static long find_root(long *parent, long i)
+{
+	while (parent[i] != i)
+	{
+		parent[i] = parent[parent[i]];
+		i = parent[i];
+	}
+	return i;
+}
+
+/* A copy of the triangles where every closed mesh (each edge shared by
+exactly two of its triangles, running opposite ways) is one-sided, wound
+outward (by its signed volume). Inside a two-sided solid every face pulls
+inward too: a biped dipping into a board's or a road chunk's top was
+dragged down through it. Open meshes (sheets) stay two-sided. NULL if out
+of memory. */
+static struct chiefrim_triangle *close_solids(struct builder *b, struct chiefrim_triangle const *in, long n)
+{
+	struct chiefrim_triangle *out = (struct chiefrim_triangle *)malloc(sizeof(*out) * (size_t)MAX(n, 1));
+	long *corner = (long *)malloc(sizeof(long) * 3 * (size_t)MAX(n, 1));
+	long *parent = (long *)malloc(sizeof(long) * (size_t)MAX(n, 1));
+	byte *bad = (byte *)calloc((size_t)MAX(n, 1), 1);
+	double *volume = (double *)calloc((size_t)MAX(n, 1), sizeof(double));
+	struct mesh_edge *edges = (struct mesh_edge *)malloc(sizeof(struct mesh_edge) * 3 * (size_t)MAX(n, 1));
+	struct hash_table vertices, edge_table;
+	long vertex_count = 0, edge_count = 0, i, k;
+
+	memset(&vertices, 0, sizeof(vertices));
+	memset(&edge_table, 0, sizeof(edge_table));
+	if (!out || !corner || !parent || !bad || !volume || !edges ||
+		!hash_init(&vertices, n * 2) || !hash_init(&edge_table, n * 3))
+	{
+		fail(b, "out of memory");
+		free(out);
+		out = NULL;
+		goto done;
+	}
+	if (n)
+		memcpy(out, in, sizeof(*out) * (size_t)n);
+	if (getenv("CHIEFRIM_NO_CLOSE")) /* the harness: compare without */
+		goto done;
+
+	/* the corners, welded */
+	for (i = 0; i < n && !b->failed; i++)
+	{
+		parent[i] = i;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned long key[3];
+			struct hash_entry *entry;
+
+			if (!hash_reserve(&vertices))
+			{
+				fail(b, "out of memory");
+				break;
+			}
+			key[0] = quantize(in[i].v[k].x, CHIEFRIM_BSP_WELD);
+			key[1] = quantize(in[i].v[k].y, CHIEFRIM_BSP_WELD);
+			key[2] = quantize(in[i].v[k].z, CHIEFRIM_BSP_WELD);
+			entry = hash_slot(&vertices, key);
+			if (!entry->used)
+				hash_put(entry, key, vertex_count++, &vertices);
+			corner[i * 3 + k] = entry->value;
+		}
+		if (corner[i * 3] == corner[i * 3 + 1] || corner[i * 3 + 1] == corner[i * 3 + 2] || corner[i * 3] == corner[i * 3 + 2])
+			bad[i] = TRUE; /* degenerate: no part of a closed mesh */
+	}
+	/* the edges */
+	for (i = 0; i < n && !b->failed; i++)
+	{
+		if (bad[i])
+			continue;
+		for (k = 0; k < 3; k++)
+		{
+			long u = corner[i * 3 + k], w = corner[i * 3 + (k + 1) % 3];
+			unsigned long key[3];
+			struct hash_entry *entry;
+			struct mesh_edge *edge;
+
+			if (!hash_reserve(&edge_table))
+			{
+				fail(b, "out of memory");
+				break;
+			}
+			key[0] = (unsigned long)MIN(u, w);
+			key[1] = (unsigned long)MAX(u, w);
+			key[2] = 1;
+			entry = hash_slot(&edge_table, key);
+			if (!entry->used)
+			{
+				edges[edge_count].from = u;
+				edges[edge_count].triangles[0] = i;
+				edges[edge_count].triangles[1] = NONE;
+				edges[edge_count].count = 0;
+				hash_put(entry, key, edge_count++, &edge_table);
+			}
+			edge = &edges[entry->value];
+			if (edge->count == 1)
+				edge->triangles[1] = i;
+			if (edge->count >= 2 || (edge->count == 1 && edge->from == u))
+				bad[i] = TRUE; /* a third face, or the same way twice: not a closed solid */
+			edge->count++;
+		}
+	}
+	if (b->failed)
+	{
+		free(out);
+		out = NULL;
+		goto done;
+	}
+	/* faces sharing a good edge are one mesh */
+	for (i = 0; i < edge_count; i++)
+	{
+		struct mesh_edge const *edge = &edges[i];
+
+		if (edge->count == 2 && !bad[edge->triangles[0]] && !bad[edge->triangles[1]])
+		{
+			long r0 = find_root(parent, edge->triangles[0]), r1 = find_root(parent, edge->triangles[1]);
+
+			if (r0 != r1)
+				parent[r0] = r1;
+		}
+	}
+	/* a mesh is open if any of its faces is bad or has an edge it shares
+	with none (or with a bad face) */
+	for (i = 0; i < edge_count; i++)
+	{
+		struct mesh_edge const *edge = &edges[i];
+
+		if (edge->count != 2 || bad[edge->triangles[0]] || bad[edge->triangles[1]])
+		{
+			bad[find_root(parent, edge->triangles[0])] = TRUE;
+			if (edge->triangles[1] != NONE)
+				bad[find_root(parent, edge->triangles[1])] = TRUE;
+		}
+	}
+	for (i = 0; i < n; i++)
+	{
+		if (bad[i])
+			bad[find_root(parent, i)] = TRUE;
+	}
+	/* signed volumes (about each mesh's first corner), and the result */
+	for (i = 0; i < n; i++)
+	{
+		long r = find_root(parent, i);
+		real_point3d const *o = &in[r].v[0], *a = &in[i].v[0], *c1 = &in[i].v[1], *c2 = &in[i].v[2];
+		double ax = a->x - o->x, ay = a->y - o->y, az = a->z - o->z;
+		double bx = c1->x - o->x, by = c1->y - o->y, bz = c1->z - o->z;
+		double cx = c2->x - o->x, cy = c2->y - o->y, cz = c2->z - o->z;
+
+		if (!bad[r])
+			volume[r] += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+	}
+	for (i = 0; i < n; i++)
+	{
+		long r = find_root(parent, i);
+
+		if (bad[r] || volume[r] == 0.0)
+			continue;
+		if (volume[r] < 0.0)
+		{
+			/* wound inward: turn it */
+			real_point3d swap = out[i].v[1];
+
+			out[i].v[1] = out[i].v[2];
+			out[i].v[2] = swap;
+		}
+		if (!(out[i].flags & CR_TRIANGLE_ONE_SIDED))
+			b->out->closed_triangles++;
+		out[i].flags |= CR_TRIANGLE_ONE_SIDED;
+	}
+
+done:
+	free(corner);
+	free(parent);
+	free(bad);
+	free(volume);
+	free(edges);
+	hash_dispose(&vertices);
+	hash_dispose(&edge_table);
+	return out;
+}
+
 /* ---------- public code */
 
 struct chiefrim_bsp *chiefrim_bsp_build(
@@ -1303,6 +1495,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 {
 	struct builder b;
 	long *order = NULL;
+	struct chiefrim_triangle *solids = NULL;
 	long i;
 
 	memset(&b, 0, sizeof(b));
@@ -1330,10 +1523,15 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 	b.out->plane_count = map_plane_count;
 	b.plane_capacity = MAX(map_plane_count, 1);
 
+	/* closed meshes one-sided */
+	solids = close_solids(&b, triangles, triangle_count);
+	if (!solids)
+		goto failed;
+
 	/* the triangles as fragments, with their planes */
 	for (i = 0; i < triangle_count && !b.failed; i++)
 	{
-		struct chiefrim_triangle const *in = &triangles[i];
+		struct chiefrim_triangle const *in = &solids[i];
 		real_plane3d plane;
 		long f, designator;
 
@@ -1373,7 +1571,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 		b.fragments[f].flipped = (designator & LONG_MIN) != 0;
 		b.fragments[f].shared = 0;
 		b.fragments[f].id = in->id;
-		b.fragments[f].one_sided = (in->flags & CR_TRIANGLE_ONE_SIDED) != 0;
+		b.fragments[f].one_sided = (in->flags & CR_TRIANGLE_ONE_SIDED) != 0 && !getenv("CHIEFRIM_NO_ONE_SIDED");
 	}
 	if (b.failed)
 		goto failed;
@@ -1513,6 +1711,7 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 	b.out->min_z = REAL_MAX;
 	for (i = 0; i < b.out->vertex_count; i++)
 		b.out->min_z = MIN(b.out->min_z, b.out->vertices[i].point.z);
+	free(solids);
 	free(b.fragments);
 	free(b.emitted);
 	free(b.overflow);
@@ -1526,6 +1725,7 @@ failed:
 	snprintf(error, (size_t)error_size, "%s", b.failure ? b.failure : "failed");
 fail:
 	free(order);
+	free(solids);
 	free(b.fragments);
 	free(b.emitted);
 	free(b.overflow);

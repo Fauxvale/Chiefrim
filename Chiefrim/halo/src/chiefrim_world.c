@@ -125,6 +125,7 @@ static struct
 	boolean logged_await;
 	boolean awaiting_ground;    /* since the origin moved: keep the stand-in floor until a build has ground under Chief */
 	unsigned long reset_ms;
+	unsigned long last_wait_log_ms;
 	boolean awaiting_first_build;
 
 #ifdef __linux__
@@ -789,6 +790,23 @@ void chiefrim_world_update(real_point3d const *chief)
 	world.have_chief = chief != NULL;
 	if (chief)
 		world.chief = *chief;
+	if (world.installed_floor && system_milliseconds() - world.reset_ms > 3000 &&
+		system_milliseconds() - world.last_wait_log_ms > 2000)
+	{
+		/* still on the stand-in floor long after a load: say why */
+		long i, used = 0, complete = 0;
+
+		for (i = 0; i < REGION_SLOTS; i++)
+		{
+			used += world.regions[i].used;
+			complete += world.regions[i].used && world.regions[i].complete && world.regions[i].epoch == world.epoch;
+		}
+		error(_error_silent, "chiefrim: no Skyrim collision yet: %ld regions (%ld complete, epoch %lu), chief %s, dirty %d, "
+			"busy %d, world %lu, collision reset for world %lu, builds %lu",
+			used, complete, (unsigned long)world.epoch, chief ? "here" : "none", world.dirty,
+			chiefrim_world_worker_busy(), world.world_generation, world.collision_generation, world.builds);
+		world.last_wait_log_ms = system_milliseconds();
+	}
 	if (!chief || !world.have_regions)
 		return;
 
@@ -958,16 +976,16 @@ boolean chiefrim_world_floor_within(real_point3d const *feet, real reach)
 	}
 }
 
-/* Skyrim's characters step up onto ledges (a road piece's lip, a stair)
-that stop Halo's biped dead. A ledge ahead (feet and direction in world
-units, direction flat and of unit length): something in the way at the
-ankles, nothing at max_step, and a floor on top no higher than max_step.
+/* Skyrim's characters step up onto ledges (a road piece's lip, a stair, a
+boardwalk's edge) that stop Halo's biped dead. A ledge ahead (feet and
+direction in world units, direction flat and of unit length): something in
+the way below max_step, nothing at it, and a floor on top no higher.
 TRUE with the top's height. */
 boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const *direction, real radius,
 	real max_step, real *top_z)
 {
 	struct collision_bsp_test_vector_result result;
-	real reach = radius + 0.12f;
+	real reach = radius + 0.2f; /* a 100 ms sample ahead of his walk */
 	real_point3d start;
 	real_vector3d ahead = { direction->i * reach, direction->j * reach, 0.f };
 	real_vector3d down = { 0.f, 0.f, -(max_step + 0.05f) };
@@ -975,10 +993,22 @@ boolean chiefrim_world_step_ahead(real_point3d const *feet, real_vector3d const 
 
 	if (!world.current || world.installed_floor)
 		return FALSE;
-	start = *feet;
-	start.z += 0.02f;
-	if (!collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result))
-		return FALSE; /* nothing at the ankles: not a ledge */
+	{
+		/* something in the way below the step's height: at the ankles, or
+		higher (a board's edge, open below it) */
+		real const spacing = 3.0f / 213.36f; /* 3 Skyrim units: boards are 4 thick */
+		boolean blocked = FALSE;
+		real height;
+
+		for (height = 0.02f; height < max_step - 0.005f && !blocked; height += spacing)
+		{
+			start = *feet;
+			start.z += height;
+			blocked = collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result);
+		}
+		if (!blocked)
+			return FALSE; /* nothing in the way: not a ledge */
+	}
 	start = *feet;
 	start.z += max_step;
 	if (collision_bsp_test_vector(flags, &world.current->bsp, 0, NULL, &start, &ahead, REAL_MAX, &result))

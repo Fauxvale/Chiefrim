@@ -76,6 +76,7 @@ struct chiefrim_bsp
 	long max_depth;
 	long dropped_overlaps;               /* polygons overlapping on a plane, in extra references */
 	long duplicates;                     /* triangles dropped as repeats of earlier ones */
+	long closed_triangles;               /* mesh triangles made one-sided: their mesh is closed */
 	long shared_fragments;               /* polygons placed on both sides of a split they all but touch */
 };
 

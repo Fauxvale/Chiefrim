@@ -35,7 +35,65 @@ namespace chiefrim::Puppet
 			// moves) until Halo's state shows him there, or a moment passed.
 			std::optional<RE::NiPoint3> awaitingTeleport;
 			ULONGLONG awaitingSince{ 0 };
+			// The character controller as Chief found it (to put back on unlink)
+			bool haveSnapshot{ false };
+			std::uint32_t snapshotFlags{ 0 };
+			std::uint32_t snapshotState{ 0 };
 		} s;
+
+		using Flags = RE::CHARACTER_FLAGS;
+
+		// What Skyrim's jump and sprint depend on, for the log.
+		void LogMovementState(RE::PlayerCharacter* a_player, const char* a_when)
+		{
+			const auto* controller = a_player->GetCharController();
+			bool inJump = false, sprinting = false, animationDriven = false;
+			a_player->GetGraphVariableBool("bInJumpState", inJump);
+			a_player->GetGraphVariableBool("IsSprinting", sprinting);
+			a_player->GetGraphVariableBool("bAnimationDriven", animationDriven);
+			logger::info("player {}: controller state {}, flags 0x{:08X} (can jump {}, jumping {}, support {}); graph: in jump {}, sprinting {}, animation driven {}",
+				a_when,
+				controller ? static_cast<std::uint32_t>(controller->context.currentState) : 99u,
+				controller ? controller->flags.underlying() : 0u,
+				controller && controller->flags.all(Flags::kCanJump),
+				controller && controller->flags.all(Flags::kJumping),
+				controller && controller->flags.all(Flags::kSupport),
+				inJump, sprinting, animationDriven);
+		}
+
+		void SnapshotController(RE::PlayerCharacter* a_player)
+		{
+			LogMovementState(a_player, "as Chief takes over");
+			if (const auto* controller = a_player->GetCharController()) {
+				s.snapshotFlags = controller->flags.underlying();
+				s.snapshotState = static_cast<std::uint32_t>(controller->context.currentState);
+				s.haveSnapshot = true;
+			}
+		}
+
+		// Following Chief teleports the player every frame with no velocity:
+		// Skyrim's controller can be left mid-jump or in the air, and then it
+		// refuses jump and sprint. Back to how Chief found it.
+		void RestoreController(RE::PlayerCharacter* a_player)
+		{
+			LogMovementState(a_player, "as Chief lets go");
+			auto* controller = a_player->GetCharController();
+			if (!controller || !s.haveSnapshot) {
+				return;
+			}
+			controller->flags.reset(Flags::kJumping);
+			if ((s.snapshotFlags & static_cast<std::uint32_t>(Flags::kCanJump)) != 0) {
+				controller->flags.set(Flags::kCanJump);
+			}
+			controller->context.currentState = static_cast<RE::hkpCharacterStateType>(s.snapshotState);
+			controller->wantState = static_cast<RE::hkpCharacterStateType>(s.snapshotState);
+			bool inJump = false;
+			if (a_player->GetGraphVariableBool("bInJumpState", inJump) && inJump) {
+				a_player->NotifyAnimationGraph("JumpLand");
+			}
+			s.haveSnapshot = false;
+			LogMovementState(a_player, "after putting it back");
+		}
 
 		bool GameplayIsRunning()
 		{
@@ -171,12 +229,14 @@ namespace chiefrim::Puppet
 				if (wasConnected) {
 					Input::OnUnlinked();  // Skyrim's own controls back
 					Camera::Release(a_player);
+					RestoreController(a_player);
 				}
 				return;
 			}
 			if (!wasConnected) {
 				s.worldSent = false;  // a new Halo: tell it everything again
 				Input::OnLinked();
+				SnapshotController(a_player);
 			}
 			Input::Publish(a_player);
 			if (!GameplayIsRunning()) {

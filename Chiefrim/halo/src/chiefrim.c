@@ -55,7 +55,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 /* ---------- globals */
 
 #define CHIEFRIM_MINIMUM_RADIUS   0.13f /* world units (~28 Skyrim units) */
-#define CHIEFRIM_STEP_UNITS       40.0f /* Skyrim units: the step assist's highest ledge */
+#define CHIEFRIM_STEP_UNITS       48.0f /* Skyrim units: the step assist's highest ledge (a boardwalk's edge) */
 #define CHIEFRIM_SAFE_SPOTS       16
 #define CHIEFRIM_RETURN_RETRY_MS  5000 /* back again this soon: the spot was no good */
 
@@ -78,6 +78,8 @@ static struct
 	boolean have_last_feet;       /* the floor guard's last position of Chief (world units) */
 	real_point3d last_feet;
 	long floor_guard_count;
+	uint32_t guard_window_ms;     /* the floor guard's firings in the last 2 s */
+	long guard_window_count;
 	long stuck_samples;           /* step assist: 100 ms samples pushing without moving */
 	boolean have_stuck_report;
 	real_point3d last_stuck_report;
@@ -685,8 +687,10 @@ static real chiefrim_chief_radius(long unit_index)
 	return biped_definition_get(biped_get(unit_index)->definition_index)->biped.collision_radius;
 }
 
-/* Lifts Chief onto a low ledge he is pushing against without moving
-(Skyrim's characters step up; Halo's biped doesn't). */
+/* Lifts Chief onto a low ledge as he walks into it (Skyrim's characters
+step up; Halo's biped doesn't, and walking into a board's edge Halo pushes
+him down and under it), and reports him stuck after a second of pushing
+without moving. */
 static void chiefrim_step_assist(long unit_index, real_point3d *chief)
 {
 	struct unit_datum *unit = unit_get(unit_index);
@@ -720,12 +724,9 @@ static void chiefrim_step_assist(long unit_index, real_point3d *chief)
 	chiefrim.stuck_sample_ms = now;
 	chiefrim.stuck_sample = *chief;
 	if (moved > 0.02f)
-	{
 		chiefrim.stuck_samples = 0;
-		return;
-	}
-	if (++chiefrim.stuck_samples < 2)
-		return;
+	else
+		chiefrim.stuck_samples++;
 	if (chiefrim.stuck_samples == 10)
 	{
 		/* a second of pushing without moving, and no ledge to step up:
@@ -813,9 +814,24 @@ void chiefrim_frame(void)
 			geometry (a road on terrain poking through it): Halo's to settle;
 			putting him back each frame made him stutter there. */
 			real_point3d back = chiefrim.last_feet;
+			uint32_t now = chiefrim_now_ms();
 
+			if (now - chiefrim.guard_window_ms > 2000)
+			{
+				chiefrim.guard_window_ms = now;
+				chiefrim.guard_window_count = 0;
+			}
 			back.z += 0.01f;
 			chiefrim_move_chief(unit_index, &back, TRUE);
+			if (++chiefrim.guard_window_count >= 8)
+			{
+				/* Halo keeps pushing him down here (wedged under something):
+				putting him back only repeats it. Somewhere he stood well. */
+				error(_error_silent, "chiefrim: the floor guard keeps firing at (%.2f, %.2f, %.2f) wu; moving Chief away",
+					chief.x, chief.y, chief.z);
+				chiefrim.guard_window_count = 0;
+				chiefrim_return_to_safe();
+			}
 			if (chiefrim.floor_guard_count % 200 == 0)
 				chiefrim_world_dump_installed("floor guard");
 			if (chiefrim.floor_guard_count++ % 50 == 0)
