@@ -198,7 +198,24 @@ regions. */
 static void region_evict(long cx, long cy, long cz)
 {
 	static struct region kept[REGION_SLOTS];
-	long count = 0, i;
+	long count = 0, near = 0, i;
+
+	/* Dropping every region means Chief isn't where Skyrim's player is
+	(still at the level's spawn point, before being placed): Skyrim sends a
+	region only once while its player stays near it, so they'd be gone for
+	good. Keep them. */
+	for (i = 0; i < REGION_SLOTS; i++)
+	{
+		struct region const *region = &world.regions[i];
+
+		if (region->used && labs(region->rx - cx) <= EVICT_RADIUS && labs(region->ry - cy) <= EVICT_RADIUS &&
+			labs(region->rz - cz) <= EVICT_RADIUS)
+		{
+			near++;
+		}
+	}
+	if (near == 0)
+		return;
 
 	for (i = 0; i < REGION_SLOTS; i++)
 	{

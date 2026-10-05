@@ -1289,6 +1289,118 @@ static boolean duplicate_triangle(struct builder *b, struct chiefrim_triangle co
 	return FALSE;
 }
 
+/* Edges a surface shares with its own twin (no neighbour on that edge: a
+T-junction, a cut, a mesh's open border) become two edges, each with the
+same surface on both sides. Halo makes an edge a collision feature, a
+crease the pill bumps against, wherever its two surfaces' planes differ,
+and a surface and its twin always do: every such edge stood up like a
+ridge on flat ground (on Skyrim's meshes, ~60% of the floors' edges), and
+walking over them Chief hitched and got bounced up. An edge with one
+surface on both sides is no feature; each surface's ring of edges is
+relinked through its own copy. */
+static void split_twin_edges(struct builder *b)
+{
+	long const original_count = b->out->edge_count;
+	long const n = b->emitted_count;
+	struct collision_edge *original = (struct collision_edge *)malloc(sizeof(struct collision_edge) * (size_t)MAX(original_count, 1));
+	long *copy = (long *)malloc(sizeof(long) * (size_t)MAX(original_count, 1));
+	byte *split_edge = (byte *)calloc((size_t)MAX(original_count, 1), 1);
+	long ring_edges[64];
+	boolean ring_sides[64];
+	long e, s;
+
+	if (!original || !copy || !split_edge)
+	{
+		free(original);
+		free(copy);
+		free(split_edge);
+		fail(b, "out of memory");
+		return;
+	}
+	memcpy(original, b->out->edges, sizeof(struct collision_edge) * (size_t)original_count);
+	for (e = 0; e < original_count; e++)
+	{
+		long s0 = original[e].surface_indices[0], s1 = original[e].surface_indices[1];
+
+		copy[e] = NONE;
+		if (s1 != NONE && (s1 == s0 + n || s0 == s1 + n))
+			split_edge[e] = TRUE;
+		/* a copy only where the twin's ring runs through it (an edge closed
+		by the twin at the end isn't in the twin's ring) */
+		if (split_edge[e] && original[e].edge_indices[1] != NONE)
+		{
+			copy[e] = b->out->edge_count;
+			GROW(b, edges, edge_capacity, b->out->edge_count + 1);
+			if (b->failed)
+				break;
+			b->out->edges[b->out->edge_count++] = original[e];
+		}
+	}
+
+	for (s = 0; s < b->out->surface_count && !b->failed; s++)
+	{
+		long first = b->out->surfaces[s].first_edge_index, count = 0, k;
+
+		/* the ring, as it was */
+		e = first;
+		do
+		{
+			boolean reverse = original[e].surface_indices[1] == s;
+
+			if (count == 64)
+			{
+				fail(b, "a surface's edge ring doesn't close");
+				break;
+			}
+			ring_edges[count] = e;
+			ring_sides[count] = reverse;
+			count++;
+			e = original[e].edge_indices[reverse];
+		} while (e != first && e != NONE);
+		if (b->failed)
+			break;
+
+		/* this surface's own edge where an edge is split: the first copy is
+		the side-0 surface's, the second the side-1 surface's */
+		for (k = 0; k < count; k++)
+		{
+			if (copy[ring_edges[k]] != NONE && ring_sides[k])
+				ring_edges[k] = copy[ring_edges[k]];
+		}
+		for (k = 0; k < count; k++)
+		{
+			long this_edge = ring_edges[k], next = ring_edges[(k + 1) % count];
+			long source = this_edge < original_count ? this_edge : NONE;
+			struct collision_edge *edge = &b->out->edges[this_edge];
+			boolean split;
+
+			if (source == NONE)
+				split = TRUE; /* a copy */
+			else
+				split = split_edge[source];
+			if (split)
+			{
+				/* one surface both sides: Halo reads such an edge as its
+				second side, so its second vertex is where the surface's
+				edge starts */
+				long start = edge->vertex_indices[ring_sides[k] ? 1 : 0];
+				long end = edge->vertex_indices[ring_sides[k] ? 0 : 1];
+
+				edge->surface_indices[0] = edge->surface_indices[1] = s;
+				edge->edge_indices[0] = edge->edge_indices[1] = next;
+				edge->vertex_indices[1] = start;
+				edge->vertex_indices[0] = end;
+			}
+			else
+				edge->edge_indices[ring_sides[k]] = next;
+		}
+		b->out->surfaces[s].first_edge_index = ring_edges[0];
+	}
+	free(original);
+	free(copy);
+	free(split_edge);
+}
+
 /* ---------- closed meshes */
 
 struct mesh_edge
@@ -1640,6 +1752,10 @@ struct chiefrim_bsp *chiefrim_bsp_build(
 			edge->surface_indices[1] = s < b.emitted_count ? s + b.emitted_count : s - b.emitted_count;
 		}
 	}
+	if (!getenv("CHIEFRIM_KEEP_TWIN_EDGES")) /* the harness: compare with */
+		split_twin_edges(&b);
+	if (b.failed)
+		goto failed;
 	fix_codes(&b);
 
 	/* structure leaves: every one of ours (and every one the map's render

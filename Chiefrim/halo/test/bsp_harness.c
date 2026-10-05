@@ -619,6 +619,32 @@ build:
 		bsp->edge_count, bsp->max_depth, bsp->dropped_overlaps, bsp->duplicates, bsp->shared_fragments, bsp->closed_triangles, now_ms() - start);
 	if (has_chief)
 		probe_below(bsp, &chief);
+	if (getenv("EDGES"))
+	{
+		/* front surfaces' edges: shared with a neighbour, or closed by the
+		surface's own twin (no neighbour: walking across, Halo finds none) */
+		long e, shared = 0, own_twin = 0, floor_shared = 0, floor_twin = 0;
+
+		for (e = 0; e < bsp->edge_count; e++)
+		{
+			long s0 = bsp->edges[e].surface_indices[0], s1 = bsp->edges[e].surface_indices[1];
+			long front = s0 < bsp->triangle_count ? s0 : s1;
+			boolean twin = s1 == s0 + bsp->triangle_count || s0 == s1 + bsp->triangle_count;
+			real_plane3d plane;
+			boolean floor;
+
+			if (front >= bsp->triangle_count)
+				continue; /* twins' edges among themselves */
+			bsp3d_get_plane_from_designator(&bsp->bsp.bsp3d, bsp->surfaces[front].plane_designator, &plane);
+			floor = plane.n.k > 0.7f;
+			if (s0 == s1)
+				continue; /* split: one surface both sides, no crease */
+			if (twin) { own_twin++; floor_twin += floor; }
+			else { shared++; floor_shared += floor; }
+		}
+		printf("edges: %ld shared with a neighbour, %ld closed by the surface's own twin; on floors: %ld shared, %ld own twin\n",
+			shared, own_twin, floor_shared, floor_twin);
+	}
 	if (getenv("FLOOR_GUARD"))
 		floor_guard_test(bsp);
 	if (getenv("SELF_TEST"))

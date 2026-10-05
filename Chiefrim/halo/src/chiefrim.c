@@ -79,6 +79,9 @@ static struct
 	real_point3d last_feet;
 	long floor_guard_count;
 	long recent_steps, recent_guards, recent_returns; /* moves of Chief's since the last summary */
+	long recent_blips, recent_long_frames, recent_frames;
+	uint32_t airborne_since_ms, last_frame_ms;
+	boolean was_airborne;
 	uint32_t summary_ms;
 	uint32_t guard_window_ms;     /* the floor guard's firings in the last 2 s */
 	long guard_window_count;
@@ -471,6 +474,18 @@ static void chiefrim_publish_player(void)
 			chiefrim_world_dump_installed("fell through");
 			chiefrim_return_to_safe();
 		}
+		{
+			/* hitches: off the ground briefly while walking */
+			uint32_t now = chiefrim_now_ms();
+			real forward, strafe;
+			boolean walking = chiefrim_input_movement(0, &forward, &strafe) && forward * forward + strafe * strafe > 0.25f;
+
+			if (!state.on_ground && !chiefrim.was_airborne)
+				chiefrim.airborne_since_ms = now;
+			if (state.on_ground && chiefrim.was_airborne && walking && now - chiefrim.airborne_since_ms <= 150)
+				chiefrim.recent_blips++;
+			chiefrim.was_airborne = !state.on_ground;
+		}
 		if (!state.on_ground)
 			state.pose = CR_POSE_AIRBORNE;
 		else if (biped->biped.crouch > 0.5f)
@@ -793,6 +808,15 @@ void chiefrim_frame(void)
 	}
 
 	chiefrim.ticks++;
+	{
+		/* frame pacing, for the summary */
+		uint32_t now = chiefrim_now_ms();
+
+		if (chiefrim.last_frame_ms && now - chiefrim.last_frame_ms > 40)
+			chiefrim.recent_long_frames++;
+		chiefrim.last_frame_ms = now;
+		chiefrim.recent_frames++;
+	}
 
 	/* No deaths while Skyrim drives (for now: deaths will follow Skyrim's
 	later). A campaign death waits for a checkpoint revert that Chiefrim
@@ -876,6 +900,8 @@ void chiefrim_frame(void)
 		jump in his movement): to match against how walking felt */
 		uint32_t now = chiefrim_now_ms();
 
+		if (!chiefrim.summary_ms)
+			chiefrim.summary_ms = now;
 		if (now - chiefrim.summary_ms >= 30000)
 		{
 			if (chiefrim.recent_steps || chiefrim.recent_guards || chiefrim.recent_returns)
@@ -883,7 +909,14 @@ void chiefrim_frame(void)
 				error(_error_silent, "chiefrim: last 30 s, Chiefrim moved Chief: %ld step-ups, %ld floor-guard put-backs, %ld returns",
 					chiefrim.recent_steps, chiefrim.recent_guards, chiefrim.recent_returns);
 			}
+			if (chiefrim.recent_frames)
+			{
+				error(_error_silent, "chiefrim: last 30 s: %ld airborne blips (off the ground 150 ms or less while walking), "
+					"%ld frames over 40 ms of %ld",
+					chiefrim.recent_blips, chiefrim.recent_long_frames, chiefrim.recent_frames);
+			}
 			chiefrim.recent_steps = chiefrim.recent_guards = chiefrim.recent_returns = 0;
+			chiefrim.recent_blips = chiefrim.recent_long_frames = chiefrim.recent_frames = 0;
 			chiefrim.summary_ms = now;
 		}
 	}

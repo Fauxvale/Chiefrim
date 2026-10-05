@@ -157,6 +157,14 @@ collision code.
     ways; turned outward by signed volume); open meshes (sheets) stay two-sided. Where terrain pokes up through a road or a floor mesh, its
     back would push whoever stands on the road down through it (the tenth in-game test: Chief in a
     stack of 2-4 layers within 60 units, the floor guard fighting Halo);
+  - an edge a surface shares only with its own twin (no neighbour there: a T-junction, a cut, a
+    mesh's open border) is split into two edges, each with one surface on both sides: Halo makes
+    every edge whose two surfaces' planes differ a collision feature (`collision_features.c`), and
+    a surface and its twin always differ, so ~60% of real floors' edges stood up as ridges;
+  - Halo never evicts every region it holds: that means Chief isn't where Skyrim's player is yet
+    (at the level's spawn point before being placed), and Skyrim sends a region only once while its
+    player stays near it (this was the fake-Skyrim test's startup flake, and could leave Chief
+    without collision after a load);
   - each triangle is two surfaces, itself and a reversed twin (the sphere query matches surfaces to
     the side it came from); winged edges are shared between neighbours, and no edge is left open
     (Halo's edge features read both sides);
@@ -226,7 +234,8 @@ collision code.
     48 units (rays every 3 units: boards are 4 thick), nothing at 48, a floor on top. A board's
     edge (open below) lifts him as he reaches it; an ordinary ledge only once he has stopped
     against it (lifting him ahead of every ledge made walking jumpy: 30 lifts in 3 minutes).
-    Every 30 s Halo logs how often it moved Chief itself (step-ups, guard put-backs, returns). A second pushing without moving is reported as stuck. If the floor guard fires 8 times
+    Every 30 s Halo logs how often it moved Chief itself (step-ups, guard put-backs, returns), how
+    many short airborne blips he had while walking (hitches), and how many frames took over 40 ms. A second pushing without moving is reported as stuck. If the floor guard fires 8 times
     in 2 s, Chief goes back to where he last stood well;
   - his collision radius, like his height, comes from Skyrim (`[Chief] fRadius`, default: the
     player's character controller, 0.26 Havok units = 18), but never under 0.13 wu (28 units):
@@ -320,9 +329,9 @@ definition comes from that map. Chiefrim loads one **host map**.
      camera-root matrix are forward, up and right (until then Skyrim turns it, from the player's
      angles, which already follow Chief);
    - FOV: Halo's observer FOV is horizontal for 4:3 and projected with 0.85 of its tangent (Halo's
-     own view is 61.5° as Skyrim measures FOV). `[Camera] fFieldOfView` (default 95) replaces that
-     0.85 with tan(95°/2) / tan(base/2), base being Chief's unzoomed camera FOV from his biped tag,
-     so his unzoomed view is 95° and zoom keeps Halo's magnification. Halo publishes the vertical
+     own view is 61.5° as Skyrim measures FOV). `[Camera] fFieldOfView` (default 85) replaces that
+     0.85 with tan(85°/2) / tan(base/2), base being Chief's unzoomed camera FOV from his biped tag,
+     so his unzoomed view is 85° and zoom keeps Halo's magnification. Halo publishes the vertical
      angle it renders with, and Skyrim's setting follows it. `bUseHaloFov=0` keeps the player's own
      Skyrim FOV;
    - Skyrim's first-person arm and weapon meshes are hidden (only meshes, never nodes), and

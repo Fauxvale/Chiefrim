@@ -60,6 +60,7 @@ def terrain_height(dx, dy):
 
 HOLE = False
 GROUND_COUNT = 0
+PRINT_EVERY = float(os.environ.get("FAKE_PRINT_EVERY", "0.25"))
 SOLID = set()  # indices of closed shapes' faces (one-sided, wound outward)
 
 
@@ -261,7 +262,7 @@ def main():
     parser.add_argument("--y", type=float, default=-7400.0)
     parser.add_argument("--z", type=float, default=-3650.0)
     parser.add_argument("--heading", type=float, default=0.0, help="degrees, 0 = north")
-    parser.add_argument("--fov", type=float, default=95.0, help="Chief's field of view, as Skyrim measures it (0: Halo's own)")
+    parser.add_argument("--fov", type=float, default=85.0, help="Chief's field of view, as Skyrim measures it (0: Halo's own)")
     parser.add_argument("--silence-at", type=float, default=0.0,
                         help="seconds in: stop the heartbeat, as a Skyrim that hangs (0: never)")
     parser.add_argument("--silence-for", type=float, default=5.0)
@@ -387,7 +388,7 @@ def main():
                 print("fake_skyrim: Halo is closing")
                 break
             now = time.monotonic()
-            if now - last_print >= (0.25 if options.drive else 0.5):
+            if now - last_print >= (PRINT_EVERY if options.drive else 0.5):
                 seq, payload = link.slot_read(SLOT_PLAYER, 88)
                 if payload and seq != last_seq:
                     v = struct.unpack("<II3f2fI3f3f3f3f2I", payload)

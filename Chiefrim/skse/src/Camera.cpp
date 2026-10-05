@@ -30,7 +30,7 @@ namespace chiefrim::Camera
 			bool               axesRejected{ false };
 			// Skyrim's own settings while Chief drives
 			bool  useHaloFov{ true };   // [Camera] bUseHaloFov
-			float fieldOfView{ 95.0f }; // [Camera] fFieldOfView
+			float fieldOfView{ 85.0f }; // [Camera] fFieldOfView
 			bool  fovSaved{ false };
 			float savedWorldFov{ 0.0f };
 			std::vector<RE::NiPointer<RE::BSGeometry>> hiddenArms;
@@ -239,7 +239,7 @@ namespace chiefrim::Camera
 		}
 
 		s.useHaloFov = Settings::ReadBool(L"Camera", L"bUseHaloFov", true);
-		s.fieldOfView = Settings::ReadFloat(L"Camera", L"fFieldOfView", 95.0f);
+		s.fieldOfView = Settings::ReadFloat(L"Camera", L"fFieldOfView", 85.0f);
 
 		REL::Relocation<std::uintptr_t> firstPerson{ RE::VTABLE_FirstPersonState[0] };
 		FirstPersonTranslationHook::func = firstPerson.write_vfunc(0x5, FirstPersonTranslationHook::thunk);
