@@ -20,7 +20,7 @@ namespace chiefrim::Combat
 			float         damageMult = 1.0f;          // [Combat] fDamageMult
 			float         levelExponent = 0.5f;       // [Combat] fLevelExponent
 			float         incomingReference = 250.0f; // [Combat] fIncomingReference
-			std::uint32_t giveWeaponKey = 0x43;       // [Controls] iGiveWeaponKey (F9)
+			std::uint32_t giveWeaponKey = 0x41;       // [Controls] iGiveWeaponKey (F7: free in Skyrim; F9 is Quickload)
 		} config;
 
 		struct RecentHit
@@ -43,6 +43,7 @@ namespace chiefrim::Combat
 			std::uint32_t     hitsOnActors = 0, hurts = 0;
 			float             hurtTotal = 0.0f, damageTotal = 0.0f;
 			ULONGLONG         nextReport = 0;
+			bool              keyChecked = false;  // in game, with a corner message
 		} s;
 
 		// ---- the player's hits from Skyrim -----------------------------------
@@ -108,6 +109,27 @@ namespace chiefrim::Combat
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
+
+		// The debug key must not be one of Skyrim's own (as Input.cpp checks
+		// Chiefrim's other hotkeys): it would do both.
+		void CheckKeyClash(bool a_show)
+		{
+			auto* map = RE::ControlMap::GetSingleton();
+			if (!map || !config.giveWeaponKey) {
+				return;
+			}
+			const auto clash = map->GetUserEventName(config.giveWeaponKey, RE::INPUT_DEVICE::kKeyboard,
+				RE::UserEvents::INPUT_CONTEXT_ID::kGameplay);
+			if (clash.empty()) {
+				return;
+			}
+			logger::warn("Chiefrim's give-weapon key 0x{:02X} is also Skyrim's \"{}\"; change iGiveWeaponKey in Chiefrim.ini",
+				config.giveWeaponKey, clash);
+			if (a_show) {
+				const auto message = std::format("Chiefrim: the give-weapon key is also Skyrim's {}", clash);
+				RE::SendHUDMessage::ShowHUDMessage(message.c_str());
+			}
+		}
 
 		void SetEssential(RE::PlayerCharacter* a_player, bool a_on)
 		{
@@ -340,7 +362,7 @@ namespace chiefrim::Combat
 		config.damageMult = Settings::ReadFloat(L"Combat", L"fDamageMult", 1.0f);
 		config.levelExponent = Settings::ReadFloat(L"Combat", L"fLevelExponent", 0.5f);
 		config.incomingReference = Settings::ReadFloat(L"Combat", L"fIncomingReference", 250.0f);
-		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x43, path.c_str());
+		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESHitEvent>(HitSink::Get());
 		}
@@ -348,6 +370,7 @@ namespace chiefrim::Combat
 			input->AddEventSink(GiveWeaponSink::Get());
 		}
 		ResolveHitPipeline();
+		CheckKeyClash(false);
 		logger::info("combat: damage x{:.2f}, level exponent {:.2f}, {:.0f} Skyrim damage kills Chief; give-weapon key 0x{:02X}",
 			config.damageMult, config.levelExponent, config.incomingReference, config.giveWeaponKey);
 	}
@@ -356,6 +379,9 @@ namespace chiefrim::Combat
 	{
 		if (s.chiefDead) {
 			return;
+		}
+		if (!std::exchange(s.keyChecked, true)) {
+			CheckKeyClash(true);
 		}
 		SetEssential(a_player, true);  // Chief's death decides; Skyrim's mustn't come first
 		WriteActors(a_player);

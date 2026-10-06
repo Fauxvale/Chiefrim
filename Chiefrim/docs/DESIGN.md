@@ -469,7 +469,7 @@ protocol 8):
 - Chief is deathless in Halo while linked; with his body at 0 Skyrim is told
   (`CR_MSG_PLAYER_DIED`) and kills its player (killer: the last attacker). A new world (the
   reload) makes him whole and clears the proxies.
-- Debug (§8.4): `[Controls] iGiveWeaponKey` (F9) gives Chief the map's next weapon (`CR_MSG_GIVE_WEAPON`;
+- Debug (§8.4): `[Controls] iGiveWeaponKey` (F7; F9 is Skyrim's Quickload) gives Chief the map's next weapon (`CR_MSG_GIVE_WEAPON`;
   vehicle guns skipped; b30 has the MA5B, M6D, plasma rifle and pistol, rocket launcher, needler,
   fuel rod and energy sword; the list is in Halo's log), dropping the one in hand if he has two.
 
