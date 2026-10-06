@@ -20,9 +20,13 @@ and Chiefrim/docs/DESIGN.md §9.
 #define OVERLAY_SCREEN_HEIGHT 480
 #define OVERLAY_SCREEN_MAXIMUM_WIDTH 1920
 #define OVERLAY_FRAMEBUFFERS 4
-#define OVERLAY_READBACKS 2
+/* chiefrim.h's CHIEFRIM_LAYER_* */
+#define OVERLAY_LAYER_WORLD 1
+/* the depth target where nothing was drawn */
+#define OVERLAY_FAR 1.0e30f
 
 struct cr_shared *chiefrim_shared(void);
+long chiefrim_overlay_layer(void);
 
 /* entry points the port's list (gl.h) doesn't have */
 static PFNGLBLENDFUNCIPROC overlay_glBlendFunci;
@@ -30,40 +34,39 @@ static PFNGLBLENDEQUATIONIPROC overlay_glBlendEquationi;
 static PFNGLENABLEIPROC overlay_glEnablei;
 static PFNGLDISABLEIPROC overlay_glDisablei;
 static PFNGLCOLORMASKIPROC overlay_glColorMaski;
-static PFNGLFENCESYNCPROC overlay_glFenceSync;
-static PFNGLCLIENTWAITSYNCPROC overlay_glClientWaitSync;
-static PFNGLDELETESYNCPROC overlay_glDeleteSync;
-static PFNGLUNMAPBUFFERPROC overlay_glUnmapBuffer;
+static void (*overlay_glReadBuffer)(GLenum mode); /* GL 1.0: no PFN type */
+static PFNGLCLEARBUFFERFVPROC overlay_glClearBufferfv;
 
 struct overlay_framebuffer
 {
 	GLuint color, depth, framebuffer;
 };
 
-struct overlay_readback
+struct overlay_resolve
 {
-	GLuint buffer;
-	GLsync fence;
+	GLuint texture, framebuffer;
 	unsigned long width, height;
-	unsigned long display_frame;
-	unsigned long time_us;
 };
 
 static struct
 {
 	int checked, enabled;
 	int loaded, failed;
-	/* the coverage target, the size of the back buffer */
-	GLuint coverage;
-	unsigned long coverage_width, coverage_height;
+	/* the targets beside the back buffer's colour: how much of Skyrim's
+	picture shows through each pixel (R8, the transmittance), and the world
+	layer's view depth (R32F, min-blended) */
+	GLuint coverage, depth;
+	unsigned long width, height;
 	struct overlay_framebuffer framebuffers[OVERLAY_FRAMEBUFFERS];
 	long framebuffer_count;
+	GLuint bound; /* the framebuffer the back buffer was last drawn through */
+	GLuint bound_color;
 	/* the picture with the coverage as alpha (the resolve pass) */
-	GLuint program, vertex_array, resolve, resolve_framebuffer;
+	GLuint program, vertex_array;
 	GLint picture_uniform, coverage_uniform;
-	unsigned long resolve_width, resolve_height;
-	struct overlay_readback readbacks[OVERLAY_READBACKS];
-	long next_readback;
+	struct overlay_resolve world, screen;
+	long world_draws;  /* draws into the world layer this frame */
+	int world_drawn;   /* the world layer of this frame has something */
 	unsigned long frame;
 	int logged;
 } overlay;
@@ -104,22 +107,20 @@ static int overlay_load(void)
 	OVERLAY_LOAD(glEnablei)
 	OVERLAY_LOAD(glDisablei)
 	OVERLAY_LOAD(glColorMaski)
-	OVERLAY_LOAD(glFenceSync)
-	OVERLAY_LOAD(glClientWaitSync)
-	OVERLAY_LOAD(glDeleteSync)
-	OVERLAY_LOAD(glUnmapBuffer)
+	OVERLAY_LOAD(glReadBuffer)
+	OVERLAY_LOAD(glClearBufferfv)
 #undef OVERLAY_LOAD
 	overlay.loaded = !overlay.failed;
 	return overlay.loaded;
 }
 
 /* Skyrim's screen in the frame slots' bounds, keeping its shape */
-static int overlay_picture_size(unsigned long *width, unsigned long *height, unsigned long *frame)
+static int overlay_picture_size(unsigned long *width, unsigned long *height, unsigned long *camera_frame)
 {
 	unsigned long w, h;
 	float fit = 1.0f;
 
-	if (!chiefrim_overlay_enabled() || !chiefrim_overlay_display(&w, &h, frame) || w < 64 || h < 64)
+	if (!chiefrim_overlay_enabled() || !chiefrim_overlay_display(&w, &h, camera_frame) || w < 64 || h < 64)
 		return FALSE;
 	if ((float)w * fit > (float)CR_FRAME_MAX_WIDTH)
 		fit = (float)CR_FRAME_MAX_WIDTH / (float)w;
@@ -161,30 +162,37 @@ static void overlay_forget_framebuffers(void)
 	for (index = 0; index < overlay.framebuffer_count; index++)
 		glDeleteFramebuffers(1, &overlay.framebuffers[index].framebuffer);
 	overlay.framebuffer_count = 0;
+	overlay.bound = 0;
+}
+
+static void overlay_target(GLuint *texture, GLint format, GLenum layout, GLenum type, unsigned long width, unsigned long height)
+{
+	if (!*texture)
+		glGenTextures(1, texture);
+	glBindTexture(GL_TEXTURE_2D, *texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, format, (GLsizei)width, (GLsizei)height, 0, layout, type, NULL);
 }
 
 unsigned int chiefrim_overlay_framebuffer(unsigned int color, unsigned int depth,
 	unsigned long width, unsigned long height)
 {
-	static const GLenum draw_buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	static const GLenum draw_buffers[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
 	struct overlay_framebuffer *entry;
 	unsigned long w, h, frame;
 	long index;
 
 	if (!color || !overlay_picture_size(&w, &h, &frame) || !overlay_load())
 		return 0;
-	if (!overlay.coverage || overlay.coverage_width != width || overlay.coverage_height != height)
+	if (!overlay.coverage || overlay.width != width || overlay.height != height)
 	{
 		overlay_forget_framebuffers();
-		if (!overlay.coverage)
-			glGenTextures(1, &overlay.coverage);
-		glBindTexture(GL_TEXTURE_2D, overlay.coverage);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)width, (GLsizei)height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-		overlay.coverage_width = width;
-		overlay.coverage_height = height;
+		overlay_target(&overlay.coverage, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height);
+		overlay_target(&overlay.depth, GL_R32F, GL_RED, GL_FLOAT, width, height);
+		overlay.width = width;
+		overlay.height = height;
 		xgpu_gl_state_invalidate();
 		platform_log("chiefrim: overlay: %lux%lu (Skyrim's screen %lux%lu)", width, height, w, h);
 	}
@@ -192,7 +200,11 @@ unsigned int chiefrim_overlay_framebuffer(unsigned int color, unsigned int depth
 	{
 		entry = &overlay.framebuffers[index];
 		if (entry->color == color && entry->depth == depth)
+		{
+			overlay.bound = entry->framebuffer;
+			overlay.bound_color = color;
 			return entry->framebuffer;
+		}
 	}
 	if (overlay.framebuffer_count == OVERLAY_FRAMEBUFFERS)
 		overlay_forget_framebuffers();
@@ -203,54 +215,53 @@ unsigned int chiefrim_overlay_framebuffer(unsigned int color, unsigned int depth
 	glBindFramebuffer(GL_FRAMEBUFFER, entry->framebuffer);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, overlay.coverage, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, overlay.depth, 0);
 	if (depth)
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
-	glDrawBuffers(2, draw_buffers);
+	glDrawBuffers(3, draw_buffers);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		platform_log("chiefrim: overlay: framebuffer %u/%u/%u is incomplete", color, overlay.coverage, depth);
+		platform_log("chiefrim: overlay: framebuffer %u/%u/%u/%u is incomplete", color, overlay.coverage, overlay.depth, depth);
 	xgpu_gl_state_invalidate();
+	overlay.bound = entry->framebuffer;
+	overlay.bound_color = color;
 	return entry->framebuffer;
 }
 
-/* What a draw's blend does to how much of a pixel is covered. The colour
-target ends up as Halo's picture over black, so the composite is
-picture + Skyrim * (1 - coverage). With the destination kept by a factor f,
-the coverage c becomes (1 - f) + f * c; the shader's coverage output is
-(1, 1, 1, alpha), so that's red = 1 * s + c * d with: */
-static void overlay_coverage_factors(GLenum source, GLenum destination, GLenum *s, GLenum *d)
+/* What a draw's blend does to how much of Skyrim's picture shows through
+a pixel: its transmittance T. The colour target ends up as Halo's picture
+over black, C, so the composite is C + Skyrim * T, sent as alpha = 1 - T
+(premultiplied). A blend out = S * src + D * dst turns T into D * T, plus
+src * T where S is the destination's colour (a modulation multiplies what
+is under it, Skyrim's picture included: bullet holes). The shader writes
+the transmittance target (luminance(src), 0, 0, alpha(src)), so its blend
+is (S == DST_COLOR ? DST_COLOR : ZERO, D); factors of the game's
+destination alpha, which the target hasn't, keep T. */
+static void overlay_transmittance_factors(int blend_enable, GLenum source, GLenum destination, GLenum *s, GLenum *d)
 {
-	/* kept as it was: blends that only darken or tint what is there
-	(modulation, which over black leaves black), or depend on it */
-	*s = GL_ZERO;
-	*d = GL_ONE;
-	if (source == GL_ZERO || source == GL_DST_COLOR || source == GL_ONE_MINUS_DST_COLOR ||
-		source == GL_DST_ALPHA || source == GL_ONE_MINUS_DST_ALPHA)
+	if (!blend_enable)
 	{
+		*s = GL_ZERO; /* replaces: Skyrim's picture is hidden */
+		*d = GL_ZERO;
 		return;
 	}
+	*s = source == GL_DST_COLOR ? GL_DST_COLOR : GL_ZERO;
 	switch (destination)
 	{
-	case GL_ZERO: /* f = 0: replaces */
-		*s = GL_ONE;
-		*d = GL_ZERO;
-		break;
-	case GL_ONE_MINUS_SRC_ALPHA: /* f = 1 - a */
-		*s = GL_SRC_ALPHA;
-		*d = GL_ONE_MINUS_SRC_ALPHA;
-		break;
-	case GL_SRC_ALPHA: /* f = a */
-		*s = GL_ONE_MINUS_SRC_ALPHA;
-		*d = GL_SRC_ALPHA;
-		break;
+	case GL_ZERO:
+	case GL_ONE:
+	case GL_SRC_COLOR:
+	case GL_ONE_MINUS_SRC_COLOR:
+	case GL_SRC_ALPHA:
+	case GL_ONE_MINUS_SRC_ALPHA:
+	case GL_CONSTANT_COLOR:
+	case GL_ONE_MINUS_CONSTANT_COLOR:
 	case GL_CONSTANT_ALPHA:
-		*s = GL_ONE_MINUS_CONSTANT_ALPHA;
-		*d = GL_CONSTANT_ALPHA;
-		break;
 	case GL_ONE_MINUS_CONSTANT_ALPHA:
-		*s = GL_CONSTANT_ALPHA;
-		*d = GL_ONE_MINUS_CONSTANT_ALPHA;
+		*d = destination;
 		break;
-	default: /* ONE (additive: light, not cover) and colour factors */
+	default: /* the destination's alpha (the game's scratch), saturate */
+		*s = GL_ZERO;
+		*d = GL_ONE;
 		break;
 	}
 }
@@ -259,21 +270,40 @@ void chiefrim_overlay_draw_state(unsigned long blend_enable, unsigned long sourc
 	int adds, unsigned char color_mask)
 {
 	GLenum s, d;
+	int world = chiefrim_overlay_layer() == OVERLAY_LAYER_WORLD;
 
-	/* the port's (unindexed) state set both targets; this sets the second */
+	/* the port's (unindexed) state set every target; this sets the others */
 	overlay_glColorMaski(1, (color_mask & 7) != 0, GL_FALSE, GL_FALSE, GL_FALSE);
-	if (!blend_enable)
+	/* the world layer's depth: the nearest of what each draw shows */
+	overlay_glColorMaski(2, world && (color_mask & 7) != 0, GL_FALSE, GL_FALSE, GL_FALSE);
+	if (world && (color_mask & 7))
 	{
-		overlay_glDisablei(GL_BLEND, 1);
-		return;
+		overlay.world_draws++;
+		overlay_glEnablei(GL_BLEND, 2);
+		overlay_glBlendEquationi(2, GL_MIN);
+		overlay_glBlendFunci(2, GL_ONE, GL_ONE);
 	}
-	if (adds)
-		overlay_coverage_factors((GLenum)source, (GLenum)destination, &s, &d);
+	if (adds || !blend_enable)
+		overlay_transmittance_factors(blend_enable != 0, (GLenum)source, (GLenum)destination, &s, &d);
 	else
-		s = GL_ZERO, d = GL_ONE;
+		s = GL_ZERO, d = GL_ONE; /* subtract, min, max: kept */
 	overlay_glEnablei(GL_BLEND, 1);
 	overlay_glBlendEquationi(1, GL_FUNC_ADD);
 	overlay_glBlendFunci(1, s, d);
+}
+
+void chiefrim_overlay_cleared(void)
+{
+	static const GLfloat far[4] = { OVERLAY_FAR, OVERLAY_FAR, OVERLAY_FAR, OVERLAY_FAR };
+	static const GLfloat through[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+	if (!overlay.loaded)
+		return;
+	overlay_glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	overlay_glClearBufferfv(GL_COLOR, 1, through); /* all of Skyrim shows through */
+	overlay_glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	overlay_glClearBufferfv(GL_COLOR, 2, far);
+	xgpu_gl_state_invalidate();
 }
 
 static GLuint overlay_compile(GLenum type, const char *source)
@@ -294,129 +324,70 @@ static GLuint overlay_compile(GLenum type, const char *source)
 	return shader;
 }
 
-static int overlay_resolve_ready(unsigned long width, unsigned long height)
+static int overlay_program_ready(void)
 {
-	if (!overlay.program)
-	{
-		static const char vertex[] =
-			"#version 330 core\n"
-			"void main()\n"
-			"{\n"
-			"	vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
-			"	gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);\n"
-			"}\n";
-		static const char fragment[] =
-			"#version 330 core\n"
-			"uniform sampler2D picture;\n"
-			"uniform sampler2D coverage;\n"
-			"out vec4 result;\n"
-			"void main()\n"
-			"{\n"
-			"	ivec2 pixel = ivec2(gl_FragCoord.xy);\n"
-			"	result = vec4(texelFetch(picture, pixel, 0).rgb, texelFetch(coverage, pixel, 0).r);\n"
-			"}\n";
-		GLuint vs = overlay_compile(GL_VERTEX_SHADER, vertex);
-		GLuint fs = overlay_compile(GL_FRAGMENT_SHADER, fragment);
-		GLint ok = 0;
+	static const char vertex[] =
+		"#version 330 core\n"
+		"void main()\n"
+		"{\n"
+		"	vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+		"	gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);\n"
+		"}\n";
+	static const char fragment[] =
+		"#version 330 core\n"
+		"uniform sampler2D picture;\n"
+		"uniform sampler2D transmittance;\n"
+		"out vec4 result;\n"
+		"void main()\n"
+		"{\n"
+		"	ivec2 pixel = ivec2(gl_FragCoord.xy);\n"
+		"	result = vec4(texelFetch(picture, pixel, 0).rgb, 1.0 - texelFetch(transmittance, pixel, 0).r);\n"
+		"}\n";
+	GLuint vs, fs;
+	GLint ok = 0;
 
-		overlay.program = glCreateProgram();
-		glAttachShader(overlay.program, vs);
-		glAttachShader(overlay.program, fs);
-		glLinkProgram(overlay.program);
-		glDeleteShader(vs);
-		glDeleteShader(fs);
-		glGetProgramiv(overlay.program, GL_LINK_STATUS, &ok);
-		if (!ok)
-		{
-			platform_log("chiefrim: overlay: the resolve program doesn't link");
-			overlay.failed = TRUE;
-			return FALSE;
-		}
-		overlay.picture_uniform = glGetUniformLocation(overlay.program, "picture");
-		overlay.coverage_uniform = glGetUniformLocation(overlay.program, "coverage");
-		glGenVertexArrays(1, &overlay.vertex_array);
-	}
-	if (!overlay.resolve || overlay.resolve_width != width || overlay.resolve_height != height)
+	if (overlay.program)
+		return TRUE;
+	vs = overlay_compile(GL_VERTEX_SHADER, vertex);
+	fs = overlay_compile(GL_FRAGMENT_SHADER, fragment);
+	overlay.program = glCreateProgram();
+	glAttachShader(overlay.program, vs);
+	glAttachShader(overlay.program, fs);
+	glLinkProgram(overlay.program);
+	glDeleteShader(vs);
+	glDeleteShader(fs);
+	glGetProgramiv(overlay.program, GL_LINK_STATUS, &ok);
+	if (!ok)
 	{
-		if (!overlay.resolve)
-		{
-			glGenTextures(1, &overlay.resolve);
-			glGenFramebuffers(1, &overlay.resolve_framebuffer);
-		}
-		glBindTexture(GL_TEXTURE_2D, overlay.resolve);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)width, (GLsizei)height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-		glBindFramebuffer(GL_FRAMEBUFFER, overlay.resolve_framebuffer);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, overlay.resolve, 0);
-		overlay.resolve_width = width;
-		overlay.resolve_height = height;
+		platform_log("chiefrim: overlay: the resolve program doesn't link");
+		overlay.failed = TRUE;
+		overlay.loaded = FALSE;
+		return FALSE;
 	}
+	overlay.picture_uniform = glGetUniformLocation(overlay.program, "picture");
+	overlay.coverage_uniform = glGetUniformLocation(overlay.program, "transmittance");
+	glGenVertexArrays(1, &overlay.vertex_array);
 	return TRUE;
 }
 
-/* the readback a frame ago, into the next frame slot */
-static void overlay_publish(struct overlay_readback *readback)
+/* the back buffer's picture with its coverage as alpha, into a resolve */
+static void overlay_resolve(struct overlay_resolve *resolve, GLuint color)
 {
-	struct cr_shared *shm = chiefrim_shared();
-	unsigned long bytes = readback->width * readback->height * 4;
-	const void *pixels;
-	uint32_t slot;
-	cr_frame_header *header;
-
-	if (!readback->fence)
-		return;
-	overlay_glClientWaitSync(readback->fence, GL_SYNC_FLUSH_COMMANDS_BIT, 50000000ull);
-	overlay_glDeleteSync(readback->fence);
-	readback->fence = 0;
-	if (!shm || readback->width > CR_FRAME_MAX_WIDTH || readback->height > CR_FRAME_MAX_HEIGHT)
-		return;
-	glBindBuffer(GL_PIXEL_PACK_BUFFER, readback->buffer);
-	pixels = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)bytes, GL_MAP_READ_BIT);
-	if (pixels)
-	{
-		uint32_t latest = CR_LOAD_ACQ(&shm->frames.latest);
-
-		slot = latest ? latest % CR_FRAME_SLOTS : 0; /* the one after the latest */
-		header = &shm->frames.slots[slot];
-		cr_slot_write_begin(&header->seq);
-		memcpy(shm->frames.pixels[slot], pixels, bytes);
-		header->width = (uint32_t)readback->width;
-		header->height = (uint32_t)readback->height;
-		header->frame = (uint32_t)++overlay.frame;
-		header->display_frame = (uint32_t)readback->display_frame;
-		header->time_us = (uint32_t)readback->time_us;
-		header->flags = CR_FRAME_VISIBLE;
-		cr_slot_write_end(&header->seq);
-		CR_STORE_REL(&shm->frames.latest, slot + 1);
-		CR_STORE_REL(&shm->frames.published, shm->frames.published + 1);
-		overlay_glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-	}
-	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-}
-
-void chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned long height)
-{
-	struct overlay_readback *readback;
-	unsigned long w, h, frame;
 	GLint vertex_array = 0;
 
-	if (!overlay_picture_size(&w, &h, &frame) || !overlay_load() || !overlay.coverage ||
-		overlay.coverage_width != width || overlay.coverage_height != height ||
-		width > CR_FRAME_MAX_WIDTH || height > CR_FRAME_MAX_HEIGHT || !overlay_resolve_ready(width, height))
+	if (!resolve->texture || resolve->width != overlay.width || resolve->height != overlay.height)
 	{
-		/* (the targets follow Skyrim's screen a frame later: halo_screen_commit) */
-		return;
+		overlay_target(&resolve->texture, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, overlay.width, overlay.height);
+		if (!resolve->framebuffer)
+			glGenFramebuffers(1, &resolve->framebuffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, resolve->framebuffer);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, resolve->texture, 0);
+		resolve->width = overlay.width;
+		resolve->height = overlay.height;
 	}
-	if (!overlay.logged)
-	{
-		overlay.logged = TRUE;
-		platform_log("chiefrim: overlay: publishing %lux%lu frames", width, height);
-	}
-
-	/* the picture with its coverage as alpha */
 	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vertex_array);
-	glBindFramebuffer(GL_FRAMEBUFFER, overlay.resolve_framebuffer);
-	glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+	glBindFramebuffer(GL_FRAMEBUFFER, resolve->framebuffer);
+	glViewport(0, 0, (GLsizei)overlay.width, (GLsizei)overlay.height);
 	glDisable(GL_SCISSOR_TEST);
 	glDisable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
@@ -434,28 +405,97 @@ void chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned 
 	glUniform1i(overlay.picture_uniform, 0);
 	glUniform1i(overlay.coverage_uniform, 1);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
-
-	/* read it back without waiting, and publish last frame's */
-	readback = &overlay.readbacks[overlay.next_readback];
-	overlay.next_readback = (overlay.next_readback + 1) % OVERLAY_READBACKS;
-	overlay_publish(readback); /* (only if still pending: normally done a frame ago) */
-	if (!readback->buffer)
-		glGenBuffers(1, &readback->buffer);
-	glBindBuffer(GL_PIXEL_PACK_BUFFER, readback->buffer);
-	if (readback->width != width || readback->height != height)
-		glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)(width * height * 4), NULL, GL_STREAM_READ);
-	readback->width = width;
-	readback->height = height;
-	readback->display_frame = frame;
-	readback->time_us = overlay_now_us();
-	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	readback->fence = overlay_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-	overlay_publish(&overlay.readbacks[overlay.next_readback]); /* last frame's */
-
 	glBindVertexArray((GLuint)vertex_array); /* the port binds its own once, at start */
 	glUseProgram(0);
 	glActiveTexture(GL_TEXTURE0);
 	xgpu_gl_state_invalidate();
+}
+
+void chiefrim_overlay_world_done(void)
+{
+	static const GLfloat clear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	static const GLfloat through[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+	overlay.world_drawn = FALSE;
+	if (!overlay.loaded || !overlay.bound || !overlay_program_ready())
+		return;
+	overlay.world_drawn = overlay.world_draws > 0;
+	overlay.world_draws = 0;
+	if (overlay.world_drawn)
+		overlay_resolve(&overlay.world, overlay.bound_color);
+	/* the screen layer starts on nothing (the depth target keeps the
+	world's, for Present); Halo's depth too, as at a frame's start */
+	glBindFramebuffer(GL_FRAMEBUFFER, overlay.bound);
+	glDisable(GL_SCISSOR_TEST);
+	overlay_glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	overlay_glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	overlay_glClearBufferfv(GL_COLOR, 0, clear);
+	overlay_glClearBufferfv(GL_COLOR, 1, through); /* all of Skyrim shows through */
+	glDepthMask(GL_TRUE);
+	glStencilMask(0xff);
+	glClearDepth(1.0);
+	glClearStencil(0);
+	glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	xgpu_gl_state_invalidate();
+}
+
+static void overlay_read(GLuint framebuffer, GLenum attachment, GLenum layout, GLenum type, void *pixels)
+{
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+	overlay_glReadBuffer(attachment);
+	glReadPixels(0, 0, (GLsizei)overlay.width, (GLsizei)overlay.height, layout, type, pixels);
+}
+
+int chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned long height)
+{
+	struct cr_shared *shm = chiefrim_shared();
+	unsigned long w, h, camera_frame;
+	uint32_t latest, slot;
+	cr_frame_header *header;
+	uint8_t *pixels;
+	int world = overlay.world_drawn;
+
+	overlay.world_drawn = FALSE;
+	overlay.world_draws = 0;
+	if (!shm || !overlay_picture_size(&w, &h, &camera_frame) || !overlay.loaded || !overlay.coverage ||
+		overlay.width != width || overlay.height != height ||
+		width > CR_FRAME_MAX_WIDTH || height > CR_FRAME_MAX_HEIGHT || !overlay_program_ready())
+	{
+		/* (the targets follow Skyrim's screen a frame later: halo_screen_commit) */
+		return FALSE;
+	}
+	if (!overlay.logged)
+	{
+		overlay.logged = TRUE;
+		platform_log("chiefrim: overlay: publishing %lux%lu frames", width, height);
+	}
+	overlay_resolve(&overlay.screen, color);
+
+	/* Read straight into the next slot, waiting for the GPU: Skyrim waits
+	for this frame (lockstep), so there's no use for it a frame later. */
+	latest = CR_LOAD_ACQ(&shm->frames.latest);
+	slot = latest ? latest % CR_FRAME_SLOTS : 0; /* the one after the latest */
+	header = &shm->frames.slots[slot];
+	pixels = shm->frames.pixels[slot];
+	cr_slot_write_begin(&header->seq);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	overlay_read(overlay.screen.framebuffer, GL_COLOR_ATTACHMENT0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	if (world && overlay.bound)
+	{
+		overlay_read(overlay.world.framebuffer, GL_COLOR_ATTACHMENT0, GL_RGBA, GL_UNSIGNED_BYTE,
+			pixels + CR_FRAME_LAYER_BYTES);
+		overlay_read(overlay.bound, GL_COLOR_ATTACHMENT2, GL_RED, GL_FLOAT, pixels + 2 * CR_FRAME_LAYER_BYTES);
+	}
+	header->width = (uint32_t)width;
+	header->height = (uint32_t)height;
+	header->frame = (uint32_t)++overlay.frame;
+	header->camera_frame = (uint32_t)camera_frame;
+	header->time_us = (uint32_t)overlay_now_us();
+	header->flags = CR_FRAME_VISIBLE | (world ? CR_FRAME_WORLD : 0u);
+	cr_slot_write_end(&header->seq);
+	CR_STORE_REL(&shm->frames.latest, slot + 1);
+	CR_STORE_REL(&shm->frames.published, shm->frames.published + 1);
+	overlay_glReadBuffer(GL_COLOR_ATTACHMENT0);
+	xgpu_gl_state_invalidate();
+	return TRUE;
 }

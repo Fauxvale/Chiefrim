@@ -27,12 +27,14 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 6
+VERSION = 7
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 352 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
-FRAME_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
+FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
+FRAME_BYTES = 3 * FRAME_LAYER_BYTES
+OFF_CAMERA = OFF_DISPLAY + 24
 TOTAL_SIZE = OFF_FRAMES + 160 + FRAME_SLOTS * FRAME_BYTES
 
 # offsets (chiefrim_protocol.h)
@@ -301,13 +303,34 @@ def grab_frame(link, directory, index):
         return False
     slot = latest - 1
     header = OFF_FRAMES + 32 + 32 * slot
-    seq, width, height, frame, display_frame, time_us, flags, _ = struct.unpack_from("<8I", link.shm, header)
+    seq, width, height, frame, camera_frame, time_us, flags, _ = struct.unpack_from("<8I", link.shm, header)
     if seq & 1 or not (0 < width <= FRAME_MAX_W and 0 < height <= FRAME_MAX_H):
         return False
     start = OFF_FRAMES + 160 + slot * FRAME_BYTES
     pixels = bytes(link.shm[start:start + width * height * 4])
+    world = bytes(link.shm[start + FRAME_LAYER_BYTES:start + FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
+    depth = bytes(link.shm[start + 2 * FRAME_LAYER_BYTES:start + 2 * FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     if link.u32(header) != seq:
         return False
+    saved = [write_png(directory, f"overlay{index:03}.png", width, height, pixels)]
+    note = ""
+    if world:
+        saved.append(write_png(directory, f"world{index:03}.png", width, height, world))
+        values = [v for v in struct.unpack(f"<{width * height}f", depth) if v < 1e29]
+        if values:
+            note = (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
+                    f"-{max(values) * 213.36:.0f} Skyrim units")
+    print(f"fake_skyrim: frame {frame} ({width}x{height}, flags {flags}, camera {camera_frame} of"
+          f" {LAST_CAMERA[0]}{note}) -> {', '.join(saved)}", flush=True)
+    return True
+
+
+LAST_CAMERA = [0]
+
+
+def write_png(directory, name, width, height, pixels):
+    """premultiplied RGBA over a grey checkerboard, as a PNG"""
+    import zlib
     rows = []
     covered = 0
     for y in range(height):
@@ -325,12 +348,10 @@ def grab_frame(link, directory, index):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
     png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(b"".join(rows), 6)) + chunk(b"IEND", b"")
-    path = os.path.join(directory, f"overlay{index:03}.png")
+    path = os.path.join(directory, name)
     with open(path, "wb") as out:
         out.write(png)
-    print(f"fake_skyrim: overlay frame {frame} ({width}x{height}, flags {flags}, display frame {display_frame},"
-          f" {100.0 * covered / (width * height):.1f}% covered) -> {path}", flush=True)
-    return True
+    return f"{path} ({100.0 * covered / (width * height):.1f}% covered)"
 
 
 def main():
@@ -380,6 +401,13 @@ def main():
     parser.add_argument("--grab", default="",
                         help="with --overlay: save a frame to this directory every --grab-every seconds")
     parser.add_argument("--grab-every", type=float, default=5.0)
+    parser.add_argument("--speed", type=float, default=300.0,
+                        help="with --skyrim-moves: units per second the player walks north (0: stands)")
+    parser.add_argument("--pitch", type=float, default=0.0,
+                        help="with --skyrim-moves: degrees the player looks up (negative: down)")
+    parser.add_argument("--fire-at", type=float, default=0.0,
+                        help="seconds in: hold fire for --fire-for seconds (bullets, casings, decals: the world layer)")
+    parser.add_argument("--fire-for", type=float, default=3.0)
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
@@ -502,14 +530,27 @@ def main():
             if options.skyrim_moves:
                 # the player walks north at 300 units a second after 2 s, on the terrain
                 t = time.monotonic() - started
-                walked = max(0.0, t - 2.0) * 300.0
+                walked = max(0.0, t - 2.0) * options.speed
                 px, py = options.x, options.y + walked
                 pz = options.z + terrain_height(px - options.x, py - options.y)
                 drive_state["skyrim_frame"] = drive_state.get("skyrim_frame", 0) + 1
+                pitch = math.radians(options.pitch)
+                fy, fz = math.cos(pitch), math.sin(pitch)
                 link.slot_write(SLOT_SKYRIM_PLAYER, struct.pack("<II3fff3f3f3f2I",
-                    drive_state["skyrim_frame"], 0x1 | 0x2, px, py, pz, 0.0, 0.0,
-                    px, py, pz + 120.0, 0.0, 1.0, 0.0, 0.0, 300.0 if t > 2 else 0.0, 0.0, 0, 0))
+                    drive_state["skyrim_frame"], 0x1 | 0x2, px, py, pz, 0.0, -pitch,
+                    px, py, pz + 120.0, 0.0, fy, fz, 0.0, options.speed if t > 2 else 0.0, 0.0, 0, 0))
+                if display:
+                    # the camera Skyrim renders with (lockstep): the same eye and view
+                    LAST_CAMERA[0] += 1
+                    link.slot_write(OFF_CAMERA, struct.pack("<II3f3f3f3f2I", LAST_CAMERA[0], 0,
+                        px, py, pz + 120.0, 0.0, fy, fz, 0.0, -fz, fy, math.radians(60.0), 5.0, 300000.0, 0, 0))
                 drive_state["skyrim_pos"] = (px, py, pz)
+            if options.fire_at and not options.drive:
+                t = time.monotonic() - started
+                firing = options.fire_at <= t < options.fire_at + options.fire_for
+                frame += 1
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 2) if firing else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
             if options.zoom_at and not options.drive:
                 t = time.monotonic() - started
                 frame += 1

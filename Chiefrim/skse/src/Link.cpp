@@ -193,6 +193,13 @@ namespace chiefrim
 		}
 	}
 
+	void Link::SendCamera(const cr_camera& a_camera)
+	{
+		if (shm_) {
+			CR_SLOT_WRITE(&shm_->camera, a_camera);
+		}
+	}
+
 	std::optional<cr_player_state> Link::ReadPlayerState()
 	{
 		if (!shm_) {

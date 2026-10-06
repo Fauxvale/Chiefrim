@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 6u
+#define CR_PROTOCOL_VERSION 7u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -190,11 +190,30 @@ typedef struct cr_display
 
 #define CR_DISPLAY_OVERLAY 0x0001u /* Skyrim composites Halo's frames: draw them */
 
+/* Skyrim -> Halo. The camera Skyrim is rendering this frame with (docs §9),
+published as its world rendering starts. Halo draws its next frame through
+it, so its world layer sits exactly on Skyrim's picture, and names it in
+the frame (cr_frame_header.camera_frame); Skyrim waits a moment for that
+frame before compositing. Skyrim units. */
+typedef struct cr_camera
+{
+	uint32_t frame;         /* bumps per published camera; 0: none yet */
+	uint32_t flags;         /* reserved */
+	cr_vec3  eye;
+	cr_vec3  forward;
+	cr_vec3  up;
+	float    vertical_fov;  /* radians, as Skyrim renders */
+	float    near_plane;    /* Skyrim's, for the logs */
+	float    far_plane;
+	uint32_t reserved[2];
+} cr_camera;
+
 CR_DECLARE_SLOT(cr_slot_world_context, cr_world_context);
 CR_DECLARE_SLOT(cr_slot_input, cr_input);
 CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
 CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
 CR_DECLARE_SLOT(cr_slot_display, cr_display);
+CR_DECLARE_SLOT(cr_slot_camera, cr_camera);
 
 /* ---- rings (events) ---------------------------------------------------- */
 
@@ -297,9 +316,16 @@ typedef struct cr_msg_collision_tris
 
 /* ---- frames (H->S, docs §9) -------------------------------------------- */
 
-/* Halo's picture of what it draws over Skyrim's: Chief's arms and weapon,
-and the HUD, on transparent black. Pixels are RGBA8, premultiplied (draw
-with ONE, INV_SRC_ALPHA), top row first, rows of width * 4 bytes.
+/* Halo's pictures of what it draws over Skyrim's, in two layers:
+- SCREEN: Chief's arms and weapon, and the HUD; over everything.
+- WORLD: projectiles, grenades, effects, decals, objects; with each
+  pixel's view depth (along the camera's forward, Halo world units; huge
+  where nothing was drawn), so Skyrim hides what is behind its own.
+Colours are RGBA8, premultiplied (draw with ONE, INV_SRC_ALPHA), on
+transparent black; depth is float32. Top row first, rows of width
+elements. In a slot: the screen layer at 0, the world layer at
+CR_FRAME_LAYER_BYTES, its depth at 2 * CR_FRAME_LAYER_BYTES; the world
+layer and depth only if the header says CR_FRAME_WORLD.
 
 Halo writes the slots round-robin, each under its own seqlock, and then
 names it the latest. Skyrim copies the latest slot out and checks its seq
@@ -309,7 +335,8 @@ can restart at any time. */
 #define CR_FRAME_SLOTS      3u
 #define CR_FRAME_MAX_WIDTH  2560u /* larger screens get a smaller picture, scaled up */
 #define CR_FRAME_MAX_HEIGHT 1440u
-#define CR_FRAME_BYTES      (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
+#define CR_FRAME_LAYER_BYTES (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
+#define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES)
 
 typedef struct cr_frame_header
 {
@@ -317,13 +344,14 @@ typedef struct cr_frame_header
 	uint32_t width;         /* pixels */
 	uint32_t height;
 	uint32_t frame;         /* Halo's frame count */
-	uint32_t display_frame; /* the cr_display.frame Halo had read */
+	uint32_t camera_frame;  /* the cr_camera.frame drawn through; 0: Halo's own camera */
 	uint32_t time_us;       /* Halo's clock when drawn (wraps) */
 	uint32_t flags;         /* CR_FRAME_* */
 	uint32_t reserved;
 } cr_frame_header;
 
-#define CR_FRAME_VISIBLE 0x0001u /* something to draw: else the picture is all transparent */
+#define CR_FRAME_VISIBLE 0x0001u /* reserved: always set */
+#define CR_FRAME_WORLD   0x0002u /* the world layer has something (else it is all transparent) */
 
 typedef struct cr_frames
 {
@@ -365,7 +393,7 @@ typedef struct cr_shared
 
 	/* protocol 6: after the rings, so the offsets above stay */
 	cr_slot_display display;              /* S->H */
-	uint32_t reserved2[18];
+	cr_slot_camera  camera;               /* S->H, protocol 7 */
 	cr_frames frames;                     /* H->S */
 } cr_shared;
 
@@ -576,6 +604,8 @@ CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 352, "cr_shared.to_ha
 CR_STATIC_ASSERT(sizeof(cr_display) == 16, "cr_display");
 CR_STATIC_ASSERT(sizeof(cr_slot_display) == 24, "cr_slot_display");
 CR_STATIC_ASSERT(sizeof(cr_frame_header) == 32, "cr_frame_header");
+CR_STATIC_ASSERT(sizeof(cr_camera) == 64, "cr_camera");
+CR_STATIC_ASSERT(sizeof(cr_slot_camera) == 72, "cr_slot_camera");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 160, "cr_frames.pixels");
 #define CR_OFFSET_DISPLAY (352u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");

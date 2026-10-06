@@ -44,7 +44,17 @@ boolean chiefrim_skyrim_drives(void);
 Chief's arms and weapon and the HUD (render.c, render_objects.c), and
 port/linux/src/chiefrim_overlay_gl.c sends them. */
 boolean chiefrim_overlay_wanted(void);
-int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame);
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *camera_frame);
+struct observer_result;
+/* main.c: the camera of local player 0's window, Skyrim's (lockstep) */
+struct observer_result const *chiefrim_render_camera(short local_player_index, struct observer_result const *observer);
+/* render.c: the layer being drawn (render_objects.c and the port follow it) */
+#define CHIEFRIM_LAYER_ALL    0 /* not in overlay mode: Halo's whole view */
+#define CHIEFRIM_LAYER_WORLD  1 /* projectiles, effects, decals, objects */
+#define CHIEFRIM_LAYER_SCREEN 2 /* the first-person weapon, the HUD */
+long chiefrim_overlay_layer(void);
+void chiefrim_set_render_layer(long layer);
+void chiefrim_overlay_world_done(void); /* port: the world layer is drawn; on to the screen's */
 
 /* chiefrim_input.c (docs §7): Chief's controls from Skyrim's actions.
 input_abstraction.c (keyboard_controls_update) and player_control.c call

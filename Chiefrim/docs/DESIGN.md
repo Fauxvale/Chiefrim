@@ -539,6 +539,35 @@ using the camera Skyrim is about to use. It draws three layers:
   needs §8.4's weapon spawn command); the layers apart (the weapon under Skyrim's HUD, not over its compass and
   messages), the world layer with depth (Phase 3), hiding Skyrim's own crosshair and bars (§11),
   and object lighting from Skyrim (the weapon is lit by the host map's lightmap for now).
+**Phase 3 (built 2026-10-05, to be tried in game): the world layer, in lockstep.**
+
+- **Two layers.** In overlay mode `render_window` draws the **world layer** first (every object
+  but the first-person weapon, decals, particles, contrails, transparent geometry), keeps it
+  (`chiefrim_overlay_world_done`), then the **screen layer** (first-person weapon, HUD) on a cleared
+  picture. The host level's objects (scenery, vehicles, weapons: 898 on b30) are erased with its
+  actors, or they'd stand around Skyrim's origin. The host map's fog is off.
+- **Transmittance, not coverage.** The second target now keeps how much of Skyrim's picture shows
+  through (T, sent as alpha = 1 - T): a blend `S * src + D * dst` turns T into `D * T`, plus
+  `src * T` where S is the destination's colour. So modulating draws darken Skyrim's picture too:
+  Halo's bullet holes are 2x-modulate decals, and showed nothing with coverage.
+- **Depth.** A third target keeps each world pixel's view distance: the pixel shaders write
+  `1 / gl_FragCoord.w` (the clip w, the distance along the view) where they show anything,
+  min-blended. Skyrim copies its main depth buffer as `Main::RenderWorld` returns (before the HUD
+  and post-processing) and, at Present, drops world pixels behind its own, with a little slack for
+  decals on its surfaces (0.3% + 4 units). Its convention (standard or reversed) is read once from
+  the depth itself (the median is near 1 or near 0).
+- **Lockstep.** As `Main::RenderWorld` starts, Skyrim publishes the camera it renders with (the
+  world root camera: eye, forward, up; the `camera` slot). Halo, which in overlay mode no longer
+  swaps its own window (whose vsync would pace it), waits for each new camera (30 ms at most), draws
+  through it (`chiefrim_render_camera` in place of the observer's: Skyrim's eye, forward and up,
+  Halo's field of view, which Skyrim's follows), reads both layers back at once and names the
+  camera in the frame. At Present Skyrim waits up to `[Overlay] fWaitMs` (12) for that frame, so the
+  world layer sits on this frame's picture rather than one or two frames old.
+- **Checked offline** (fake Skyrim, `--fire-at`, `--pitch`, `--speed 0`): frames name the camera
+  they were drawn through; muzzle flash, smoke, sparks and bullet holes are in the world layer; a
+  camera 120 units up looking 60 degrees down puts the holes at 123-146 units (120 / sin 60 = 139).
+  Under Proton with DXVK, the composite shows world pixels in front of Skyrim's surface, on it and
+  against the sky, and hides those behind.
 - **Halo side, later layers:** `render_window` (`source/render/render.c:302`) gets a Chiefrim mode that skips
   `render_sky`, the structure lightmap and visibility passes, and the parts of the world Skyrim
   already draws.
@@ -606,7 +635,8 @@ Initial message catalog:
 | H→S | `HitActor {...}` | Event |
 | H→S | `PlayerDied` | Event |
 | S→H | `display` slot `{width, height, flags, frame}` (protocol 6) | Per frame (Present) |
-| H→S | `frames`: 3 slots of RGBA8 premultiplied pixels, each `{seq, width, height, frame, display_frame, time_us}` (protocol 6) | Per frame |
+| S→H | `camera` slot `{frame, eye, forward, up, vertical_fov, near, far}` (protocol 7) | Per frame (world rendering starts) |
+| H→S | `frames`: 3 slots, each the screen layer and the world layer (RGBA8 premultiplied) and the world's depth (float), `{seq, width, height, frame, camera_frame, time_us, flags}` (protocol 7) | Per frame |
 | H→S | `MenuState {haloScreenOpen}` | On change |
 | H→S | `SaveState {blob}` | Reply |
 
@@ -645,7 +675,7 @@ Each phase ends in something you can play.
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
 | 1 | **Walk Skyrim as Chief** | **Status: done (2026-10-05), verified in game.** Skyrim moves the player and Chief follows (§7, `bSkyrimMoves=1`): Skyrim's own controller walks, jumps, sprints and sneaks on Skyrim's meshes; Chief is placed there each frame and aimed along the camera. Chief's actions are Skyrim's (InputBridge, §7; rebinding carries over): fire, zoom (with the view narrowing), reload, grenade, melee, weapon and grenade switch, flashlight, all verified. The camera is Skyrim's, with Chief's field of view (85, zoom from Halo) and no third-person switch while linked. Halo's collision (§5.2, the runtime BSP builder) is built from Skyrim's Havok shapes for shots and grenades. Unlinking leaves Skyrim fully playable (controls reset as pausing does). The Halo-driven mode (`bSkyrimMoves=0`, CameraDriver §6 and the movement safeguards) stays: it walked, but caught and bounced on Skyrim's meshes. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
-| 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
+| 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: the world layer is built (2026-10-05), to be tried in game** (§9); proxies, damage both ways and death next. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |
 | 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |

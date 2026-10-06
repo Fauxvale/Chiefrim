@@ -116,6 +116,9 @@ static struct
 	uint32_t last_skyrim_heartbeat;
 	uint32_t last_skyrim_heartbeat_change;
 	uint32_t skyrim_pid;          /* from its hello */
+	uint32_t camera_frame;        /* Skyrim's camera this frame is drawn through (0: Halo's) */
+	uint32_t last_camera_frame;   /* the last one drawn */
+	long render_layer;            /* CHIEFRIM_LAYER_*: what render_window draws now */
 } chiefrim;
 
 /* ---------- private code */
@@ -733,7 +736,7 @@ boolean chiefrim_overlay_wanted(void)
 	return chiefrim_read_display(&display);
 }
 
-int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame)
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *camera_frame)
 {
 	cr_display display;
 
@@ -741,8 +744,96 @@ int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsign
 		return 0;
 	*width = display.width;
 	*height = display.height;
-	*frame = display.frame;
+	*camera_frame = chiefrim.camera_frame;
 	return 1;
+}
+
+long chiefrim_overlay_layer(void)
+{
+	return chiefrim.render_layer;
+}
+
+void chiefrim_set_render_layer(long layer)
+{
+	chiefrim.render_layer = layer;
+}
+
+/* Lockstep with Skyrim (docs §9): the frame Halo draws next is for the
+camera Skyrim published as it began rendering its own, so the world layer
+sits on Skyrim's picture. Waits up to 30 ms for a camera newer than the
+last drawn (Skyrim paused: Halo draws at ~30 frames a second meanwhile),
+then sees through it: Skyrim's eye, forward and up, Halo's field of view
+(which Skyrim's follows). */
+struct observer_result const *chiefrim_render_camera(short local_player_index, struct observer_result const *observer)
+{
+	static struct observer_result result;
+	cr_camera camera;
+	uint32_t start = chiefrim_now_ms();
+	boolean have = FALSE;
+
+	chiefrim.camera_frame = 0;
+	if (!observer || local_player_index != 0 || !chiefrim_overlay_wanted() || !chiefrim.world_valid)
+		return observer;
+	for (;;)
+	{
+		if (CR_SLOT_READ(&chiefrim.shm->camera, &camera) && camera.frame)
+		{
+			have = TRUE;
+			if (camera.frame != chiefrim.last_camera_frame)
+				break;
+		}
+		if (chiefrim_now_ms() - start >= 30)
+			break;
+		{
+			struct timespec pause = { 0, 100000 }; /* 0.1 ms */
+
+			nanosleep(&pause, NULL);
+		}
+	}
+	if (!have)
+		return observer;
+	result = *observer;
+	{
+		cr_vec3 eye = cr_sky_to_halo(camera.eye, chiefrim.world.origin);
+
+		result.position.x = eye.x;
+		result.position.y = eye.y;
+		result.position.z = eye.z;
+	}
+	result.forward.i = camera.forward.x;
+	result.forward.j = camera.forward.y;
+	result.forward.k = camera.forward.z;
+	result.up.i = camera.up.x;
+	result.up.j = camera.up.y;
+	result.up.k = camera.up.z;
+	if (normalize3d(&result.forward) == 0.f || normalize3d(&result.up) == 0.f)
+		return observer;
+	chiefrim.camera_frame = camera.frame;
+	chiefrim.last_camera_frame = camera.frame;
+	return &result;
+}
+
+/* Everything the host level placed (scenery, vehicles, weapons, machines)
+but Chief and what he carries: in Skyrim it would stand around the
+origin. */
+static void chiefrim_clear_level_objects(long chief)
+{
+	struct object_iterator iterator;
+	static long doomed[2048];
+	long count = 0, index;
+
+	object_iterator_new(&iterator, _object_mask_all, 0);
+	while (object_iterator_next(&iterator) && count < (long)NUMBEROF(doomed))
+	{
+		if (iterator.index != chief && object_get_ultimate_parent(iterator.index) != chief)
+			doomed[count++] = iterator.index;
+	}
+	for (index = 0; index < count; index++)
+	{
+		if (object_try_and_get(doomed[index]))
+			object_delete(doomed[index]);
+	}
+	error(_error_silent, "chiefrim: erased the level's %ld other objects", count);
 }
 
 struct cr_shared *chiefrim_shared(void)
@@ -991,6 +1082,7 @@ void chiefrim_frame(void)
 	if (!chiefrim.level_cleared && chiefrim_local_unit() != NONE)
 	{
 		ai_erase(NONE, NONE, NONE, TRUE);
+		chiefrim_clear_level_objects(chiefrim_local_unit());
 		chiefrim.level_cleared = TRUE;
 		error(_error_silent, "chiefrim: erased the level's actors");
 	}
