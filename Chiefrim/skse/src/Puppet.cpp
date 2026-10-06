@@ -5,6 +5,7 @@
 #include "Camera.h"
 #include "Collision.h"
 #include "Combat.h"
+#include "Hud.h"
 #include "Input.h"
 #include "Link.h"
 
@@ -446,6 +447,7 @@ namespace chiefrim::Puppet
 				s.worldSent = false;
 				if (wasConnected) {
 					Input::OnUnlinked();  // Skyrim's own controls back
+					Hud::Restore();
 					Camera::Release(a_player);
 					Combat::Release(a_player);
 					RestoreController(a_player);
@@ -459,6 +461,7 @@ namespace chiefrim::Puppet
 				SnapshotController(a_player);
 			}
 			Input::Publish(a_player);
+			Hud::Update();
 			if (!GameplayIsRunning()) {
 				return;
 			}
