@@ -215,6 +215,28 @@ index 72798d4b..015440ec 100644
  					}
  				}
  				else
+diff --git a/source/game/players.c b/source/game/players.c
+index a834d481..af198080 100644
+--- a/source/game/players.c
++++ b/source/game/players.c
+@@ -275,6 +275,7 @@ symbols in this file:
+ #include "units/units.h"
+ #include "units/vehicle_definitions.h"
+ #include "units/vehicles.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* network_game_globals.c's */
+ boolean network_game_distributed_client(void);
+@@ -3932,7 +3933,8 @@ void players_update_after_game(
+ 						&scenario->bsp_switch_trigger_volumes,
+ 						bsp_switch_trigger_volume_index,
+ 						struct scenario_bsp_switch_trigger_volume);
+-					if (bsp_switch_trigger_volume->source_structure_bsp_index ==
++					if (!chiefrim_active() && /* CHIEFRIM: Chief is in Skyrim; the level's volumes mean nothing there */
++						bsp_switch_trigger_volume->source_structure_bsp_index ==
+ 						global_structure_bsp_index &&
+ 						scenario_trigger_volume_test_object(
+ 							bsp_switch_trigger_volume->trigger_volume_index,
 diff --git a/source/input/input_abstraction.c b/source/input/input_abstraction.c
 index a9decc9c..f8550cb1 100644
 --- a/source/input/input_abstraction.c

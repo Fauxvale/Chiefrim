@@ -759,12 +759,16 @@ int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsign
 void chiefrim_note_projection(real x0, real x1, real y0, real y1)
 {
 	static real logged_x, logged_y;
+	static uint32_t logged_ms;
 
 	chiefrim.tangent_x = 0.5f * (real)fabs(x1 - x0);
 	chiefrim.tangent_y = 0.5f * (real)fabs(y1 - y0);
-	if (chiefrim.camera_frame && (fabs(chiefrim.tangent_x - logged_x) > 0.01f * logged_x + 0.001f ||
+	/* when it changes, at most every 10 s (zooming changes it every frame) */
+	if (chiefrim.camera_frame && (!logged_ms || chiefrim_now_ms() - logged_ms >= 10000) &&
+		(fabs(chiefrim.tangent_x - logged_x) > 0.01f * logged_x + 0.001f ||
 		fabs(chiefrim.tangent_y - logged_y) > 0.01f * logged_y + 0.001f))
 	{
+		logged_ms = chiefrim_now_ms();
 		logged_x = chiefrim.tangent_x;
 		logged_y = chiefrim.tangent_y;
 		error(_error_silent, "chiefrim: Halo draws through Skyrim's camera with a view %.4f x %.4f (%.1f degrees vertically)",

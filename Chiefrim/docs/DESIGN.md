@@ -321,7 +321,11 @@ definition comes from that map. Chiefrim loads one **host map**.
   spawns nobody. The port's own profile-training script skips them for the same reason.
 - **Phase 0 uses `b30`** (The Silent Cartographer), the decomp's own default campaign level.
 - **In Chiefrim mode the level's logic is off:** `game_tick` skips `hs_update` (scripts and
-  cutscenes) and `ai_update`, and Chiefrim erases the level's actors once Chief exists. What is
+  cutscenes) and `ai_update`, and Chiefrim erases the level's actors and other objects once Chief
+  exists. Its BSP-switch trigger volumes are off too (`players.c`): Chief, at Skyrim's
+  coordinates, walked into one of b30's, the level switched BSPs under Chiefrim's collision, and
+  Halo's state went bad (the third in-game test: the overlay flashed through assets, assertions
+  followed). What is
   left is Halo's engine with Chief in it.
 - Chief first spawns at the level's own starting location, on the level's own collision. When
   Skyrim's world context arrives, Chiefrim installs its collision and moves him (§6).
