@@ -259,8 +259,12 @@ collision code.
     thinner than ~0.12 wu, Halo's biped tunnels through surfaces (at 18 he walked through a wall in
     the fake-Skyrim test, and in game sank into floors, the floor guard bouncing him back ~4 times
     a second);
-  - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
-    edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
+  - a build takes Chief's region and those around it, `[Collision] iRadius` rings (default 2: 5 x 5
+    x 3 regions of 1024 units; Skyrim sends a ring more, protocol 10), so the edge, and how far his
+    shots hit Skyrim's world, is always at least that many regions ahead: with 3 x 3 (1024 units,
+    ~15 m) shots at walls and NPCs further away passed through (the second in-game test). A build is
+    at most 600,000 triangles: rings beyond the nearest two that would go over are left out, logged
+    (Halo is 32-bit; in-game 3 x 3 builds were 100,000-200,000 triangles, 1-2.4 s);
   - open: on the latest Skyrim dumps 0.5-1.5% of surfaces miss Halo's ray query (sphere queries
     all hit), clustered where many planes meet nearly at a point. Not the near-plane band, closed
     meshes, one-sided faces or the exporter's subdivision (all tested). Chief falling through a
@@ -469,6 +473,10 @@ protocol 8):
 - Chief is deathless in Halo while linked; with his body at 0 Skyrim is told
   (`CR_MSG_PLAYER_DIED`) and kills its player (killer: the last attacker). A new world (the
   reload) makes him whole and clears the proxies.
+- Chief's aim follows Skyrim's view only to 85 degrees up or down: Halo asserts beyond 85.5 (the
+  second in-game test crashed looking down at a weapon to pick it up). The view itself is Skyrim's.
+- Picking up and swapping weapons is Skyrim's Activate (`sAction`); Halo's prompt still names the
+  Xbox button ("X"): to show the Skyrim key, later.
 - Debug (§8.4): `[Controls] iGiveWeaponKey` (F7; F9 is Skyrim's Quickload) gives Chief the map's next weapon (`CR_MSG_GIVE_WEAPON`;
   vehicle guns skipped; a dropped weapon resting on a surface past 32,767 crashed Halo, which keeps
   that index in a short: now it rests on no surface in particular, `items.c`; b30 has the MA5B, M6D, plasma rifle and pistol, rocket launcher, needler,

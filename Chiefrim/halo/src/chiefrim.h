@@ -79,6 +79,7 @@ void chiefrim_world_initialize(void);
 void chiefrim_world_map_loaded(void);             /* a structure BSP loaded */
 void chiefrim_world_reset(cr_vec3 origin, real floor_z); /* a new world; floor in world units */
 void chiefrim_world_generation(unsigned long generation); /* the world context in force */
+void chiefrim_world_build_radius(unsigned long radius); /* regions around Chief's in a build */
 void chiefrim_world_message(int type, void const *message);
 void chiefrim_world_update(real_point3d const *chief); /* each frame; Chief or NULL */
 boolean chiefrim_world_below_collision(real_point3d const *point); /* below all of Skyrim's collision loaded */

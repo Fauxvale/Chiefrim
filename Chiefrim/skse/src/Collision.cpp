@@ -6,6 +6,7 @@
 #include "Collision.h"
 
 #include "Link.h"
+#include "Settings.h"
 
 #include <chrono>
 #include <unordered_map>
@@ -17,7 +18,9 @@ namespace chiefrim::Collision
 	{
 		using Clock = std::chrono::steady_clock;
 
-		constexpr int  kRadiusXY = 2;   // regions around the player's: what Halo builds from
+		// regions around the player's: what Halo builds from, and a ring more
+		// (so they're there when he walks on): Settings::CollisionRadius
+		int RadiusXY() { return int(Settings::CollisionRadius()) + 1; }
 		constexpr int  kBelow = 1;
 		constexpr int  kAbove = 1;
 		constexpr auto kFrameBudget = std::chrono::microseconds(2500);
@@ -765,8 +768,8 @@ namespace chiefrim::Collision
 	void Update(RE::PlayerCharacter* a_player)
 	{
 		if (s.offsets.empty()) {
-			for (int dx = -kRadiusXY; dx <= kRadiusXY; ++dx) {
-				for (int dy = -kRadiusXY; dy <= kRadiusXY; ++dy) {
+			for (int dx = -RadiusXY(); dx <= RadiusXY(); ++dx) {
+				for (int dy = -RadiusXY(); dy <= RadiusXY(); ++dy) {
 					for (int dz = -kBelow; dz <= kAbove; ++dz) {
 						s.offsets.push_back({ dx, dy, dz });
 					}
@@ -832,7 +835,7 @@ namespace chiefrim::Collision
 		if (s.harvested.size() > s.offsets.size() * 2) {
 			const auto isFar = [&](std::uint64_t a_key) {
 				const auto unpack = [](std::uint64_t v) { return static_cast<int>(static_cast<std::int32_t>(static_cast<std::uint32_t>(v & 0x1FFFFF) << 11) >> 11); };
-				return std::abs(unpack(a_key >> 42) - prx) > kRadiusXY + 2 || std::abs(unpack(a_key >> 21) - pry) > kRadiusXY + 2 ||
+				return std::abs(unpack(a_key >> 42) - prx) > RadiusXY() + 2 || std::abs(unpack(a_key >> 21) - pry) > RadiusXY() + 2 ||
 				       std::abs(unpack(a_key) - prz) > kBelow + 2;
 			};
 			std::erase_if(s.harvested, [&](const auto& a_entry) { return isFar(a_entry.first); });

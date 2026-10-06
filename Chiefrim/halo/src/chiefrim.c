@@ -205,6 +205,7 @@ static void chiefrim_apply_world(void)
 		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
+	chiefrim_world_build_radius(world.collision_radius);
 	chiefrim_combat_reset(chiefrim_local_unit()); /* a load, a door: Skyrim's people again, Chief whole */
 	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
@@ -974,7 +975,23 @@ static void chiefrim_follow_skyrim(long unit_index, real_point3d *chief)
 	forward.j = player.forward.y;
 	forward.k = player.forward.z;
 	if (normalize3d(&forward) > 0.f)
+	{
+		/* Halo's aim stops at 85.5 degrees up or down (player_control.c asserts
+		it); Skyrim looks further, as when picking something off the floor */
+		real limit = DEGREES_TO_RADIANS(85.f);
+		real pitch = (real)asin(PIN(forward.k, -1.f, 1.f));
+		real across = (real)sqrt(forward.i * forward.i + forward.j * forward.j);
+		real yaw = across > 0.0001f ? (real)atan2(forward.j, forward.i) : cr_sky_heading_to_halo_yaw(player.yaw);
+
+		if (pitch > limit || pitch < -limit)
+		{
+			pitch = PIN(pitch, -limit, limit);
+			forward.i = (real)(cos(pitch) * cos(yaw));
+			forward.j = (real)(cos(pitch) * sin(yaw));
+			forward.k = (real)sin(pitch);
+		}
 		player_control_set_facing(0, &forward);
+	}
 	chiefrim.last_feet = position;
 }
 

@@ -215,6 +215,7 @@ namespace chiefrim::Puppet
 			context.field_of_view = Camera::FieldOfView();
 			context.chief_height = ChiefHeight(a_player);
 			context.chief_radius = ChiefRadius(a_player);
+			context.collision_radius = Settings::CollisionRadius();
 
 			auto& link = Link::Get();
 			link.SendWorldContext(context);

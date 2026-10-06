@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 9u
+#define CR_PROTOCOL_VERSION 10u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -87,6 +87,10 @@ typedef struct cr_world_context
 	float    chief_height;  /* Skyrim units: Chief's standing height (collision and eyes
 	                           scale with it). 0: Halo's own */
 	float    chief_radius;  /* Skyrim units: Chief's collision radius. 0: Halo's own */
+	uint32_t collision_radius; /* regions (CR_REGION_UNITS) around Chief's that Halo builds its
+	                              collision from, so shots hit that far; 0: 1. Skyrim sends one
+	                              more around */
+	uint32_t reserved;
 } cr_world_context;
 
 /* Skyrim -> Halo. Chief's controls (docs §7). Skyrim's ControlMap has already
@@ -473,7 +477,7 @@ typedef struct cr_shared
 	cr_slot_display display;              /* S->H */
 	cr_slot_camera  camera;               /* S->H, protocol 7 */
 	cr_slot_actors  actors;               /* S->H, protocol 8 */
-	uint32_t reserved2[12];               /* the frames start on a 64-byte line */
+	uint32_t reserved2[10];               /* the frames start on a 64-byte line */
 	cr_frames frames;                     /* H->S */
 } cr_shared;
 
@@ -661,11 +665,11 @@ static inline float cr_halo_yaw_to_sky_heading(float yaw)
 #endif
 
 CR_STATIC_ASSERT(sizeof(cr_vec3) == 12, "cr_vec3");
-CR_STATIC_ASSERT(sizeof(cr_world_context) == 40, "cr_world_context");
+CR_STATIC_ASSERT(sizeof(cr_world_context) == 48, "cr_world_context");
 CR_STATIC_ASSERT(sizeof(cr_input) == 56, "cr_input");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_input, yaw_total) == 40, "cr_input.yaw_total");
 CR_STATIC_ASSERT(sizeof(cr_player_state) == 88, "cr_player_state");
-CR_STATIC_ASSERT(sizeof(cr_slot_world_context) == 48, "cr_slot_world_context");
+CR_STATIC_ASSERT(sizeof(cr_slot_world_context) == 56, "cr_slot_world_context");
 CR_STATIC_ASSERT(sizeof(cr_slot_input) == 64, "cr_slot_input");
 CR_STATIC_ASSERT(sizeof(cr_slot_player_state) == 96, "cr_slot_player_state");
 CR_STATIC_ASSERT(sizeof(cr_skyrim_player) == 72, "cr_skyrim_player");
@@ -680,7 +684,7 @@ CR_STATIC_ASSERT(__builtin_offsetof(cr_msg_collision_tris, tris) == 40, "cr_msg_
 CR_STATIC_ASSERT(CR_COLLISION_TRIS_SIZE(CR_TRIS_PER_MESSAGE) <= 0xFFF8u, "a full collision message fits a ring message");
 CR_STATIC_ASSERT(sizeof(cr_ring) == 128 + CR_RING_BYTES, "cr_ring");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, world_context) == 64, "cr_shared.world_context");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 352, "cr_shared.to_halo");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 360, "cr_shared.to_halo");
 CR_STATIC_ASSERT(sizeof(cr_display) == 16, "cr_display");
 CR_STATIC_ASSERT(sizeof(cr_slot_display) == 24, "cr_slot_display");
 CR_STATIC_ASSERT(sizeof(cr_frame_header) == 48, "cr_frame_header");
@@ -693,11 +697,11 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
-#define CR_OFFSET_DISPLAY (352u + 2u * (128u + CR_RING_BYTES))
+#define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + 1552u + 48u, "cr_shared.frames");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + 1552u + 40u, "cr_shared.frames");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) % 64u == 0, "cr_shared.frames: on a line");
-CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 1600u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
+CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 1592u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
 
 #ifdef __cplusplus
 }

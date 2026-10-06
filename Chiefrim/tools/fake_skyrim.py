@@ -27,10 +27,10 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 9
+VERSION = 10
 RING_BYTES = 4 * 1024 * 1024
-OFF_DISPLAY = 352 + 2 * (128 + RING_BYTES)
-OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 48
+OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
+OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
 OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
@@ -42,8 +42,8 @@ TOTAL_SIZE = OFF_FRAMES + 192 + FRAME_SLOTS * FRAME_BYTES
 SKYRIM_PID, HALO_PID = 16, 20
 SKYRIM_STATE, HALO_STATE = 24, 28
 SKYRIM_HEARTBEAT, HALO_HEARTBEAT = 32, 36
-SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER, SLOT_SKYRIM_PLAYER = 64, 112, 176, 272
-RING_TO_HALO, RING_TO_SKYRIM = 352, 352 + 128 + RING_BYTES
+SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER, SLOT_SKYRIM_PLAYER = 64, 120, 184, 280
+RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
@@ -412,6 +412,8 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--collision-radius", type=int, default=2,
+                        help="regions around Chief's that Halo builds its collision from, as the plugin sends it")
     parser.add_argument("--speed", type=float, default=300.0,
                         help="with --skyrim-moves: units per second the player walks north (0: stands)")
     parser.add_argument("--pitch", type=float, default=0.0,
@@ -465,8 +467,8 @@ def main():
         struct.pack("<II48s", VERSION, os.getpid(), b"fake_skyrim.py"))
     # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, chief_height, reserved
     start_z = options.z - options.start_below
-    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfff",
-        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius))
+    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffII",
+        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius, options.collision_radius, 0))
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, start_z, math.radians(options.heading)))
     if options.terrain:
@@ -531,8 +533,8 @@ def main():
                 px, py, pz, yaw = last_position
                 generation += 1
                 epoch += 1
-                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfff",
-                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius))
+                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffII",
+                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius, options.collision_radius, 0))
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
                 print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 if options.terrain:

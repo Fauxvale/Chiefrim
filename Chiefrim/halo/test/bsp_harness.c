@@ -452,7 +452,7 @@ static void subdivide_emit(struct chiefrim_triangle *t, long *n, long capacity, 
 
 int main(int argc, char **argv)
 {
-	long capacity = 400000, n = 0, i, j;
+	long capacity = 2000000, n = 0, i, j;
 	float half = argc > 1 ? (float)atof(argv[1]) : 3072.f;
 	long rocks = argc > 2 ? atol(argv[2]) : 400;
 	struct chiefrim_triangle *t = (struct chiefrim_triangle *)calloc((size_t)capacity, sizeof(*t));
