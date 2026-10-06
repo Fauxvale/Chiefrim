@@ -7,6 +7,9 @@
 #include "Link.h"
 #include "Settings.h"
 
+#include <numbers>
+#include <unordered_map>
+
 namespace chiefrim::Combat
 {
 	namespace
@@ -311,6 +314,33 @@ namespace chiefrim::Combat
 			return root;
 		}
 
+		// A hit's reaction where Skyrim's hit processing isn't found: a big hit
+		// staggers, away from Chief; any other flinches (Skyrim's recoil, which
+		// also interrupts an attack), at most once a second each, so automatic
+		// fire doesn't hold anyone in place.
+		std::unordered_map<RE::FormID, ULONGLONG> lastFlinch;
+
+		void React(RE::Actor* a_actor, const RE::NiPoint3& a_dir, float a_stagger)
+		{
+			if (a_stagger > 0.0f) {
+				float direction = (std::atan2(a_dir.x, a_dir.y) - a_actor->GetAngleZ()) / (2.0f * std::numbers::pi_v<float>) + 0.5f;
+				direction -= std::floor(direction);
+				a_actor->SetGraphVariableFloat("staggerDirection", direction);
+				a_actor->SetGraphVariableFloat("staggerMagnitude", a_stagger);
+				a_actor->NotifyAnimationGraph("staggerStart");
+				return;
+			}
+			const ULONGLONG now = ::GetTickCount64();
+			auto&           last = lastFlinch[a_actor->GetFormID()];
+			if (now - last >= 1000) {
+				last = now;
+				a_actor->NotifyAnimationGraph("recoilStart");
+			}
+			if (lastFlinch.size() > 256) {
+				std::erase_if(lastFlinch, [now](const auto& a_entry) { return now - a_entry.second > 5000; });
+			}
+		}
+
 		// The toughness of an NPC against the player (docs §13): an NPC at
 		// four times the player's level takes twice the hits (exponent 0.5).
 		float Toughness(RE::Actor* a_actor, RE::PlayerCharacter* a_player)
@@ -356,7 +386,20 @@ namespace chiefrim::Combat
 					RE::HitData::Flag::kMeleeAttack);
 				processHit(a_actor, *hit);
 			} else {
+				// Without it (1.6.1170: docs §8.2), what it would do, piece by
+				// piece: the damage, a stagger or a flinch, and the hit event.
 				a_actor->DoDamage(damage, a_player, true);
+				if (!a_actor->IsDead()) {
+					React(a_actor, dir, stagger);
+				}
+				RE::TESHitEvent event(a_actor, a_player, weapon ? weapon->GetFormID() : 0, 0, RE::TESHitEvent::Flag::kNone);
+				RE::ScriptEventSourceHolder::GetSingleton()->SendEvent(&event);
+			}
+			// blood and the sound of the hit
+			// (a blade's impacts: the bow's own are its bash)
+			auto* blade = RE::TESForm::LookupByID<RE::TESObjectWEAP>(0x0001397E);  // Iron Dagger
+			if (auto* impacts = RE::BGSImpactManager::GetSingleton(); impacts && blade && blade->impactDataSet && node) {
+				impacts->PlayImpactEffect(a_actor, blade->impactDataSet, node->name.c_str(), dir, 128.0f, false, false);
 			}
 			if (!a_actor->IsDead() && !a_actor->IsPlayerTeammate() && !a_actor->IsInCombat()) {
 				a_actor->StartCombat(a_player);

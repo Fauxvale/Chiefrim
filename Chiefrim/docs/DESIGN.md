@@ -467,8 +467,11 @@ protocol 8):
   headshot multiplier, melee and splash is Halo's own: 3 s of MA5B fire at 400 units landed 14 hits
   of 0.10 (offline test).
 - Skyrim applies it level-scaled (§13) through its own hit processing (found by the call the
-  melee handler makes; plain damage otherwise), with a Hunting Bow's impacts, starts combat, and
-  big hits (half a proxy or more) stagger.
+  melee handler makes), and starts combat. Big hits (half a proxy or more) stagger. On 1.6.1170
+  the call isn't there (SkyCraft's lookup fails the same way), so the hit is done piece by piece:
+  damage, then a stagger away from Chief (`staggerStart`) or a flinch (`recoilStart`, at most
+  once a second per actor), then a `TESHitEvent` for scripts. Either way an Iron Dagger's impact
+  set gives the blood and the hit sound.
 - The player is essential while linked; each frame the health Skyrim took is refunded and sent
   (`CR_MSG_PLAYER_HURT`, as a fraction of Chief's vitality: damage ÷ `fIncomingReference`, with
   the attacker's position and the kind from the last hit event). Halo applies it with
