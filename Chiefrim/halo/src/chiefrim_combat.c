@@ -55,6 +55,8 @@ struct chiefrim_proxy
 	uint32_t form_id;   /* 0: free */
 	long object_index;
 	boolean seen;
+	boolean blasted;       /* an explosion hurt it this frame */
+	real_point3d blast;    /* its centre */
 };
 
 static struct
@@ -204,6 +206,33 @@ static real chiefrim_proxy_take_damage(long object_index)
 	return combat.proxy_vitality > 0.f && lost > 0.f ? MIN(lost / combat.proxy_vitality, 1.f) : 0.f;
 }
 
+/* a proxy's loss this frame to Skyrim, with the explosion's centre if one
+did some of it */
+static void chiefrim_proxy_send_hit(struct chiefrim_proxy *proxy, real fraction, cr_vec3 origin)
+{
+	if (fraction > 0.0001f)
+	{
+		cr_msg_hit_actor hit;
+
+		memset(&hit, 0, sizeof(hit));
+		hit.form_id = proxy->form_id;
+		hit.fraction = fraction;
+		if (proxy->blasted)
+		{
+			cr_vec3 blast;
+
+			blast.x = proxy->blast.x;
+			blast.y = proxy->blast.y;
+			blast.z = proxy->blast.z;
+			hit.flags |= CR_HIT_EXPLOSION;
+			hit.blast = cr_halo_to_sky(blast, origin);
+		}
+		chiefrim_push(CR_MSG_HIT_ACTOR, &hit, sizeof(hit));
+		combat.hits++;
+	}
+	proxy->blasted = FALSE;
+}
+
 static void chiefrim_proxies_update(cr_vec3 origin)
 {
 	struct cr_shared *shm = chiefrim_shared();
@@ -248,18 +277,7 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 		{
 			/* the proxy died (a headshot kills outright, whatever its vitality):
 			its hit is sent below; a fresh one stands in from next frame */
-			real fraction = chiefrim_proxy_take_damage(proxy->object_index);
-
-			if (fraction > 0.0001f)
-			{
-				cr_msg_hit_actor hit;
-
-				memset(&hit, 0, sizeof(hit));
-				hit.form_id = actor->form_id;
-				hit.fraction = fraction;
-				chiefrim_push(CR_MSG_HIT_ACTOR, &hit, sizeof(hit));
-				combat.hits++;
-			}
+			chiefrim_proxy_send_hit(proxy, chiefrim_proxy_take_damage(proxy->object_index), origin);
 			chiefrim_proxy_delete(proxy);
 			continue;
 		}
@@ -283,18 +301,7 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 
 		/* what Chief did to it since last frame goes to Skyrim */
 		{
-			real fraction = chiefrim_proxy_take_damage(proxy->object_index);
-
-			if (fraction > 0.0001f)
-			{
-				cr_msg_hit_actor hit;
-
-				memset(&hit, 0, sizeof(hit));
-				hit.form_id = actor->form_id;
-				hit.fraction = fraction;
-				chiefrim_push(CR_MSG_HIT_ACTOR, &hit, sizeof(hit));
-				combat.hits++;
-			}
+			chiefrim_proxy_send_hit(proxy, chiefrim_proxy_take_damage(proxy->object_index), origin);
 		}
 
 		/* where the actor stands now, its size */
@@ -403,6 +410,25 @@ static void chiefrim_give_weapon(long chief, int32_t requested)
 }
 
 /* ---------- public code */
+
+/* damage.c's hook: an explosion reaches an object; if it's a proxy, its hit
+this frame says so */
+void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter)
+{
+	long slot;
+
+	for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
+	{
+		struct chiefrim_proxy *proxy = &combat.proxies[slot];
+
+		if (proxy->form_id && proxy->object_index == object_index)
+		{
+			proxy->blasted = TRUE;
+			proxy->blast = *epicenter;
+			return;
+		}
+	}
+}
 
 boolean chiefrim_object_unseen(long object_index)
 {

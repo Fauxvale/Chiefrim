@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 10u
+#define CR_PROTOCOL_VERSION 11u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -311,10 +311,17 @@ typedef struct cr_msg_hit_actor
 {
 	cr_msg_header header;
 	uint32_t form_id;
-	uint32_t flags;      /* reserved */
+	uint32_t flags;      /* CR_HIT_* */
 	float    fraction;   /* 1 = what kills the proxy's biped */
 	float    reserved;
+	cr_vec3  blast;      /* CR_HIT_EXPLOSION: the explosion's centre, Skyrim units */
+	uint32_t reserved2;
 } cr_msg_hit_actor;
+
+/* Some of it was an explosion's (a grenade's, a rocket's: Halo's area
+damage): Skyrim throws the actor away from its centre and sets it alight
+(docs §8.2). */
+#define CR_HIT_EXPLOSION 0x0001u
 
 /* Skyrim's damage to the player, which Skyrim has refunded: Halo applies it
 to Chief, shields first. */
@@ -692,7 +699,7 @@ CR_STATIC_ASSERT(sizeof(cr_camera) == 64, "cr_camera");
 CR_STATIC_ASSERT(sizeof(cr_slot_camera) == 72, "cr_slot_camera");
 CR_STATIC_ASSERT(sizeof(cr_actor) == 32, "cr_actor");
 CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 32 * CR_ACTORS_MAX, "cr_slot_actors");
-CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 24, "cr_msg_hit_actor");
+CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");

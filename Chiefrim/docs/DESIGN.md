@@ -472,6 +472,14 @@ protocol 8):
   damage, then a stagger away from Chief (`staggerStart`) or a flinch (`recoilStart`, at most
   once a second per actor), then a `TESHitEvent` for scripts. Either way an Iron Dagger's impact
   set gives the blood and the hit sound.
+- Explosions (Halo's area damage: grenades, rockets, the fuel rod) throw and burn. damage.c's hook
+  marks a proxy an explosion reached, and its hit goes with `CR_HIT_EXPLOSION` and the blast's
+  centre (protocol 11). Skyrim knocks the actor down away from it first (`AIProcess::
+  KnockExplosion`, the ragdoll Skyrim's own explosions use), with `fBlastForce` ×0.5 to ×1.5 by the
+  hit's size, so one it kills flies too, then sets them alight: `FireFXShader` (0x1B212) for
+  `fBurnSeconds` and `fBurnDamage` of their health over that time (fire resistance counts). An
+  explosion hit doesn't stagger or flinch. Offline: a frag grenade 3 m past the actor sent its
+  hit with the blast's centre.
 - The player is essential while linked; each frame the health Skyrim took is refunded and sent
   (`CR_MSG_PLAYER_HURT`, as a fraction of Chief's vitality: damage ÷ `fIncomingReference`, with
   the attacker's position and the kind from the last hit event). Halo applies it with

@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 10
+VERSION = 11
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -421,6 +421,8 @@ def main():
     parser.add_argument("--fire-at", type=float, default=0.0,
                         help="seconds in: hold fire for --fire-for seconds (bullets, casings, decals: the world layer)")
     parser.add_argument("--fire-for", type=float, default=3.0)
+    parser.add_argument("--grenade-at", type=float, default=0.0,
+                        help="seconds in: throw a grenade (an explosion's hits on --actor say so)")
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
@@ -523,8 +525,9 @@ def main():
                 elif msg_type == MSG_LOG:
                     print(f"halo: {text(body)}", flush=True)
                 elif msg_type == MSG_HIT_ACTOR:
-                    form_id, _, fraction = struct.unpack_from("<IIf", body)
-                    print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy", flush=True)
+                    form_id, flags, fraction, _, bx, by, bz = struct.unpack_from("<IIff3f", body)
+                    blast = f", explosion at ({bx:.0f} {by:.0f} {bz:.0f})" if flags & 1 else ""
+                    print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy{blast}", flush=True)
                 elif msg_type == MSG_PLAYER_DIED:
                     print("fake_skyrim: Chief died: Skyrim's player would die now", flush=True)
             if (options.recenter_every > 0 and last_position and
@@ -568,6 +571,15 @@ def main():
                 firing = options.fire_at <= t < options.fire_at + options.fire_for
                 frame += 1
                 link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 2) if firing else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
+            if options.grenade_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                if t >= options.grenade_at and not drive_state.get("thrown"):
+                    presses[5] = (presses[5] + 1) & 0xFF  # CR_ACTION_GRENADE
+                    drive_state["thrown"] = True
+                    print("fake_skyrim: throw a grenade", flush=True)
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, 0, 1,
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
             if options.zoom_at and not options.drive:
                 t = time.monotonic() - started

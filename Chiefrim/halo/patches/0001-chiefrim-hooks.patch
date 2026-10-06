@@ -354,6 +354,27 @@ index e35691e1..33935254 100644
  					collision_log_end_period();
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
+diff --git a/source/objects/damage.c b/source/objects/damage.c
+index 5f00c31c..16053cde 100644
+--- a/source/objects/damage.c
++++ b/source/objects/damage.c
+@@ -131,6 +131,7 @@ symbols in this file:
+ #include "rasterizer/rasterizer.h"
+ #include "render/render.h"
+ #include "scenario/scenario.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ #include "tag_files/tag_files.h"
+ #include "text/draw_string.h"
+ #include "units/unit_definitions.h"
+@@ -2482,6 +2483,8 @@ static void area_of_effect_cause_damage_to_object(
+ 
+ 		if (scale > 0.f)
+ 		{
++			if (chiefrim_active()) /* CHIEFRIM: an explosion's hit on a Skyrim actor's proxy */
++				chiefrim_note_area_damage(object_index, &damage->epicenter);
+ 			object_cause_damage(
+ 				damage,
+ 				object_index,
 diff --git a/source/render/render.c b/source/render/render.c
 index 68a746c2..24b5171a 100644
 --- a/source/render/render.c

@@ -9,6 +9,7 @@
 
 #include <numbers>
 #include <unordered_map>
+#include <vector>
 
 namespace chiefrim::Combat
 {
@@ -26,7 +27,20 @@ namespace chiefrim::Combat
 			std::uint32_t giveWeaponKey = 0x41;       // [Controls] iGiveWeaponKey (F7: free in Skyrim; F9 is Quickload)
 			std::uint32_t toggleKey = 0x44;           // [Controls] iToggleChiefrimKey (F10)
 			std::uint32_t restartKey = 0x57;          // [Controls] iRestartHaloKey (F11)
+			float         blastForce = 20.0f;         // [Combat] fBlastForce
+			float         burnSeconds = 5.0f;         // [Combat] fBurnSeconds
+			float         burnDamage = 0.15f;         // [Combat] fBurnDamage
 		} config;
+
+		// The people an explosion set alight (docs §8.2): burning for a while,
+		// hurt a little each frame.
+		struct Burning
+		{
+			RE::FormID form{ 0 };
+			float      left{ 0.0f };      // seconds
+			float      perSecond{ 0.0f }; // damage
+		};
+		std::vector<Burning> burning;
 
 		struct RecentHit
 		{
@@ -349,8 +363,51 @@ namespace chiefrim::Combat
 			return std::clamp(std::pow(ratio, config.levelExponent), 0.5f, 3.0f);
 		}
 
-		void ApplyHit(RE::PlayerCharacter* a_player, RE::Actor* a_actor, float a_fraction)
+		// An explosion's hit: thrown away from its centre (Skyrim's own
+		// knock-down, as its explosions do: a ragdoll), harder the more it took,
+		// and set alight. Before the damage, so one it kills flies too.
+		void Explode(RE::PlayerCharacter* a_player, RE::Actor* a_actor, const RE::NiPoint3& a_blast, float a_fraction, float a_toughness)
 		{
+			const float force = config.blastForce * std::clamp(a_fraction * 2.0f, 0.5f, 1.5f);
+			if (auto* process = a_actor->GetActorRuntimeData().currentProcess; process && force > 0.0f) {
+				// from just below the centre, so they go up as well as away
+				process->KnockExplosion(a_actor, a_blast - RE::NiPoint3{ 0.0f, 0.0f, 32.0f }, force);
+			}
+			if (config.burnSeconds <= 0.0f) {
+				return;
+			}
+			if (auto* fire = RE::TESForm::LookupByID<RE::TESEffectShader>(0x0001B212)) {  // FireFXShader (what Skyrim's fire spells burn with)
+				a_actor->ApplyEffectShader(fire, config.burnSeconds);
+			}
+			const float resist = std::clamp(a_actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kResistFire), 0.0f, 85.0f) / 100.0f;
+			const float total = config.burnDamage * a_actor->GetActorValueMax(RE::ActorValue::kHealth) * config.damageMult / a_toughness * (1.0f - resist);
+			const auto  it = std::ranges::find(burning, a_actor->GetFormID(), &Burning::form);
+			Burning&    burn = it != burning.end() ? *it : burning.emplace_back(Burning{ a_actor->GetFormID() });
+			burn.left = config.burnSeconds;
+			burn.perSecond = total / config.burnSeconds;
+			static int logged = 0;
+			if (logged++ < 5) {
+				logger::info("combat: an explosion threw {} ({:08X}) with force {:.1f} and set them alight ({:.0f} damage over {:.0f} s)",
+					a_actor->GetDisplayFullName(), a_actor->GetFormID(), force, total, config.burnSeconds);
+			}
+		}
+
+		void Burn(RE::PlayerCharacter* a_player, float a_delta)
+		{
+			std::erase_if(burning, [&](Burning& a_burn) {
+				auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_burn.form);
+				a_burn.left -= a_delta;
+				if (!actor || actor->IsDead() || a_burn.left <= 0.0f) {
+					return true;
+				}
+				actor->DoDamage(a_burn.perSecond * a_delta, a_player, true);
+				return false;
+			});
+		}
+
+		void ApplyHit(RE::PlayerCharacter* a_player, RE::Actor* a_actor, float a_fraction, const cr_msg_hit_actor& a_hit)
+		{
+			const bool explosion = (a_hit.flags & CR_HIT_EXPLOSION) != 0;
 			const float maxHealth = a_actor->GetActorValueMax(RE::ActorValue::kHealth);
 			const float toughness = Toughness(a_actor, a_player);
 			const float damage = a_fraction * maxHealth * config.damageMult / toughness;
@@ -358,12 +415,16 @@ namespace chiefrim::Combat
 				return;
 			}
 			// big hits (a rocket, a grenade's middle) stagger; bullets don't
-			const float stagger = a_fraction >= 0.5f ? std::clamp(a_fraction, 0.5f, 1.0f) : 0.0f;
+			// (an explosion throws them instead)
+			const float stagger = !explosion && a_fraction >= 0.5f ? std::clamp(a_fraction, 0.5f, 1.0f) : 0.0f;
 			auto*       weapon = RE::TESForm::LookupByID<RE::TESObjectWEAP>(0x00013985);  // Hunting Bow: a ranged hit's impacts and sounds
 			auto*       node = HitNode(a_actor);
 			RE::NiPoint3 hitPos = node ? node->world.translate : Chest(a_actor);
 			RE::NiPoint3 dir = hitPos - a_player->GetPosition();
 			dir = dir.Length() > 1e-3f ? dir / dir.Length() : RE::NiPoint3{ 0.0f, 1.0f, 0.0f };
+			if (explosion) {
+				Explode(a_player, a_actor, RE::NiPoint3{ a_hit.blast.x, a_hit.blast.y, a_hit.blast.z }, a_fraction, toughness);
+			}
 
 			if (processHit && hitDataCtor) {
 				alignas(16) std::array<std::byte, sizeof(RE::HitData)> storage{};
@@ -389,7 +450,7 @@ namespace chiefrim::Combat
 				// Without it (1.6.1170: docs §8.2), what it would do, piece by
 				// piece: the damage, a stagger or a flinch, and the hit event.
 				a_actor->DoDamage(damage, a_player, true);
-				if (!a_actor->IsDead()) {
+				if (!a_actor->IsDead() && !explosion) {
 					React(a_actor, dir, stagger);
 				}
 				RE::TESHitEvent event(a_actor, a_player, weapon ? weapon->GetFormID() : 0, 0, RE::TESHitEvent::Flag::kNone);
@@ -420,6 +481,9 @@ namespace chiefrim::Combat
 		config.damageMult = Settings::ReadFloat(L"Combat", L"fDamageMult", 1.0f);
 		config.levelExponent = Settings::ReadFloat(L"Combat", L"fLevelExponent", 0.5f);
 		config.incomingReference = Settings::ReadFloat(L"Combat", L"fIncomingReference", 250.0f);
+		config.blastForce = Settings::ReadFloat(L"Combat", L"fBlastForce", 20.0f);
+		config.burnSeconds = Settings::ReadFloat(L"Combat", L"fBurnSeconds", 5.0f);
+		config.burnDamage = Settings::ReadFloat(L"Combat", L"fBurnDamage", 0.15f);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
 		config.toggleKey = ::GetPrivateProfileIntW(L"Controls", L"iToggleChiefrimKey", 0x44, path.c_str());
 		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
@@ -447,6 +511,7 @@ namespace chiefrim::Combat
 		SetEssential(a_player, true);  // Chief's death decides; Skyrim's mustn't come first
 		WriteActors(a_player);
 		BridgePlayerDamage(a_player, a_delta);
+		Burn(a_player, a_delta);
 		for (int presses = s.givePresses.exchange(0); presses > 0; --presses) {
 			cr_msg_give_weapon give{};
 			give.index = -1;
@@ -470,7 +535,7 @@ namespace chiefrim::Combat
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* actor = RE::TESForm::LookupByID<RE::Actor>(a_hit.form_id);
 		if (player && actor && !actor->IsDead()) {
-			ApplyHit(player, actor, a_hit.fraction);
+			ApplyHit(player, actor, a_hit.fraction, a_hit);
 		}
 	}
 
@@ -500,5 +565,6 @@ namespace chiefrim::Combat
 		s.chiefDead = false;
 		s.lastHit = RecentHit{};
 		s.dotDamage = 0.0f;
+		burning.clear();
 	}
 }
