@@ -216,7 +216,7 @@ index 72798d4b..015440ec 100644
  				}
  				else
 diff --git a/source/game/players.c b/source/game/players.c
-index a834d481..af198080 100644
+index a834d481..94d17bf0 100644
 --- a/source/game/players.c
 +++ b/source/game/players.c
 @@ -275,6 +275,7 @@ symbols in this file:
@@ -227,7 +227,19 @@ index a834d481..af198080 100644
  
  /* network_game_globals.c's */
  boolean network_game_distributed_client(void);
-@@ -3932,7 +3933,8 @@ void players_update_after_game(
+@@ -3897,7 +3898,10 @@ void players_update_after_game(
+ 				else if (player->unit_index != NONE)
+ 				{
+ 					unit = unit_get(player->unit_index);
+-					if (!TEST_FLAG(unit->object.damage_flags, _object_die_act_of_god_bit))
++					/* CHIEFRIM: Chief stands where Skyrim's player does, and Skyrim's
++					people's proxies where they do: touching them in a fight isn't
++					a telefrag (it killed him, and the level went back) */
++					if (!chiefrim_active() && !TEST_FLAG(unit->object.damage_flags, _object_die_act_of_god_bit))
+ 					{
+ 						players_show_telefragged(iterator.datum_index);
+ 						player_telefrag_effect_stop(iterator.datum_index);
+@@ -3932,7 +3936,8 @@ void players_update_after_game(
  						&scenario->bsp_switch_trigger_volumes,
  						bsp_switch_trigger_volume_index,
  						struct scenario_bsp_switch_trigger_volume);

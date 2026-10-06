@@ -53,6 +53,7 @@ namespace chiefrim
 		shm_->skyrim_pid = ::GetCurrentProcessId();
 		CR_STORE_REL(&shm_->skyrim_state, CR_SIDE_READY);
 		lastHaloHeartbeat_ = CR_LOAD_ACQ(&shm_->halo_heartbeat);
+		haloPid_ = CR_LOAD_ACQ(&shm_->halo_pid);
 		lastHaloHeartbeatChange_ = a_now;  // the caller's clock: no unsigned wrap below
 		loggedWaiting_ = false;
 
@@ -99,9 +100,49 @@ namespace chiefrim
 		}
 	}
 
+	void Link::Control(const char* a_command)
+	{
+		// the supervisor reads "<count> <command>": the count makes a repeat new
+		const HANDLE file = ::CreateFileW(L"Z:\\dev\\shm\\chiefrim_control", GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (file == INVALID_HANDLE_VALUE) {
+			logger::warn("can't ask Halo's supervisor to {} (no /dev/shm/chiefrim_control: is tools/launch_halo.sh running?)", a_command);
+			return;
+		}
+		const auto text = std::format("{} {}\n", ++controlCount_ + ::GetTickCount64() % 100000 * 1000, a_command);
+		DWORD written = 0;
+		::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+		::CloseHandle(file);
+		logger::info("asked Halo's supervisor to {}", a_command);
+	}
+
 	bool Link::Update()
 	{
 		const auto now = ::GetTickCount64();
+
+		if (toggleRequested_.exchange(false)) {
+			enabled_ = !enabled_;
+			if (!enabled_) {
+				Close(nullptr);
+				Control("stop");
+				logger::info("Chiefrim turned off (the hotkey)");
+				RE::SendHUDMessage::ShowHUDMessage("Chiefrim: off");
+			} else {
+				Control("start");
+				nextOpenAttempt_ = 0;
+				logger::info("Chiefrim turned on (the hotkey)");
+				RE::SendHUDMessage::ShowHUDMessage("Chiefrim: on, starting Halo");
+			}
+		}
+		if (restartRequested_.exchange(false) && enabled_) {
+			Close(nullptr);
+			Control("restart");
+			nextOpenAttempt_ = now + 2000;
+			RE::SendHUDMessage::ShowHUDMessage("Chiefrim: restarting Halo");
+		}
+		if (!enabled_) {
+			return false;
+		}
 
 		if (!shm_) {
 			if (now < nextOpenAttempt_) {
@@ -117,12 +158,17 @@ namespace chiefrim
 			Close("Halo closed");
 			return false;
 		}
+		if (CR_LOAD_ACQ(&shm_->halo_pid) != haloPid_ || CR_LOAD_ACQ(&shm_->magic) != CR_MAGIC) {
+			Close("Halo restarted");  // the same file, a new Halo in it: hello and the world again
+			return false;
+		}
 		const auto heartbeat = CR_LOAD_ACQ(&shm_->halo_heartbeat);
 		if (heartbeat != lastHaloHeartbeat_) {
 			lastHaloHeartbeat_ = heartbeat;
 			lastHaloHeartbeatChange_ = now;
 		} else if (now - lastHaloHeartbeatChange_ > CR_HEARTBEAT_TIMEOUT_MS) {
 			Close("Halo stopped responding");
+			Control("restart");  // hung, not gone: the supervisor kills it and starts another
 			return false;
 		}
 

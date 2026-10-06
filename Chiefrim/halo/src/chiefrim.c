@@ -120,6 +120,7 @@ static struct
 	uint32_t last_camera_frame;   /* the last one drawn */
 	long render_layer;            /* CHIEFRIM_LAYER_*: what render_window draws now */
 	float tangent_x, tangent_y;   /* the projection of the frame being drawn (0: unknown) */
+	long chief_unit;              /* Chief's unit last frame (NONE: none) */
 } chiefrim;
 
 /* ---------- private code */
@@ -890,12 +891,16 @@ void chiefrim_initialize(void)
 	char const *flag = getenv("CHIEFRIM");
 
 	memset(&chiefrim, 0, sizeof(chiefrim));
+	chiefrim.chief_unit = NONE;
 	if (!flag || strcmp(flag, "1") != 0)
 		return;
 
 #ifdef __linux__
 	{
-		int fd = shm_open(CR_SHM_NAME, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		/* not truncated: a Skyrim still mapping the file of a Halo that died
+		(the supervisor restarts it, tools/launch_halo.sh) would fault on its
+		pages while the file was empty; sized in place and cleared below */
+		int fd = shm_open(CR_SHM_NAME, O_RDWR | O_CREAT, 0600);
 		void *address;
 
 		if (fd < 0 || ftruncate(fd, sizeof(cr_shared)) != 0)
@@ -1129,6 +1134,23 @@ void chiefrim_frame(void)
 	if (!chiefrim.active)
 		return;
 
+	{
+		/* Chief's unit came back, or is another: Halo respawned him or went
+		back to a checkpoint (a death that wasn't Chiefrim's to prevent), which
+		also brings back the level's objects, AI and all. Skyrim's player dies
+		with him; the level is cleared again; the proxies are forgotten. */
+		long unit = chiefrim_local_unit();
+
+		if (chiefrim.chief_unit != NONE && unit != chiefrim.chief_unit && chiefrim.linked)
+		{
+			error(_error_silent, "chiefrim: Chief's unit changed (%ld to %ld): a respawn or a revert; clearing the level again",
+				chiefrim.chief_unit, unit);
+			chiefrim_combat_chief_lost();
+			chiefrim_combat_forget();
+			chiefrim.level_cleared = FALSE;
+		}
+		chiefrim.chief_unit = unit;
+	}
 	if (!chiefrim.level_cleared && chiefrim_local_unit() != NONE)
 	{
 		ai_erase(NONE, NONE, NONE, TRUE);

@@ -21,6 +21,8 @@ namespace chiefrim::Combat
 			float         levelExponent = 0.5f;       // [Combat] fLevelExponent
 			float         incomingReference = 250.0f; // [Combat] fIncomingReference
 			std::uint32_t giveWeaponKey = 0x41;       // [Controls] iGiveWeaponKey (F7: free in Skyrim; F9 is Quickload)
+			std::uint32_t toggleKey = 0x44;           // [Controls] iToggleChiefrimKey (F10)
+			std::uint32_t restartKey = 0x57;          // [Controls] iRestartHaloKey (F11)
 		} config;
 
 		struct RecentHit
@@ -87,13 +89,14 @@ namespace chiefrim::Combat
 			}
 		};
 
-		// The debug key: give Chief the host map's next weapon (docs §8.4).
-		class GiveWeaponSink final : public RE::BSTEventSink<RE::InputEvent*>
+		// Chiefrim's own keys: give Chief the host map's next weapon (debug,
+		// docs §8.4), Chiefrim off and on, Halo restarted (docs §11).
+		class HotkeySink final : public RE::BSTEventSink<RE::InputEvent*>
 		{
 		public:
-			static GiveWeaponSink* Get()
+			static HotkeySink* Get()
 			{
-				static GiveWeaponSink sink;
+				static HotkeySink sink;
 				return &sink;
 			}
 
@@ -101,33 +104,45 @@ namespace chiefrim::Combat
 			{
 				for (auto* event = a_events ? *a_events : nullptr; event; event = event->next) {
 					auto* button = event->AsButtonEvent();
-					if (button && config.giveWeaponKey && button->GetDevice() == RE::INPUT_DEVICE::kKeyboard &&
-						button->GetIDCode() == config.giveWeaponKey && button->IsDown()) {
+					if (!button || button->GetDevice() != RE::INPUT_DEVICE::kKeyboard || !button->IsDown()) {
+						continue;
+					}
+					const auto key = button->GetIDCode();
+					if (config.giveWeaponKey && key == config.giveWeaponKey) {
 						++s.givePresses;
+					} else if (config.toggleKey && key == config.toggleKey) {
+						Link::Get().RequestToggle();
+					} else if (config.restartKey && key == config.restartKey) {
+						Link::Get().RequestRestart();
 					}
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
 
-		// The debug key must not be one of Skyrim's own (as Input.cpp checks
-		// Chiefrim's other hotkeys): it would do both.
+		// These keys must not be Skyrim's own (as Input.cpp checks Chiefrim's
+		// other hotkeys): they would do both.
 		void CheckKeyClash(bool a_show)
 		{
 			auto* map = RE::ControlMap::GetSingleton();
-			if (!map || !config.giveWeaponKey) {
+			if (!map) {
 				return;
 			}
-			const auto clash = map->GetUserEventName(config.giveWeaponKey, RE::INPUT_DEVICE::kKeyboard,
-				RE::UserEvents::INPUT_CONTEXT_ID::kGameplay);
-			if (clash.empty()) {
-				return;
-			}
-			logger::warn("Chiefrim's give-weapon key 0x{:02X} is also Skyrim's \"{}\"; change iGiveWeaponKey in Chiefrim.ini",
-				config.giveWeaponKey, clash);
-			if (a_show) {
-				const auto message = std::format("Chiefrim: the give-weapon key is also Skyrim's {}", clash);
-				RE::SendHUDMessage::ShowHUDMessage(message.c_str());
+			const std::pair<std::uint32_t, const char*> keys[]{ { config.giveWeaponKey, "give-weapon (iGiveWeaponKey)" },
+				{ config.toggleKey, "Chiefrim on/off (iToggleChiefrimKey)" }, { config.restartKey, "restart Halo (iRestartHaloKey)" } };
+			for (const auto& [key, what] : keys) {
+				if (!key) {
+					continue;
+				}
+				const auto clash = map->GetUserEventName(key, RE::INPUT_DEVICE::kKeyboard, RE::UserEvents::INPUT_CONTEXT_ID::kGameplay);
+				if (clash.empty()) {
+					continue;
+				}
+				logger::warn("Chiefrim's {} key 0x{:02X} is also Skyrim's \"{}\"; change it in Chiefrim.ini", what, key, clash);
+				if (a_show) {
+					const auto message = std::format("Chiefrim: the {} key is also Skyrim's {}", what, clash);
+					RE::SendHUDMessage::ShowHUDMessage(message.c_str());
+				}
 			}
 		}
 
@@ -363,16 +378,19 @@ namespace chiefrim::Combat
 		config.levelExponent = Settings::ReadFloat(L"Combat", L"fLevelExponent", 0.5f);
 		config.incomingReference = Settings::ReadFloat(L"Combat", L"fIncomingReference", 250.0f);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
+		config.toggleKey = ::GetPrivateProfileIntW(L"Controls", L"iToggleChiefrimKey", 0x44, path.c_str());
+		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESHitEvent>(HitSink::Get());
 		}
 		if (auto* input = RE::BSInputDeviceManager::GetSingleton()) {
-			input->AddEventSink(GiveWeaponSink::Get());
+			input->AddEventSink(HotkeySink::Get());
 		}
 		ResolveHitPipeline();
 		CheckKeyClash(false);
-		logger::info("combat: damage x{:.2f}, level exponent {:.2f}, {:.0f} Skyrim damage kills Chief; give-weapon key 0x{:02X}",
-			config.damageMult, config.levelExponent, config.incomingReference, config.giveWeaponKey);
+		logger::info("combat: damage x{:.2f}, level exponent {:.2f}, {:.0f} Skyrim damage kills Chief; keys: give weapon 0x{:02X},"
+					 " Chiefrim on/off 0x{:02X}, restart Halo 0x{:02X}",
+			config.damageMult, config.levelExponent, config.incomingReference, config.giveWeaponKey, config.toggleKey, config.restartKey);
 	}
 
 	void PerFrame(RE::PlayerCharacter* a_player, float a_delta)

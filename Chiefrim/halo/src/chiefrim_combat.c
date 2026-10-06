@@ -199,7 +199,9 @@ static real chiefrim_proxy_take_damage(long object_index)
 	object->object.body_vitality = 1.f;
 	object->object.current_body_damage = 0.f;
 	object->object.recent_body_damage = 0.f;
-	return combat.proxy_vitality > 0.f && lost > 0.f ? lost / combat.proxy_vitality : 0.f;
+	/* at most a whole proxy: a headshot kills a marine outright (Halo sets its
+	body to nothing, which here is the 100,000) */
+	return combat.proxy_vitality > 0.f && lost > 0.f ? MIN(lost / combat.proxy_vitality, 1.f) : 0.f;
 }
 
 static void chiefrim_proxies_update(cr_vec3 origin)
@@ -241,6 +243,26 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 		forward.j = sine(yaw);
 		forward.k = 0.f;
 
+		if (proxy && proxy->object_index != NONE && object_try_and_get(proxy->object_index) &&
+			TEST_FLAG(object_get(proxy->object_index)->object.damage_flags, _object_dead_bit))
+		{
+			/* the proxy died (a headshot kills outright, whatever its vitality):
+			its hit is sent below; a fresh one stands in from next frame */
+			real fraction = chiefrim_proxy_take_damage(proxy->object_index);
+
+			if (fraction > 0.0001f)
+			{
+				cr_msg_hit_actor hit;
+
+				memset(&hit, 0, sizeof(hit));
+				hit.form_id = actor->form_id;
+				hit.fraction = fraction;
+				chiefrim_push(CR_MSG_HIT_ACTOR, &hit, sizeof(hit));
+				combat.hits++;
+			}
+			chiefrim_proxy_delete(proxy);
+			continue;
+		}
 		if (proxy && (proxy->object_index == NONE || !object_try_and_get(proxy->object_index)))
 		{
 			proxy->form_id = 0; /* gone (Halo cleaned it up): a new one */
@@ -404,6 +426,34 @@ void chiefrim_combat_map_loaded(void)
 		combat.proxies[slot].object_index = NONE;
 }
 
+/* Halo's game state went back (a checkpoint revert): the proxies' object
+indices mean nothing now; they're forgotten, not deleted */
+void chiefrim_combat_forget(void)
+{
+	long slot;
+
+	for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
+	{
+		combat.proxies[slot].form_id = 0;
+		combat.proxies[slot].object_index = NONE;
+	}
+}
+
+/* Chief died in a way that isn't his body running out (deathless covers that
+one): his unit dead or gone */
+void chiefrim_combat_chief_lost(void)
+{
+	if (!combat.chief_dead)
+	{
+		cr_msg_player_died died;
+
+		memset(&died, 0, sizeof(died));
+		chiefrim_push(CR_MSG_PLAYER_DIED, &died, sizeof(died));
+		combat.chief_dead = TRUE;
+		error(_error_silent, "chiefrim: Chief is gone (his unit died or went); Skyrim's player dies");
+	}
+}
+
 void chiefrim_combat_reset(long chief)
 {
 	long slot;
@@ -452,7 +502,10 @@ void chiefrim_combat_update(long chief, cr_vec3 origin)
 	chiefrim_combat_resolve(chief);
 	chiefrim_proxies_update(origin);
 
-	/* Chief's body gone (he's deathless while linked): Skyrim's player dies */
+	/* Chief's body gone (he's deathless while linked) or his unit dead:
+	Skyrim's player dies */
+	if (!combat.chief_dead && TEST_FLAG(object_get(chief)->object.damage_flags, _object_dead_bit))
+		chiefrim_combat_chief_lost();
 	if (!combat.chief_dead && object_get(chief)->object.body_vitality <= 0.001f)
 	{
 		cr_msg_player_died died;

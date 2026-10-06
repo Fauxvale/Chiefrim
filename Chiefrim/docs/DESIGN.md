@@ -294,7 +294,9 @@ stay slopes, and there are no micro-steps.
 **Where the data comes from (Skyrim side, WorldExporter, `skse/src/Collision.cpp`):** stage C
 straight away, adapted from SkyCraft's harvester (MIT), which already reads AE's Havok shapes:
 the world's static bodies (static, animated static, trees, props, terrain, ground, invisible
-walls, stair helpers), their shape trees (MOPP, compressed and extended meshes, lists,
+walls, stair helpers), and physics objects (clutter, large debris) at rest (asleep in Havok:
+moving ones are left out until they settle; a near region is harvested again each second) and at
+least 24 units across, their shape trees (MOPP, compressed and extended meshes, lists,
 transforms), and boxes, capsules and convex hulls as outward-wound triangles; every read is
 fault-guarded. Triangles go to Halo in Skyrim units, per 1024-unit cube region (each triangle in
 the one region holding its centre), within ±2 regions around and ±1 below/above the player, at
@@ -474,7 +476,14 @@ protocol 8):
   for arrows and the rest, the plasma rifle's bolt for magic. Shields take it first and recharge
   as ever; the HUD shows where it came from. Unlike the plan, Skyrim's health stays full rather
   than following Chief's body: lowered, the essential player would kneel in bleedout.
-- Chief is deathless in Halo while linked; with his body at 0 Skyrim is told
+- Chief is deathless in Halo while linked, and Halo's telefrag (a player blocked inside another
+  unit for 3 s dies) is off: in a fight Chief stands inside Skyrim's people's proxies, and it
+  killed him, bypassing deathless (the fourth in-game test); the campaign death then reverted the
+  game to its checkpoint, before the level was cleared, and b30's trees and Covenant scenery
+  floated around the player. Any loss of Chief's unit (dead, gone, another) now counts as a death
+  for Skyrim, and a changed unit (a respawn or revert) clears the level again and forgets the
+  proxies (their indices mean nothing after a revert). A proxy that dies (a headshot kills a marine
+  outright) sends a whole proxy's hit, at most, and is replaced. With his body at 0 Skyrim is told
   (`CR_MSG_PLAYER_DIED`) and kills its player (killer: the last attacker). A new world (the
   reload) makes him whole and clears the proxies.
 - Chief's aim follows Skyrim's view only to 85 degrees up or down: Halo asserts beyond 85.5 (the
@@ -707,8 +716,19 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
 - **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
   stamina and the crosshair, because Halo's HUD replaces them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.
-- **Launching (v1):** the user starts Halo with a launch script (Chiefrim mode, host map; Phase 0
-  has `tools/run_phase0.sh` for the test stand).
+- **Launching and recovery (2026-10-05):** `tools/launch_halo.sh` supervises Halo: it starts it,
+  starts it again whenever it exits or crashes (after 1, 4, 9 ... up to 30 s while it keeps crashing
+  within 30 s of starting), and obeys Skyrim through `/dev/shm/chiefrim_control` ("<count>
+  restart|stop|start"). As Skyrim's Steam launch options (`launch_halo.sh --steam %command%`) it
+  runs alongside Skyrim, outside Proton's container, and stops Halo when Skyrim exits. The plugin
+  asks for a restart when Halo stops responding (a hang: a crash the supervisor sees by itself),
+  and on its keys: `iRestartHaloKey` (F11) kills and restarts Halo, `iToggleChiefrimKey` (F10)
+  turns Chiefrim off (unlinked: Skyrim's own player, controls, camera and health; Halo stopped)
+  and on. The keys are applied in the next `Link::Update`, so the unlinking path restores Skyrim's
+  controls. A new Halo in the same shared file is noticed by its process id (relinked: hello and
+  the world again); Halo no longer truncates the file on start (a Skyrim still mapping it would
+  fault on its pages). Checked offline: a SIGKILL, a restart, off and on, and Skyrim exiting.
+  Phase 0 has `tools/run_phase0.sh` for the test stand.
 - **Hidden window:** the port's own hidden-window mode (`HALO_HIDDEN_WINDOW`) crashes the GL
   driver within seconds in the lens-flare occlusion query (`rasterizer_lens_flares_submit_occlusion_tests`).
   This also happens on stock b30 without Chiefrim, so it's an upstream bug. The Phase 0 test stand

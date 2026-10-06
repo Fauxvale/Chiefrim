@@ -19,6 +19,14 @@ namespace chiefrim
 
 		bool Connected() const { return shm_ != nullptr; }
 
+		// Chiefrim's hotkeys (any thread; applied in the next Update): Chiefrim
+		// off (unlinked, Skyrim's own player again, Halo stopped) or on, and Halo
+		// killed and started again. The supervisor running Halo
+		// (tools/launch_halo.sh) does the stopping and starting.
+		void RequestToggle() { toggleRequested_ = true; }
+		void RequestRestart() { restartRequested_ = true; }
+		bool Enabled() const { return enabled_; }
+
 		void SendWorldContext(const cr_world_context& a_context);
 		void SendTeleport(const RE::NiPoint3& a_position, float a_heading);
 		void SendInput(const cr_input& a_input);
@@ -41,14 +49,21 @@ namespace chiefrim
 		bool TryOpen(ULONGLONG a_now);
 		void Close(const char* a_reason);
 		void Push(std::uint16_t a_type, const void* a_message, std::uint32_t a_size);
+		// to the supervisor: "restart", "stop" or "start" (/dev/shm/chiefrim_control)
+		void Control(const char* a_command);
 
 		HANDLE file_{ INVALID_HANDLE_VALUE };
 		HANDLE mapping_{ nullptr };
 		cr_shared* shm_{ nullptr };
 		std::uint32_t lastHaloHeartbeat_{ 0 };
+		std::uint32_t haloPid_{ 0 };  // the Halo linked to: another one (restarted) means linking again
 		ULONGLONG lastHaloHeartbeatChange_{ 0 };
 		ULONGLONG nextOpenAttempt_{ 0 };
 		bool loggedWaiting_{ false };
+		bool enabled_{ true };
+		std::atomic<bool> toggleRequested_{ false };
+		std::atomic<bool> restartRequested_{ false };
+		std::uint32_t controlCount_{ 0 };
 
 		// Writes Skyrim's heartbeat a few times a second, also while the game
 		// is paused in a menu or a loading screen, when PlayerCharacter::Update

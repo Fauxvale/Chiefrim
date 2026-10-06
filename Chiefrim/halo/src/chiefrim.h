@@ -73,6 +73,8 @@ void chiefrim_combat_reset(long chief);                /* a new world */
 void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 origin);
 void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while linked */
 boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
+void chiefrim_combat_forget(void);                     /* Halo's game state went back */
+void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
 
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
 void chiefrim_world_initialize(void);
