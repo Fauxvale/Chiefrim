@@ -27,7 +27,7 @@ namespace chiefrim::Combat
 			std::uint32_t giveWeaponKey = 0x41;       // [Controls] iGiveWeaponKey (F7: free in Skyrim; F9 is Quickload)
 			std::uint32_t toggleKey = 0x44;           // [Controls] iToggleChiefrimKey (F10)
 			std::uint32_t restartKey = 0x57;          // [Controls] iRestartHaloKey (F11)
-			float         blastForce = 20.0f;         // [Combat] fBlastForce
+			float         blastForce = 10.0f;         // [Combat] fBlastForce
 			float         burnSeconds = 5.0f;         // [Combat] fBurnSeconds
 			float         burnDamage = 0.15f;         // [Combat] fBurnDamage
 		} config;
@@ -481,7 +481,7 @@ namespace chiefrim::Combat
 		config.damageMult = Settings::ReadFloat(L"Combat", L"fDamageMult", 1.0f);
 		config.levelExponent = Settings::ReadFloat(L"Combat", L"fLevelExponent", 0.5f);
 		config.incomingReference = Settings::ReadFloat(L"Combat", L"fIncomingReference", 250.0f);
-		config.blastForce = Settings::ReadFloat(L"Combat", L"fBlastForce", 20.0f);
+		config.blastForce = Settings::ReadFloat(L"Combat", L"fBlastForce", 10.0f);
 		config.burnSeconds = Settings::ReadFloat(L"Combat", L"fBurnSeconds", 5.0f);
 		config.burnDamage = Settings::ReadFloat(L"Combat", L"fBurnDamage", 0.15f);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
