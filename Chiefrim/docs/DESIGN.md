@@ -472,8 +472,12 @@ protocol 8):
   headshot multiplier, melee and splash is Halo's own: 3 s of MA5B fire at 400 units landed 14 hits
   of 0.10 (offline test).
 - Skyrim applies it level-scaled (§13) through its own hit processing (found by the call the
-  melee handler makes), and starts combat. Big hits (half a proxy or more) stagger. On 1.6.1170
-  the call isn't there (SkyCraft's lookup fails the same way), so the hit is done piece by piece:
+  melee handler makes), and starts combat. Big hits (half a proxy or more) stagger. On the
+  author's 1.6.1170 the direct call wasn't found (nor by SkyCraft): another plugin likely hooks
+  that call, so it leads out of Skyrim's code. The plugin now follows the call at the melee
+  handler's +0x4A8, and when it leads to another module (logged by name) it still uses the hit
+  processing; bullets add the flinch below. `bSkyrimHitProcessing=0`, or a call into some other
+  part of Skyrim, keeps the piece-by-piece hit:
   damage, then a stagger away from Chief (`staggerStart`) or a flinch (`recoilStart`, at most
   once a second per actor), then a `TESHitEvent` for scripts. Either way an Iron Dagger's impact
   set gives the blood and the hit sound.

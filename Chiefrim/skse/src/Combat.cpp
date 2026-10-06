@@ -294,6 +294,10 @@ namespace chiefrim::Combat
 
 		void ResolveHitPipeline()
 		{
+			if (!Settings::ReadFloat(L"Combat", L"bSkyrimHitProcessing", 1.0f)) {
+				logger::info("combat: bSkyrimHitProcessing=0; Chief's hits are done piece by piece");
+				return;
+			}
 			if (!REL::Module::IsAE()) {
 				logger::info("combat: not AE; Chief's hits are plain damage");
 				return;
@@ -301,17 +305,69 @@ namespace chiefrim::Combat
 			const auto  caller = REL::ID(38627).address();
 			const auto  target = REL::ID(38586).address();
 			const auto* code = reinterpret_cast<const std::uint8_t*>(caller);
+			const auto  use = [&](const char* a_how) {
+				processHit = reinterpret_cast<ProcessHitFn*>(target);
+				hitDataCtor = reinterpret_cast<HitDataCtorFn*>(REL::ID(43995).address());
+				logger::info("combat: Chief's hits go through Skyrim's hit processing ({})", a_how);
+			};
 			for (std::size_t i = 0; i + 5 <= 0x1000; ++i) {
 				std::int32_t rel;
 				std::memcpy(&rel, code + i + 1, 4);
 				if (code[i] == 0xE8 && caller + i + 5 + static_cast<std::intptr_t>(rel) == target) {
-					processHit = reinterpret_cast<ProcessHitFn*>(target);
-					hitDataCtor = reinterpret_cast<HitDataCtorFn*>(REL::ID(43995).address());
-					logger::info("combat: Chief's hits go through Skyrim's hit processing");
+					use("the melee handler calls it");
 					return;
 				}
 			}
-			logger::warn("combat: Skyrim's hit processing isn't where expected; Chief's hits are plain damage");
+			// Not called directly: another plugin may have hooked the call (it
+			// then goes to that plugin, which calls the hit processing itself).
+			// The melee handler's call is at +0x4A8 (SkyCraft's finding); if it
+			// leads out of Skyrim's code, the address is right and still Skyrim's.
+			const auto site = caller + 0x4A8;
+			const auto* at = reinterpret_cast<const std::uint8_t*>(site);
+			const auto& module = REL::Module::get();
+			const auto  inSkyrim = [&](std::uintptr_t a_address) {
+				return a_address >= module.base() && a_address < module.base() + module.segment(REL::Segment::textx).offset() +
+				                                                     module.segment(REL::Segment::textx).size();
+			};
+			const auto owner = [](std::uintptr_t a_address) {
+				HMODULE handle = nullptr;
+				char    name[MAX_PATH]{};
+				if (::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+						reinterpret_cast<LPCSTR>(a_address), &handle) && ::GetModuleFileNameA(handle, name, MAX_PATH)) {
+					const std::string_view path{ name };
+					return std::string{ path.substr(path.find_last_of("\\/") + 1) };
+				}
+				return std::string{ "no module (a trampoline)" };
+			};
+			if (at[0] == 0xE8) {
+				std::int32_t rel;
+				std::memcpy(&rel, at + 1, 4);
+				std::uintptr_t to = site + 5 + static_cast<std::intptr_t>(rel);
+				std::string    path = owner(to);
+				// a trampoline's jump: FF 25 [rip+0] then the address
+				for (int hop = 0; hop < 4 && !inSkyrim(to); ++hop) {
+					const auto* jump = reinterpret_cast<const std::uint8_t*>(to);
+					if (jump[0] == 0xFF && jump[1] == 0x25) {
+						std::int32_t disp;
+						std::memcpy(&disp, jump + 2, 4);
+						std::memcpy(&to, jump + 6 + disp, sizeof(to));
+						path += " -> " + owner(to);
+					} else {
+						break;
+					}
+				}
+				if (!inSkyrim(to)) {
+					logger::info("combat: the melee handler's call to the hit processing is hooked ({}); it's still Skyrim's", path);
+					use("its call is another plugin's hook");
+					return;
+				}
+				logger::warn("combat: the melee handler's call at +0x4A8 goes to Skyrim's +0x{:X}, not the hit processing (+0x{:X})",
+					to - module.base(), target - module.base());
+			} else {
+				logger::warn("combat: no call at the melee handler's +0x4A8 (bytes {:02X} {:02X} {:02X} {:02X} {:02X})", at[0], at[1], at[2],
+					at[3], at[4]);
+			}
+			logger::warn("combat: Skyrim's hit processing isn't where expected; Chief's hits are done piece by piece");
 		}
 
 		RE::NiAVObject* HitNode(RE::Actor* a_actor)
@@ -446,6 +502,9 @@ namespace chiefrim::Combat
 				hit->flags.reset(RE::HitData::Flag::kPowerAttack, RE::HitData::Flag::kCritical, RE::HitData::Flag::kSneakAttack,
 					RE::HitData::Flag::kMeleeAttack);
 				processHit(a_actor, *hit);
+				if (!a_actor->IsDead() && !explosion && stagger <= 0.0f) {
+					React(a_actor, dir, 0.0f);  // the flinch (a bullet's stagger is 0)
+				}
 			} else {
 				// Without it (1.6.1170: docs §8.2), what it would do, piece by
 				// piece: the damage, a stagger or a flinch, and the hit event.
