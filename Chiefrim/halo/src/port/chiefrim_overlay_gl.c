@@ -27,6 +27,7 @@ and Chiefrim/docs/DESIGN.md §9.
 
 struct cr_shared *chiefrim_shared(void);
 long chiefrim_overlay_layer(void);
+void chiefrim_overlay_projection(float *tangent_x, float *tangent_y);
 
 /* entry points the port's list (gl.h) doesn't have */
 static PFNGLBLENDFUNCIPROC overlay_glBlendFunci;
@@ -492,6 +493,7 @@ int chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned l
 	header->camera_frame = (uint32_t)camera_frame;
 	header->time_us = (uint32_t)overlay_now_us();
 	header->flags = CR_FRAME_VISIBLE | (world ? CR_FRAME_WORLD : 0u);
+	chiefrim_overlay_projection(&header->tangent_x, &header->tangent_y);
 	cr_slot_write_end(&header->seq);
 	CR_STORE_REL(&shm->frames.latest, slot + 1);
 	CR_STORE_REL(&shm->frames.published, shm->frames.published + 1);

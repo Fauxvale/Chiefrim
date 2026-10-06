@@ -53,6 +53,8 @@ struct observer_result const *chiefrim_render_camera(short local_player_index, s
 #define CHIEFRIM_LAYER_WORLD  1 /* projectiles, effects, decals, objects */
 #define CHIEFRIM_LAYER_SCREEN 2 /* the first-person weapon, the HUD */
 long chiefrim_overlay_layer(void);
+void chiefrim_note_projection(real x0, real x1, real y0, real y1); /* render.c: the view's tangents */
+void chiefrim_overlay_projection(float *tangent_x, float *tangent_y);
 void chiefrim_set_render_layer(long layer);
 void chiefrim_overlay_world_done(void); /* port: the world layer is drawn; on to the screen's */
 

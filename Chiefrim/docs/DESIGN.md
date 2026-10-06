@@ -470,7 +470,8 @@ protocol 8):
   (`CR_MSG_PLAYER_DIED`) and kills its player (killer: the last attacker). A new world (the
   reload) makes him whole and clears the proxies.
 - Debug (§8.4): `[Controls] iGiveWeaponKey` (F7; F9 is Skyrim's Quickload) gives Chief the map's next weapon (`CR_MSG_GIVE_WEAPON`;
-  vehicle guns skipped; b30 has the MA5B, M6D, plasma rifle and pistol, rocket launcher, needler,
+  vehicle guns skipped; a dropped weapon resting on a surface past 32,767 crashed Halo, which keeps
+  that index in a short: now it rests on no surface in particular, `items.c`; b30 has the MA5B, M6D, plasma rifle and pistol, rocket launcher, needler,
   fuel rod and energy sword; the list is in Halo's log), dropping the one in hand if he has two.
 
 ### 8.1 Skyrim NPCs inside Halo: proxy bipeds
@@ -592,6 +593,15 @@ using the camera Skyrim is about to use. It draws three layers:
   Halo's field of view, which Skyrim's follows), reads both layers back at once and names the
   camera in the frame. At Present Skyrim waits up to `[Overlay] fWaitMs` (12) for that frame, so the
   world layer sits on this frame's picture rather than one or two frames old.
+- **Reprojection (protocol 9).** The first in-game test showed the lockstep mostly missing:
+  Halo's frame of the moment was ready in time for ~20% of frames (894 of 1078 waits ran out its
+  12 ms), so the world layer showed a camera a frame or two old (decals slid when turning) and the
+  waits cost frame rate (~33 fps). Now each frame carries Halo's projection (`tangent_x/y`, from
+  its frustum), Skyrim keeps its last 64 cameras, and the world-layer shader maps each pixel's view
+  ray from the camera of the moment into the camera and projection Halo drew through (depth
+  compared along the ray). Exact for turning, and for any field of view mismatch; walking leaves a
+  frame's parallax. Skyrim no longer waits (`fWaitMs` 0); Checked under Proton with DXVK: a marker
+  at the centre of Halo's frame lands at column 69-70 of 160 after a 10 degree turn (70.2 expected).
 - **Checked offline** (fake Skyrim, `--fire-at`, `--pitch`, `--speed 0`): frames name the camera
   they were drawn through; muzzle flash, smoke, sparks and bullet holes are in the world layer; a
   camera 120 units up looking 60 degrees down puts the holes at 123-146 units (120 / sin 60 = 139).

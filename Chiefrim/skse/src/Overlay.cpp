@@ -27,8 +27,20 @@ namespace chiefrim::Overlay
 
 		struct alignas(16) Params
 		{
-			float depth[4];  // Skyrim's near, far, 1 if its depth is reversed, Skyrim units per Halo world unit
+			float depth[4];       // Skyrim's near, far, 1 if its depth is reversed, Skyrim units per Halo world unit
+			float now[4][4];      // Skyrim's camera now: forward, up, right (xyz), and its tangents (x, y)
+			float halo[4][4];     // the camera Halo's frame was drawn through, and Halo's tangents
 		};
+
+		// A camera Skyrim published, for mapping Halo's frame onto the camera
+		// of the moment (Halo's frames are a frame or two behind).
+		struct PublishedCamera
+		{
+			std::uint32_t frame = 0;
+			RE::NiPoint3  forward, up, right;
+			float         tangentX = 0.0f, tangentY = 0.0f;
+		};
+		constexpr std::uint32_t kCameraRing = 64;
 
 		struct
 		{
@@ -54,6 +66,13 @@ namespace chiefrim::Overlay
 			int                       reversed = -1;         // unknown until a look at the depth
 			std::uint32_t             depthCopies = 0;
 
+			PublishedCamera cameras[kCameraRing];
+			PublishedCamera current;           // this frame's
+			std::uint32_t   haloCamera = 0;    // the camera of Halo's frame in the textures
+			float           haloTangentX = 0.0f, haloTangentY = 0.0f;
+			std::uint64_t   reprojected = 0, unknownCamera = 0;
+			float           lastLoggedTangent = 0.0f;
+
 			std::uint32_t displayFrame = 0;
 			std::uint32_t cameraFrame = 0;    // the last camera published to Halo
 			std::uint32_t cameraPending = 0;  // published this frame: wait for Halo's frame of it
@@ -72,7 +91,7 @@ namespace chiefrim::Overlay
 		// the back buffer if Halo's are smaller (screens over CR_FRAME_MAX_*).
 		// The world layer's pixels behind Skyrim's own are dropped.
 		constexpr char kShader[] = R"(
-cbuffer Params : register(b0) { float4 depthParams; };
+cbuffer Params : register(b0) { float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4]; };
 Texture2D picture : register(t0);
 Texture2D<float> haloDepth : register(t1);
 Texture2D<float> skyrimDepth : register(t2);
@@ -97,12 +116,26 @@ float SkyrimViewDepth(float d)
 	float n = depthParams.x, f = depthParams.y;
 	return depthParams.z > 0.5 ? n * f / (n + d * (f - n)) : n * f / (f - d * (f - n));
 }
+// The world layer was drawn through an older camera (haloBasis: forward, up,
+// right, tangents); this pixel's view ray, from the camera of the moment
+// (nowBasis), is where in Halo's picture to look. Exact for turning; walking
+// leaves a parallax of a frame's step.
 float4 PSWorld(VSOut i) : SV_Target
 {
-	float4 c = picture.Sample(linear_clamp, i.uv);
+	float2 ndc = float2(i.uv.x * 2 - 1, 1 - i.uv.y * 2);
+	float3 ray = nowBasis[0].xyz + ndc.x * nowBasis[3].x * nowBasis[2].xyz + ndc.y * nowBasis[3].y * nowBasis[1].xyz;
+	float  ahead = dot(ray, haloBasis[0].xyz);
+	if (ahead <= 1e-4)
+		discard;
+	float2 h = float2(dot(ray, haloBasis[2].xyz), dot(ray, haloBasis[1].xyz)) / ahead / haloBasis[3].xy;
+	if (any(abs(h) > 1))
+		discard;
+	float2 uv = float2(h.x * 0.5 + 0.5, 0.5 - h.y * 0.5);
+	float4 c = picture.Sample(linear_clamp, uv);
 	if (all(c == 0))
 		discard;
-	float halo = haloDepth.SampleLevel(point_clamp, i.uv, 0) * depthParams.w;
+	// Halo's depth is along its forward; along this camera's: the same point
+	float halo = haloDepth.SampleLevel(point_clamp, uv, 0) * depthParams.w / ahead;
 	float skyrim = SkyrimViewDepth(skyrimDepth.SampleLevel(point_clamp, i.uv, 0));
 	// a little slack: Halo's decals lie on Skyrim's own surfaces
 	if (halo > skyrim * 1.003 + 4.0)
@@ -110,6 +143,20 @@ float4 PSWorld(VSOut i) : SV_Target
 	return c;
 }
 )";
+
+		void PutBasis(float (&a_out)[4][4], const PublishedCamera& a_camera, float a_tangentX, float a_tangentY)
+		{
+			const RE::NiPoint3* axes[3]{ &a_camera.forward, &a_camera.up, &a_camera.right };
+			for (int i = 0; i < 3; ++i) {
+				a_out[i][0] = axes[i]->x;
+				a_out[i][1] = axes[i]->y;
+				a_out[i][2] = axes[i]->z;
+				a_out[i][3] = 0.0f;
+			}
+			a_out[3][0] = a_tangentX;
+			a_out[3][1] = a_tangentY;
+			a_out[3][2] = a_out[3][3] = 0.0f;
+		}
 
 		bool Enabled()
 		{
@@ -120,7 +167,7 @@ float4 PSWorld(VSOut i) : SV_Target
 		// How long Present waits for Halo's frame of this frame's camera.
 		double WaitLimitMs()
 		{
-			static const double value = std::clamp(Settings::ReadFloat(L"Overlay", L"fWaitMs", 12.0f), 0.0f, 50.0f);
+			static const double value = std::clamp(Settings::ReadFloat(L"Overlay", L"fWaitMs", 0.0f), 0.0f, 50.0f);
 			return value;
 		}
 
@@ -311,6 +358,9 @@ float4 PSWorld(VSOut i) : SV_Target
 			s.lastFrame = frame;
 			s.haveFrame = true;
 			s.worldShown = world;
+			s.haloCamera = cameraFrame;
+			s.haloTangentX = header.tangent_x;
+			s.haloTangentY = header.tangent_y;
 			++s.uploads;
 			if (cameraFrame && cameraFrame == s.cameraFrame) {
 				++s.matched;
@@ -323,7 +373,7 @@ float4 PSWorld(VSOut i) : SV_Target
 		void WaitForCameraFrame(const cr_frames* a_frames)
 		{
 			const auto pending = std::exchange(s.cameraPending, 0u);
-			if (!pending) {
+			if (!pending || WaitLimitMs() <= 0.0) {
 				return;
 			}
 			++s.waits;
@@ -356,6 +406,13 @@ float4 PSWorld(VSOut i) : SV_Target
 				p->depth[1] = s.farPlane;
 				p->depth[2] = s.reversed == 1 ? 1.0f : 0.0f;
 				p->depth[3] = CR_SKY_UNITS_PER_WU;
+				PutBasis(p->now, s.current, s.current.tangentX, s.current.tangentY);
+				// the camera of Halo's frame; unknown (too old, or Halo's own): as now
+				const auto& then = s.cameras[s.haloCamera % kCameraRing];
+				const bool  known = s.haloCamera && then.frame == s.haloCamera && s.haloTangentX > 0.0f && s.haloTangentY > 0.0f;
+				PutBasis(p->halo, known ? then : s.current, known ? s.haloTangentX : s.current.tangentX,
+					known ? s.haloTangentY : s.current.tangentY);
+				++(known ? s.reprojected : s.unknownCamera);
 				s.context->Unmap(s.params, 0);
 			}
 		}
@@ -436,7 +493,7 @@ float4 PSWorld(VSOut i) : SV_Target
 
 			// The world layer, where Skyrim's own picture isn't nearer; then
 			// the screen layer over everything.
-			if (s.worldShown && s.depthCopied && s.reversed >= 0) {
+			if (s.worldShown && s.depthCopied && s.reversed >= 0 && s.current.frame) {
 				ID3D11ShaderResourceView* srvs[3]{ s.world.srv, s.worldDepth.srv, s.depthCopySrv };
 				SetParams();
 				context->PSSetShader(s.worldPs, nullptr, 0);
@@ -541,11 +598,17 @@ float4 PSWorld(VSOut i) : SV_Target
 			if (now >= s.nextReport) {
 				if (s.nextReport && (s.uploads || s.torn)) {
 					logger::info("overlay: in the last 30 s, {} frames from Halo ({} torn copies), {} for this frame's camera;"
-								 " waited for {} frames, {:.1f} ms on average, {} too late; Skyrim's depth {}",
+								 " waited for {} frames, {:.1f} ms on average, {} too late; world layer reprojected {} times"
+								 " ({} from an unknown camera); Skyrim's depth {}",
 						s.uploads, s.torn, s.matched, s.waits, s.waits ? s.waitMs / double(s.waits) : 0.0, s.late,
-						s.reversed < 0 ? "not read yet" : s.reversed ? "reversed" : "standard");
+						s.reprojected, s.unknownCamera, s.reversed < 0 ? "not read yet" : s.reversed ? "reversed" : "standard");
+					if (s.haloTangentY > 0.0f && std::fabs(s.haloTangentY - s.lastLoggedTangent) > 0.001f) {
+						s.lastLoggedTangent = s.haloTangentY;
+						logger::info("overlay: views: Skyrim's {:.4f} x {:.4f}, Halo's {:.4f} x {:.4f} (the world layer is mapped from Halo's to Skyrim's)",
+							s.current.tangentX, s.current.tangentY, s.haloTangentX, s.haloTangentY);
+					}
 				}
-				s.uploads = s.torn = s.waits = s.late = s.matched = 0;
+				s.uploads = s.torn = s.waits = s.late = s.matched = s.reprojected = s.unknownCamera = 0;
 				s.waitMs = 0.0;
 				s.nextReport = now + 30000;
 			}
@@ -591,6 +654,15 @@ float4 PSWorld(VSOut i) : SV_Target
 			out.far_plane = frustum.fFar;
 			link.SendCamera(out);
 			s.cameraPending = out.frame;
+			PublishedCamera kept;
+			kept.frame = out.frame;
+			kept.forward = { out.forward.x, out.forward.y, out.forward.z };
+			kept.up = { out.up.x, out.up.y, out.up.z };
+			kept.right = kept.forward.Cross(kept.up);  // screen right (Z up, right-handed), as Halo's view has it
+			kept.tangentX = 0.5f * std::fabs(frustum.fRight - frustum.fLeft);
+			kept.tangentY = 0.5f * std::fabs(frustum.fTop - frustum.fBottom);
+			s.cameras[out.frame % kCameraRing] = kept;
+			s.current = kept;
 			s.nearPlane = frustum.fNear;
 			s.farPlane = frustum.fFar;
 		}

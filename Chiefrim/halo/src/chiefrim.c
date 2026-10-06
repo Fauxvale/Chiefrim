@@ -119,6 +119,7 @@ static struct
 	uint32_t camera_frame;        /* Skyrim's camera this frame is drawn through (0: Halo's) */
 	uint32_t last_camera_frame;   /* the last one drawn */
 	long render_layer;            /* CHIEFRIM_LAYER_*: what render_window draws now */
+	float tangent_x, tangent_y;   /* the projection of the frame being drawn (0: unknown) */
 } chiefrim;
 
 /* ---------- private code */
@@ -752,6 +753,28 @@ int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsign
 	*height = display.height;
 	*camera_frame = chiefrim.camera_frame;
 	return 1;
+}
+
+void chiefrim_note_projection(real x0, real x1, real y0, real y1)
+{
+	static real logged_x, logged_y;
+
+	chiefrim.tangent_x = 0.5f * (real)fabs(x1 - x0);
+	chiefrim.tangent_y = 0.5f * (real)fabs(y1 - y0);
+	if (chiefrim.camera_frame && (fabs(chiefrim.tangent_x - logged_x) > 0.01f * logged_x + 0.001f ||
+		fabs(chiefrim.tangent_y - logged_y) > 0.01f * logged_y + 0.001f))
+	{
+		logged_x = chiefrim.tangent_x;
+		logged_y = chiefrim.tangent_y;
+		error(_error_silent, "chiefrim: Halo draws through Skyrim's camera with a view %.4f x %.4f (%.1f degrees vertically)",
+			chiefrim.tangent_x, chiefrim.tangent_y, 2.f * RADIANS_TO_DEGREES(atan(chiefrim.tangent_y)));
+	}
+}
+
+void chiefrim_overlay_projection(float *tangent_x, float *tangent_y)
+{
+	*tangent_x = chiefrim.tangent_x;
+	*tangent_y = chiefrim.tangent_y;
 }
 
 long chiefrim_overlay_layer(void)

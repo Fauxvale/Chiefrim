@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 8
+VERSION = 9
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 352 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 48
@@ -36,7 +36,7 @@ FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
 FRAME_BYTES = 3 * FRAME_LAYER_BYTES
 OFF_CAMERA = OFF_DISPLAY + 24
-TOTAL_SIZE = OFF_FRAMES + 160 + FRAME_SLOTS * FRAME_BYTES
+TOTAL_SIZE = OFF_FRAMES + 192 + FRAME_SLOTS * FRAME_BYTES
 
 # offsets (chiefrim_protocol.h)
 SKYRIM_PID, HALO_PID = 16, 20
@@ -304,11 +304,11 @@ def grab_frame(link, directory, index):
     if not latest:
         return False
     slot = latest - 1
-    header = OFF_FRAMES + 32 + 32 * slot
-    seq, width, height, frame, camera_frame, time_us, flags, _ = struct.unpack_from("<8I", link.shm, header)
+    header = OFF_FRAMES + 32 + 48 * slot
+    seq, width, height, frame, camera_frame, time_us, flags, tangent_x, tangent_y = struct.unpack_from("<7I2f", link.shm, header)
     if seq & 1 or not (0 < width <= FRAME_MAX_W and 0 < height <= FRAME_MAX_H):
         return False
-    start = OFF_FRAMES + 160 + slot * FRAME_BYTES
+    start = OFF_FRAMES + 192 + slot * FRAME_BYTES
     pixels = bytes(link.shm[start:start + width * height * 4])
     world = bytes(link.shm[start + FRAME_LAYER_BYTES:start + FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     depth = bytes(link.shm[start + 2 * FRAME_LAYER_BYTES:start + 2 * FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
@@ -323,7 +323,7 @@ def grab_frame(link, directory, index):
             note = (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
                     f"-{max(values) * 213.36:.0f} Skyrim units")
     print(f"fake_skyrim: frame {frame} ({width}x{height}, flags {flags}, camera {camera_frame} of"
-          f" {LAST_CAMERA[0]}{note}) -> {', '.join(saved)}", flush=True)
+          f" {LAST_CAMERA[0]}, tangents {tangent_x:.4f} x {tangent_y:.4f}{note}) -> {', '.join(saved)}", flush=True)
     return True
 
 
