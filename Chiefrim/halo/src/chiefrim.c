@@ -204,6 +204,7 @@ static void chiefrim_apply_world(void)
 		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
+	chiefrim_combat_reset(chiefrim_local_unit()); /* a load, a door: Skyrim's people again, Chief whole */
 	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
 	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
@@ -279,6 +280,11 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_COLLISION_RESET:
 		case CR_MSG_COLLISION_TRIS:
 			chiefrim_world_message(type, buffer);
+			break;
+		case CR_MSG_PLAYER_HURT:
+		case CR_MSG_GIVE_WEAPON:
+			if (chiefrim.world_valid)
+				chiefrim_combat_message(chiefrim_local_unit(), type, buffer, chiefrim.world.origin);
 			break;
 		default:
 			break;
@@ -1098,9 +1104,9 @@ void chiefrim_frame(void)
 		chiefrim.recent_frames++;
 	}
 
-	/* No deaths while Skyrim drives (for now: deaths will follow Skyrim's
-	later). A campaign death waits for a checkpoint revert that Chiefrim
-	never makes, and Chief would never come back. */
+	/* No deaths of Halo's while linked: a campaign death waits for a
+	checkpoint revert that Chiefrim never makes, and Chief would never come
+	back. His body gone, Skyrim's player dies instead (chiefrim_combat.c). */
 	cheat.deathless_player = chiefrim.linked;
 	CR_STORE_REL(&chiefrim.shm->halo_heartbeat, chiefrim_now_ms());
 	chiefrim_watch_skyrim();
@@ -1228,6 +1234,8 @@ void chiefrim_frame(void)
 	}
 
 	chiefrim_debug_collision();
+	if (chiefrim.linked && chiefrim.world_valid)
+		chiefrim_combat_update(chiefrim_local_unit(), chiefrim.world.origin);
 	if (chiefrim.placement_pending && chiefrim_skyrim_drives())
 		chiefrim.placement_pending = FALSE; /* placed every frame where Skyrim's player is */
 	if (chiefrim.placement_pending)
@@ -1260,6 +1268,7 @@ void chiefrim_structure_bsp_loaded(void)
 	it, so the level can spawn Chief at its own starting location; then
 	Chiefrim's collision goes over it and Chief moves. */
 	chiefrim_world_map_loaded();
+	chiefrim_combat_map_loaded();
 	if (chiefrim.world_valid)
 		chiefrim.placement_pending = TRUE;
 }

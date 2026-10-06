@@ -59,6 +59,10 @@ plugin:
 - the camera hooks (`Camera.cpp`);
 - the Havok collision harvesting (`Collision.cpp`): gathering the world's bodies, walking their
   shape trees, primitives as triangles, and the fault guards.
+- the compositor's Present hook and state handling (`Overlay.cpp`), and the depth copy after
+  `Main::RenderWorld`;
+- combat (`Combat.cpp`): the nearby actors, hits through Skyrim's own hit processing, the player's
+  damage refunded and sent on, and the player killed when the other game's dies.
 
 SkyCraft's license:
 

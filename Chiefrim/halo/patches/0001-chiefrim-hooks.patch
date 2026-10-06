@@ -417,7 +417,7 @@ index bcd26cd0..176277d3 100644
  
  boolean render_camera_world_to_screen(
 diff --git a/source/render/render_objects.c b/source/render/render_objects.c
-index dad616be..ef0d96d8 100644
+index dad616be..7a438ac6 100644
 --- a/source/render/render_objects.c
 +++ b/source/render/render_objects.c
 @@ -106,6 +106,7 @@ symbols in this file:
@@ -445,6 +445,16 @@ index dad616be..ef0d96d8 100644
  		{
  			process_rendered_objects(&data);
  		}
+@@ -471,7 +475,8 @@ static void render_object_list(
+ 	{
+ 		struct object_datum *object = object_get(object_index);
+ 
+-		if (!object_is_first_person_camera(object_index) || render.camera.mirrored)
++		if ((!object_is_first_person_camera(object_index) || render.camera.mirrored) &&
++			!chiefrim_object_unseen(object_index)) /* CHIEFRIM: proxies of Skyrim's people are hit, never seen */
+ 		{
+ 			struct render_model_effect model_effect;
+ 
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index 265149a3..76b6189b 100644
 --- a/source/scenario/scenario.c

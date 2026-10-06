@@ -65,6 +65,13 @@ boolean chiefrim_input_look(short gamepad_index, real *yaw, real *pitch);
 boolean chiefrim_input_driving(short gamepad_index);
 boolean chiefrim_input_mark(void); /* the "mark stuck" hotkey, once per press */
 
+/* chiefrim_combat.c (docs §8): proxies for Skyrim's people, damage both ways */
+void chiefrim_combat_map_loaded(void);
+void chiefrim_combat_reset(long chief);                /* a new world */
+void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 origin);
+void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while linked */
+boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
+
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
 void chiefrim_world_initialize(void);
 void chiefrim_world_map_loaded(void);             /* a structure BSP loaded */

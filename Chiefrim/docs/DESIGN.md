@@ -444,6 +444,35 @@ games' frames).
 
 ## 8. Combat
 
+**Built (2026-10-05), to be tried in game** (`halo/src/chiefrim_combat.c`, `skse/src/Combat.cpp`,
+protocol 8):
+
+- Skyrim lists the 48 nearest living actors within ~5300 units each frame (the `actors` slot).
+  Halo keeps a proxy for each: the host map's armoured marine (`characters\marine_armored`, found
+  by name; Chief's own biped if none), scaled to the actor's height, on the Covenant's team (so
+  Chief's hits count in full, the motion tracker shows them, and aim assist works), never drawn
+  (a hook in `render_object_list`: hiding objects Halo's way would also stop collision and splash).
+- A proxy has 100,000 vitality, all body. Each frame, what it lost is divided by its biped's own
+  vitality (shields and body) and sent (`CR_MSG_HIT_ACTOR`); the proxy is refilled. Every weapon,
+  headshot multiplier, melee and splash is Halo's own: 3 s of MA5B fire at 400 units landed 14 hits
+  of 0.10 (offline test).
+- Skyrim applies it level-scaled (§13) through its own hit processing (found by the call the
+  melee handler makes; plain damage otherwise), with a Hunting Bow's impacts, starts combat, and
+  big hits (half a proxy or more) stagger.
+- The player is essential while linked; each frame the health Skyrim took is refunded and sent
+  (`CR_MSG_PLAYER_HURT`, as a fraction of Chief's vitality: damage ÷ `fIncomingReference`, with
+  the attacker's position and the kind from the last hit event). Halo applies it with
+  `object_cause_damage` and a damage effect of the map's: the MA5B's melee for melee, its bullet
+  for arrows and the rest, the plasma rifle's bolt for magic. Shields take it first and recharge
+  as ever; the HUD shows where it came from. Unlike the plan, Skyrim's health stays full rather
+  than following Chief's body: lowered, the essential player would kneel in bleedout.
+- Chief is deathless in Halo while linked; with his body at 0 Skyrim is told
+  (`CR_MSG_PLAYER_DIED`) and kills its player (killer: the last attacker). A new world (the
+  reload) makes him whole and clears the proxies.
+- Debug (§8.4): `[Controls] iGiveWeaponKey` (F9) gives Chief the map's next weapon (`CR_MSG_GIVE_WEAPON`;
+  vehicle guns skipped; b30 has the MA5B, M6D, plasma rifle and pistol, rocket launcher, needler,
+  fuel rod and energy sword; the list is in Halo's log), dropping the one in hand if he has two.
+
 ### 8.1 Skyrim NPCs inside Halo: proxy bipeds
 
 For every Skyrim actor within ~25 wu (about 75 m), Chiefrim spawns a **proxy**: a biped from the
@@ -675,7 +704,7 @@ Each phase ends in something you can play.
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
 | 1 | **Walk Skyrim as Chief** | **Status: done (2026-10-05), verified in game.** Skyrim moves the player and Chief follows (§7, `bSkyrimMoves=1`): Skyrim's own controller walks, jumps, sprints and sneaks on Skyrim's meshes; Chief is placed there each frame and aimed along the camera. Chief's actions are Skyrim's (InputBridge, §7; rebinding carries over): fire, zoom (with the view narrowing), reload, grenade, melee, weapon and grenade switch, flashlight, all verified. The camera is Skyrim's, with Chief's field of view (85, zoom from Halo) and no third-person switch while linked. Halo's collision (§5.2, the runtime BSP builder) is built from Skyrim's Havok shapes for shots and grenades. Unlinking leaves Skyrim fully playable (controls reset as pausing does). The Halo-driven mode (`bSkyrimMoves=0`, CameraDriver §6 and the movement safeguards) stays: it walked, but caught and bounced on Skyrim's meshes. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
-| 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: the world layer is built (2026-10-05), to be tried in game** (§9); proxies, damage both ways and death next. |
+| 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: built (2026-10-05), to be tried in game:** the world layer (§9), proxies, damage both ways, shields, death and the debug weapon key (§8). |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |
 | 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
@@ -684,10 +713,15 @@ Each phase ends in something you can play.
 
 Proposed. Each one needs the user's call before the phase that depends on it.
 
-1. **Damage scaling** (Phase 3): outgoing damage as a fraction of the proxy's vitality × NPC max
-   health × `fDamageMult`. Incoming damage ÷ `fIncomingReference` × Chief's vitality. Both are ini
-   values. (§8)
-2. **Weapon acquisition** (Phase 3): starting loadout + a debug spawn command for v1. (§8.4)
+1. **Damage scaling** (Phase 3): **decided 2026-10-05: level-scaled.** Outgoing: a hit's fraction of
+   the proxy's vitality × the NPC's max health × `fDamageMult`, divided by a toughness that grows
+   with the NPC's level against the player's: `clamp((npcLevel / playerLevel)^fLevelExponent, 0.5,
+   3)` (`fLevelExponent` 0.5: an NPC at four times the player's level takes twice the hits). So a
+   weapon kills a peer in as many hits as it kills the proxy in Halo, and Skyrim's difficulty curve
+   stays. Incoming: Skyrim damage ÷ `fIncomingReference` (250) × Chief's vitality, shields first.
+   All ini values. (§8)
+2. **Weapon acquisition** (Phase 3): **decided 2026-10-05: the starting loadout (b30's: MA5B, M6D,
+   frag grenades) and a debug command** that gives Chief any weapon in the host map. (§8.4)
 3. **Deep water** (Phase 4): walk on the bottom, or hand over to Skyrim's swimming. (§6)
 4. **Host map:** a campaign level, `b30` for now. Final choice from the tag-listing tool's output.
    (§5.3)

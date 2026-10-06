@@ -34,6 +34,7 @@ namespace chiefrim
 		// screen to Halo, and Halo's frames; nullptr while unlinked.
 		void SendDisplay(const cr_display& a_display);
 		void SendCamera(const cr_camera& a_camera);
+		void SendActors(const cr_actors& a_actors);
 		const cr_frames* Frames() const { return shm_ ? &shm_->frames : nullptr; }
 
 	private:

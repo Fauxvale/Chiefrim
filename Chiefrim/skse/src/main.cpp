@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Camera.h"
+#include "Combat.h"
 #include "Input.h"
 #include "Overlay.h"
 #include "Puppet.h"
@@ -28,6 +29,7 @@ namespace
 			chiefrim::Camera::Install();
 			chiefrim::Puppet::Install();
 			chiefrim::Overlay::Install();
+			chiefrim::Combat::Install();
 		}
 	}
 }

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Link.h"
+#include "Combat.h"
 
 namespace chiefrim
 {
@@ -138,6 +139,12 @@ namespace chiefrim
 			case CR_MSG_LOG:
 				logger::info("halo: {}", reinterpret_cast<const cr_msg_log*>(buffer)->text);
 				break;
+			case CR_MSG_HIT_ACTOR:
+				Combat::OnHitActor(*reinterpret_cast<const cr_msg_hit_actor*>(buffer));
+				break;
+			case CR_MSG_PLAYER_DIED:
+				Combat::OnChiefDied();
+				break;
 			default:
 				break;
 			}
@@ -190,6 +197,13 @@ namespace chiefrim
 	{
 		if (shm_) {
 			CR_SLOT_WRITE(&shm_->display, a_display);
+		}
+	}
+
+	void Link::SendActors(const cr_actors& a_actors)
+	{
+		if (shm_) {
+			CR_SLOT_WRITE(&shm_->actors, a_actors);
 		}
 	}
 

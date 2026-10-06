@@ -27,10 +27,11 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 7
+VERSION = 8
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 352 + 2 * (128 + RING_BYTES)
-OFF_FRAMES = OFF_DISPLAY + 96
+OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 48
+OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
 FRAME_BYTES = 3 * FRAME_LAYER_BYTES
@@ -46,6 +47,7 @@ RING_TO_HALO, RING_TO_SKYRIM = 352, 352 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
+MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON = 6, 7, 8, 9
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
 REGION_UNITS = 1024.0
@@ -401,6 +403,15 @@ def main():
     parser.add_argument("--grab", default="",
                         help="with --overlay: save a frame to this directory every --grab-every seconds")
     parser.add_argument("--grab-every", type=float, default=5.0)
+    parser.add_argument("--actor", type=float, default=0.0,
+                        help="Skyrim units: a hostile actor (128 tall) stands this far north of the start; Halo's hits on it are printed")
+    parser.add_argument("--hurt-at", type=float, default=0.0,
+                        help="seconds in: the player is hurt, --hurt-count times a second apart (melee, from the north)")
+    parser.add_argument("--hurt-amount", type=float, default=0.2, help="each hurt, of Chief's whole vitality")
+    parser.add_argument("--hurt-count", type=int, default=3)
+    parser.add_argument("--give-at", type=float, default=0.0,
+                        help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
+    parser.add_argument("--give-count", type=int, default=1)
     parser.add_argument("--speed", type=float, default=300.0,
                         help="with --skyrim-moves: units per second the player walks north (0: stands)")
     parser.add_argument("--pitch", type=float, default=0.0,
@@ -509,6 +520,11 @@ def main():
                     print(f"fake_skyrim: Halo says hello (protocol {version}, pid {pid}, {text(body[8:56])})", flush=True)
                 elif msg_type == MSG_LOG:
                     print(f"halo: {text(body)}", flush=True)
+                elif msg_type == MSG_HIT_ACTOR:
+                    form_id, _, fraction = struct.unpack_from("<IIf", body)
+                    print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy", flush=True)
+                elif msg_type == MSG_PLAYER_DIED:
+                    print("fake_skyrim: Chief died: Skyrim's player would die now", flush=True)
             if (options.recenter_every > 0 and last_position and
                     time.monotonic() - last_recenter >= options.recenter_every):
                 # wherever a build is: the race between a build and a new origin
@@ -564,6 +580,19 @@ def main():
                     print("fake_skyrim: zoom held", flush=True)
                 link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 3) if zooming else 0, 1,
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
+            t = time.monotonic() - started
+            if options.actor:
+                link.slot_write(OFF_ACTORS, struct.pack("<II", frame, 1) +
+                    struct.pack("<II3ffff", 0x0001A2B3, 0x1, options.x, options.y + options.actor, options.z, math.pi, 128.0, 20.0))
+            if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
+                drive_state["hurts"] = drive_state.get("hurts", 0) + 1
+                link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,
+                    options.x, options.y + 300.0, options.z + 60.0, 0, 0))
+                print(f"fake_skyrim: player hurt #{drive_state['hurts']} ({options.hurt_amount:.2f} of Chief)", flush=True)
+            if options.give_at and t >= options.give_at + drive_state.get("gives", 0) and drive_state.get("gives", 0) < options.give_count:
+                drive_state["gives"] = drive_state.get("gives", 0) + 1
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI", -1, 0))
+                print(f"fake_skyrim: give weapon #{drive_state['gives']}", flush=True)
             if display:
                 display[2] += 1
                 link.slot_write(OFF_DISPLAY, struct.pack("<4I", display[0], display[1], 0x1, display[2]))
