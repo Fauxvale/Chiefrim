@@ -240,6 +240,38 @@ static void chiefrim_say_hello(void)
 	cr_ring_push(&chiefrim.shm->to_skyrim, CR_MSG_HELLO, &hello, sizeof(hello));
 }
 
+/* The player's Skyrim keys for Chief's actions (CR_MSG_KEY_NAMES), for
+Halo's prompts: "Press E to swap" in place of its Xbox X. */
+static wchar_t chiefrim_key_names[CR_ACTION_COUNT][CR_KEY_NAME_LENGTH];
+
+static void chiefrim_key_names_set(cr_msg_key_names const *message)
+{
+	long action, i;
+
+	for (action = 0; action < (long)CR_ACTION_COUNT; action++)
+	{
+		for (i = 0; i + 1 < (long)CR_KEY_NAME_LENGTH && message->names[action][i]; i++)
+			chiefrim_key_names[action][i] = (unsigned char)message->names[action][i];
+		chiefrim_key_names[action][i] = 0;
+	}
+}
+
+wchar_t const *chiefrim_control_key_name(long control)
+{
+	/* Halo's controls (player_control.c's control_button) as Chief's actions;
+	start and back (8, 9) aren't Chief's */
+	static long const actions[12] = {
+		CR_ACTION_JUMP, CR_ACTION_SWITCH_GRENADE, CR_ACTION_ACTION, CR_ACTION_SWITCH_WEAPON,
+		CR_ACTION_MELEE, CR_ACTION_FLASHLIGHT, CR_ACTION_GRENADE, CR_ACTION_FIRE,
+		NONE, NONE, CR_ACTION_CROUCH, CR_ACTION_ZOOM
+	};
+	long action;
+
+	if (!chiefrim_active() || control < 0 || control >= 12 || (action = actions[control]) == NONE)
+		return NULL;
+	return chiefrim_key_names[action][0] ? chiefrim_key_names[action] : NULL;
+}
+
 static void chiefrim_pump_events(void)
 {
 	static unsigned long buffer[0x10000 / sizeof(unsigned long)]; /* a full collision message */
@@ -283,6 +315,9 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_COLLISION_RESET:
 		case CR_MSG_COLLISION_TRIS:
 			chiefrim_world_message(type, buffer);
+			break;
+		case CR_MSG_KEY_NAMES:
+			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
 			break;
 		case CR_MSG_PLAYER_HURT:
 		case CR_MSG_GIVE_WEAPON:

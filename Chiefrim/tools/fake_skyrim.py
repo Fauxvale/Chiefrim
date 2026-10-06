@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 11
+VERSION = 12
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -47,7 +47,7 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
-MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON = 6, 7, 8, 9
+MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES = 6, 7, 8, 9, 10
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
 REGION_UNITS = 1024.0
@@ -412,6 +412,9 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--key-names", default="",
+                        help="comma-separated, per CR_ACTION_* (jump,crouch,fire,zoom,reload,grenade,melee,action,...): "
+                             "the keys Halo's prompts show")
     parser.add_argument("--collision-radius", type=int, default=2,
                         help="regions around Chief's that Halo builds its collision from, as the plugin sends it")
     parser.add_argument("--speed", type=float, default=300.0,
@@ -603,6 +606,12 @@ def main():
                 link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,
                     options.x, options.y + 300.0, options.z + 60.0, 0, 0))
                 print(f"fake_skyrim: player hurt #{drive_state['hurts']} ({options.hurt_amount:.2f} of Chief)", flush=True)
+            if options.key_names and not drive_state.get("named"):
+                # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
+                names = options.key_names.split(",") + [""] * 12
+                link.push(RING_TO_HALO, MSG_KEY_NAMES, b"".join(n.encode()[:15].ljust(16, b"\0") for n in names[:12]))
+                drive_state["named"] = True
+                print(f"fake_skyrim: key names {names[:12]}", flush=True)
             if options.give_at and t >= options.give_at + drive_state.get("gives", 0) and drive_state.get("gives", 0) < options.give_count:
                 drive_state["gives"] = drive_state.get("gives", 0) + 1
                 link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI", -1, 0))

@@ -414,6 +414,11 @@ only raw keys are Chiefrim's own two hotkeys.
   and Skyrim gets everything as usual. The plugin publishes neutral input the moment any menu
   opens (PlayerCharacter::Update doesn't run while Skyrim is paused), and Halo treats input older
   than 150 ms as none, so Chief never keeps walking on a stale key.
+- **Halo's prompts name Skyrim's keys** (protocol 12). Twice a second the plugin names the key
+  each of Chief's actions is bound to (Windows' key names; mouse and gamepad buttons by their own
+  names), for the device the player last used, and sends them when they change
+  (`CR_MSG_KEY_NAMES`). hud_messaging.c writes the name where Halo would draw its Xbox button:
+  "Hold E to swap for" (offline, with the fake Skyrim's names).
 
 ### Default mapping (`Chiefrim.ini`, `[Controls]`)
 

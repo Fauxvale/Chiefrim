@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 11u
+#define CR_PROTOCOL_VERSION 12u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -279,6 +279,7 @@ vehicles); docs §10. */
 #define CR_MSG_PLAYER_HURT  0x07u /* S->H: something in Skyrim hurt the player (docs §8.3) */
 #define CR_MSG_PLAYER_DIED  0x08u /* H->S: Chief is dead */
 #define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §8.4) */
+#define CR_MSG_KEY_NAMES    0x0Au /* S->H: the player's keys for Chief's actions, for Halo's prompts (protocol 12) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -354,6 +355,17 @@ typedef struct cr_msg_give_weapon
 	int32_t  index;
 	uint32_t reserved;
 } cr_msg_give_weapon;
+
+/* The names of the keys (or gamepad buttons, as the player last played) that
+do each of Chief's actions in Skyrim, per CR_ACTION_*: Halo's prompts ("Press
+X to swap") show them in place of its Xbox buttons. ASCII, NUL-terminated;
+empty: none bound (Halo's own icon). Sent on linking and when they change. */
+#define CR_KEY_NAME_LENGTH 16u
+typedef struct cr_msg_key_names
+{
+	cr_msg_header header;
+	char names[CR_ACTION_COUNT][CR_KEY_NAME_LENGTH];
+} cr_msg_key_names;
 
 typedef struct cr_msg_hello
 {
@@ -703,6 +715,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
 #define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");
