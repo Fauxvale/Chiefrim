@@ -15,7 +15,8 @@ namespace chiefrim::Lighting
 		} config;
 
 		ULONGLONG next = 0;
-		bool      reported = false;
+		float     reportedLevel = -1.0f;  // the brightness last logged
+		ULONGLONG nextReport = 0;
 
 		cr_vec3 Vec(const RE::NiPoint3& a_point) { return { a_point.x, a_point.y, a_point.z }; }
 		cr_vec3 Color(const RE::NiColor& a_color, float a_scale) { return { a_color.red * a_scale, a_color.green * a_scale, a_color.blue * a_scale }; }
@@ -67,6 +68,8 @@ namespace chiefrim::Lighting
 	void Reset()
 	{
 		next = 0;
+		reportedLevel = -1.0f;
+		nextReport = 0;
 	}
 
 	void Update(RE::PlayerCharacter* a_player)
@@ -108,7 +111,14 @@ namespace chiefrim::Lighting
 		}
 		NearestPoints(runtime, a_player->GetPosition() + RE::NiPoint3{ 0.0f, 0.0f, 100.0f }, message);
 
-		if (Link::Get().PushRaw(CR_MSG_LIGHTING, &message, sizeof(message)) && !std::exchange(reported, true)) {
+		if (!Link::Get().PushRaw(CR_MSG_LIGHTING, &message, sizeof(message))) {
+			return;
+		}
+		// logged at first and when it changes a lot (a door, nightfall, a torch), every 5 s at most
+		const float level = (message.ambient.x + message.ambient.y + message.ambient.z + message.key_color.x + message.key_color.y + message.key_color.z) / 3.0f;
+		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f))) {
+			reportedLevel = level;
+			nextReport = now + 5000;
 			logger::info("lighting: Halo's objects lit by Skyrim's: ambient ({:.2f} {:.2f} {:.2f}), key ({:.2f} {:.2f} {:.2f}) towards ({:.2f} {:.2f} {:.2f}), {} point lights near",
 				message.ambient.x, message.ambient.y, message.ambient.z, message.key_color.x, message.key_color.y, message.key_color.z,
 				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count);

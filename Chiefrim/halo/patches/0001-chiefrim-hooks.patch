@@ -552,7 +552,7 @@ index bcd26cd0..176277d3 100644
  
  boolean render_camera_world_to_screen(
 diff --git a/source/render/render_objects.c b/source/render/render_objects.c
-index dad616be..2bf21eb3 100644
+index dad616be..f12b20d2 100644
 --- a/source/render/render_objects.c
 +++ b/source/render/render_objects.c
 @@ -106,6 +106,7 @@ symbols in this file:
@@ -600,6 +600,16 @@ index dad616be..2bf21eb3 100644
  	{
  		if (level_of_detail_pixels > OBJECT_RENDER_STATE_LARGE_PIXELS)
  		{
+@@ -964,7 +970,8 @@ static void object_render_state_refresh(
+ 		if (velocity.i != 0.f ||
+ 			velocity.j != 0.f ||
+ 			velocity.k != 0.f ||
+-			object_try_and_get_and_verify_type(object_index, _object_mask_machine))
++			object_try_and_get_and_verify_type(object_index, _object_mask_machine) ||
++			chiefrim_active()) /* CHIEFRIM: Skyrim's light changes around objects standing still (out of a door) */
+ 		{
+ 			interpolate_real_rgb_color(
+ 				&lighting->ambient_color,
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index 265149a3..76b6189b 100644
 --- a/source/scenario/scenario.c

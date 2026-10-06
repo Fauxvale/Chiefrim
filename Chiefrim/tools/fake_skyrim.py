@@ -414,6 +414,8 @@ def main():
     parser.add_argument("--give-count", type=int, default=1)
     parser.add_argument("--light", type=float, default=-1.0,
                         help="Skyrim's light for Halo's objects (CR_MSG_LIGHTING): ambient and a sun from above, this bright (0: dark)")
+    parser.add_argument("--light-to", type=float, default=-1.0, help="with --light: this bright from --light-at seconds in")
+    parser.add_argument("--light-at", type=float, default=10.0)
     parser.add_argument("--key-names", default="",
                         help="comma-separated, per CR_ACTION_* (jump,crouch,fire,zoom,reload,grenade,melee,action,...): "
                              "the keys Halo's prompts show")
@@ -610,7 +612,8 @@ def main():
                 print(f"fake_skyrim: player hurt #{drive_state['hurts']} ({options.hurt_amount:.2f} of Chief)", flush=True)
             if options.light >= 0.0 and time.monotonic() >= drive_state.get("next_light", 0.0):
                 drive_state["next_light"] = time.monotonic() + 0.1
-                a, k = 0.3 * options.light, 1.0 * options.light
+                level = options.light_to if options.light_to >= 0.0 and t >= options.light_at else options.light
+                a, k = 0.3 * level, 1.0 * level
                 link.push(RING_TO_HALO, MSG_LIGHTING, struct.pack("<3f3f3f3fI", a, a, a, 0.0, 0.0, 0.0, k, k * 0.95, k * 0.85,
                                                                   0.3, 0.4, -0.866, 0) + bytes(4 * 28))
             if options.key_names and not drive_state.get("named"):

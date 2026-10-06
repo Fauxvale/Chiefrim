@@ -690,8 +690,10 @@ using the camera Skyrim is about to use. It draws three layers:
   from them at its own position (chiefrim_lighting.c): ambient, the key as distant light 0, the
   strongest point light (or the sky's light from above) as distant light 1, the others into the
   ambient; reflections and shadow as Halo derives them from a lightmap. Objects' lighting is
-  refreshed every tick (Halo only refreshed moving objects'), smoothed by Halo's own
-  interpolation. Offline: the MA5B in a 0.05 scene against a 1.0 scene, mean weapon brightness 52
+  refreshed every tick and blended toward it every tick (Halo did both only for moving objects:
+  the first in-game test kept the gun dark a minute after leaving an interior), at Halo's own step
+  (0.03 a tick): dark to daylight in about a second. Offline, standing still: brightness 11, then
+  79 a second after the light changes. Offline: the MA5B in a 0.05 scene against a 1.0 scene, mean weapon brightness 52
   against 79 (its ammo counter glows by itself). `[Lighting] bEnabled`, `fBrightness`, `fPointLights`.
 
 ## 10. Protocol / IPC
