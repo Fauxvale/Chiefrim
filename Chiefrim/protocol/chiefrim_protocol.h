@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 6u
+#define CR_PROTOCOL_VERSION 12u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -87,6 +87,10 @@ typedef struct cr_world_context
 	float    chief_height;  /* Skyrim units: Chief's standing height (collision and eyes
 	                           scale with it). 0: Halo's own */
 	float    chief_radius;  /* Skyrim units: Chief's collision radius. 0: Halo's own */
+	uint32_t collision_radius; /* regions (CR_REGION_UNITS) around Chief's that Halo builds its
+	                              collision from, so shots hit that far; 0: 1. Skyrim sends one
+	                              more around */
+	uint32_t reserved;
 } cr_world_context;
 
 /* Skyrim -> Halo. Chief's controls (docs §7). Skyrim's ControlMap has already
@@ -190,11 +194,56 @@ typedef struct cr_display
 
 #define CR_DISPLAY_OVERLAY 0x0001u /* Skyrim composites Halo's frames: draw them */
 
+/* Skyrim -> Halo. The camera Skyrim is rendering this frame with (docs §9),
+published as its world rendering starts. Halo draws its next frame through
+it, so its world layer sits exactly on Skyrim's picture, and names it in
+the frame (cr_frame_header.camera_frame); Skyrim waits a moment for that
+frame before compositing. Skyrim units. */
+typedef struct cr_camera
+{
+	uint32_t frame;         /* bumps per published camera; 0: none yet */
+	uint32_t flags;         /* reserved */
+	cr_vec3  eye;
+	cr_vec3  forward;
+	cr_vec3  up;
+	float    vertical_fov;  /* radians, as Skyrim renders */
+	float    near_plane;    /* Skyrim's, for the logs */
+	float    far_plane;
+	uint32_t reserved[2];
+} cr_camera;
+
 CR_DECLARE_SLOT(cr_slot_world_context, cr_world_context);
 CR_DECLARE_SLOT(cr_slot_input, cr_input);
 CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
 CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
+/* Skyrim -> Halo. The actors near the player (docs §8.1): Halo keeps an
+unseen, hittable stand-in (a proxy biped) for each. Latest value. */
+#define CR_ACTORS_MAX 48u
+
+typedef struct cr_actor
+{
+	uint32_t form_id;
+	uint32_t flags;         /* CR_ACTOR_* */
+	cr_vec3  position;      /* feet, Skyrim units */
+	float    heading;       /* Skyrim heading (rotZ) */
+	float    height;        /* Skyrim units */
+	float    radius;        /* Skyrim units */
+} cr_actor;
+
+#define CR_ACTOR_HOSTILE   0x0001u /* hostile to the player */
+#define CR_ACTOR_DEAD      0x0002u
+#define CR_ACTOR_ESSENTIAL 0x0004u
+
+typedef struct cr_actors
+{
+	uint32_t frame;
+	uint32_t count;
+	cr_actor actors[CR_ACTORS_MAX];
+} cr_actors;
+
 CR_DECLARE_SLOT(cr_slot_display, cr_display);
+CR_DECLARE_SLOT(cr_slot_actors, cr_actors);
+CR_DECLARE_SLOT(cr_slot_camera, cr_camera);
 
 /* ---- rings (events) ---------------------------------------------------- */
 
@@ -226,6 +275,11 @@ vehicles); docs §10. */
 #define CR_MSG_LOG       0x03u /* H->S: a line for SKSE's log */
 #define CR_MSG_COLLISION_RESET 0x04u /* S->H: forget all collision regions */
 #define CR_MSG_COLLISION_TRIS  0x05u /* S->H: (part of) one region's triangles */
+#define CR_MSG_HIT_ACTOR    0x06u /* H->S: Chief hurt an actor's proxy (docs §8.2) */
+#define CR_MSG_PLAYER_HURT  0x07u /* S->H: something in Skyrim hurt the player (docs §8.3) */
+#define CR_MSG_PLAYER_DIED  0x08u /* H->S: Chief is dead */
+#define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §8.4) */
+#define CR_MSG_KEY_NAMES    0x0Au /* S->H: the player's keys for Chief's actions, for Halo's prompts (protocol 12) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -250,6 +304,68 @@ into a slab, a back would push them down through it. */
 /* The land itself (Skyrim's height field): Halo keeps its heights and puts
 Chief back on top if he ends up under it. */
 #define CR_TRIANGLE_LAND      0x0002u
+
+/* Chief hurt an actor: how much, as a fraction of the proxy's own vitality
+(its biped's, shields and body, unscaled), so a weapon takes as many hits
+as it would on that biped in Halo. Skyrim scales it (docs §13). */
+typedef struct cr_msg_hit_actor
+{
+	cr_msg_header header;
+	uint32_t form_id;
+	uint32_t flags;      /* CR_HIT_* */
+	float    fraction;   /* 1 = what kills the proxy's biped */
+	float    reserved;
+	cr_vec3  blast;      /* CR_HIT_EXPLOSION: the explosion's centre, Skyrim units */
+	uint32_t reserved2;
+} cr_msg_hit_actor;
+
+/* Some of it was an explosion's (a grenade's, a rocket's: Halo's area
+damage): Skyrim throws the actor away from its centre and sets it alight
+(docs §8.2). */
+#define CR_HIT_EXPLOSION 0x0001u
+
+/* Skyrim's damage to the player, which Skyrim has refunded: Halo applies it
+to Chief, shields first. */
+typedef struct cr_msg_player_hurt
+{
+	cr_msg_header header;
+	float    amount;     /* of Chief's whole vitality (shields and body): Skyrim's damage over [Combat] fIncomingReference */
+	uint32_t kind;       /* CR_HURT_* */
+	uint32_t attacker;   /* form id, 0: unknown */
+	cr_vec3  from;       /* where it came from (the attacker), Skyrim units; all 0: unknown */
+	uint32_t reserved[2];
+} cr_msg_player_hurt;
+
+#define CR_HURT_OTHER      0u
+#define CR_HURT_MELEE      1u
+#define CR_HURT_PROJECTILE 2u /* arrows, bolts, thrown */
+#define CR_HURT_MAGIC      3u /* spells, poison, over time */
+
+typedef struct cr_msg_player_died
+{
+	cr_msg_header header;
+	uint32_t reserved[2];
+} cr_msg_player_died;
+
+/* index: of the host map's weapons, as Halo lists them in its log at start
+(wraps); -1: the next after the last given. */
+typedef struct cr_msg_give_weapon
+{
+	cr_msg_header header;
+	int32_t  index;
+	uint32_t reserved;
+} cr_msg_give_weapon;
+
+/* The names of the keys (or gamepad buttons, as the player last played) that
+do each of Chief's actions in Skyrim, per CR_ACTION_*: Halo's prompts ("Press
+X to swap") show them in place of its Xbox buttons. ASCII, NUL-terminated;
+empty: none bound (Halo's own icon). Sent on linking and when they change. */
+#define CR_KEY_NAME_LENGTH 16u
+typedef struct cr_msg_key_names
+{
+	cr_msg_header header;
+	char names[CR_ACTION_COUNT][CR_KEY_NAME_LENGTH];
+} cr_msg_key_names;
 
 typedef struct cr_msg_hello
 {
@@ -297,9 +413,16 @@ typedef struct cr_msg_collision_tris
 
 /* ---- frames (H->S, docs §9) -------------------------------------------- */
 
-/* Halo's picture of what it draws over Skyrim's: Chief's arms and weapon,
-and the HUD, on transparent black. Pixels are RGBA8, premultiplied (draw
-with ONE, INV_SRC_ALPHA), top row first, rows of width * 4 bytes.
+/* Halo's pictures of what it draws over Skyrim's, in two layers:
+- SCREEN: Chief's arms and weapon, and the HUD; over everything.
+- WORLD: projectiles, grenades, effects, decals, objects; with each
+  pixel's view depth (along the camera's forward, Halo world units; huge
+  where nothing was drawn), so Skyrim hides what is behind its own.
+Colours are RGBA8, premultiplied (draw with ONE, INV_SRC_ALPHA), on
+transparent black; depth is float32. Top row first, rows of width
+elements. In a slot: the screen layer at 0, the world layer at
+CR_FRAME_LAYER_BYTES, its depth at 2 * CR_FRAME_LAYER_BYTES; the world
+layer and depth only if the header says CR_FRAME_WORLD.
 
 Halo writes the slots round-robin, each under its own seqlock, and then
 names it the latest. Skyrim copies the latest slot out and checks its seq
@@ -309,7 +432,8 @@ can restart at any time. */
 #define CR_FRAME_SLOTS      3u
 #define CR_FRAME_MAX_WIDTH  2560u /* larger screens get a smaller picture, scaled up */
 #define CR_FRAME_MAX_HEIGHT 1440u
-#define CR_FRAME_BYTES      (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
+#define CR_FRAME_LAYER_BYTES (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
+#define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES)
 
 typedef struct cr_frame_header
 {
@@ -317,13 +441,18 @@ typedef struct cr_frame_header
 	uint32_t width;         /* pixels */
 	uint32_t height;
 	uint32_t frame;         /* Halo's frame count */
-	uint32_t display_frame; /* the cr_display.frame Halo had read */
+	uint32_t camera_frame;  /* the cr_camera.frame drawn through; 0: Halo's own camera */
 	uint32_t time_us;       /* Halo's clock when drawn (wraps) */
 	uint32_t flags;         /* CR_FRAME_* */
-	uint32_t reserved;
+	float    tangent_x;     /* Halo's projection: the view's half-width at distance 1 */
+	float    tangent_y;     /* and its half-height (0: unknown). With the camera of
+	                           camera_frame, Skyrim maps the world layer onto its own
+	                           camera of the moment (it moved since) */
+	uint32_t reserved[3];
 } cr_frame_header;
 
-#define CR_FRAME_VISIBLE 0x0001u /* something to draw: else the picture is all transparent */
+#define CR_FRAME_VISIBLE 0x0001u /* reserved: always set */
+#define CR_FRAME_WORLD   0x0002u /* the world layer has something (else it is all transparent) */
 
 typedef struct cr_frames
 {
@@ -331,7 +460,7 @@ typedef struct cr_frames
 	uint32_t published;     /* frames published (wraps) */
 	uint32_t reserved[6];
 	cr_frame_header slots[CR_FRAME_SLOTS];
-	uint32_t pad[8];        /* pixels start on a 64-byte line */
+	uint32_t pad[4];        /* pixels start on a 64-byte line */
 	uint8_t  pixels[CR_FRAME_SLOTS][CR_FRAME_BYTES];
 } cr_frames;
 
@@ -365,7 +494,9 @@ typedef struct cr_shared
 
 	/* protocol 6: after the rings, so the offsets above stay */
 	cr_slot_display display;              /* S->H */
-	uint32_t reserved2[18];
+	cr_slot_camera  camera;               /* S->H, protocol 7 */
+	cr_slot_actors  actors;               /* S->H, protocol 8 */
+	uint32_t reserved2[10];               /* the frames start on a 64-byte line */
 	cr_frames frames;                     /* H->S */
 } cr_shared;
 
@@ -553,11 +684,11 @@ static inline float cr_halo_yaw_to_sky_heading(float yaw)
 #endif
 
 CR_STATIC_ASSERT(sizeof(cr_vec3) == 12, "cr_vec3");
-CR_STATIC_ASSERT(sizeof(cr_world_context) == 40, "cr_world_context");
+CR_STATIC_ASSERT(sizeof(cr_world_context) == 48, "cr_world_context");
 CR_STATIC_ASSERT(sizeof(cr_input) == 56, "cr_input");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_input, yaw_total) == 40, "cr_input.yaw_total");
 CR_STATIC_ASSERT(sizeof(cr_player_state) == 88, "cr_player_state");
-CR_STATIC_ASSERT(sizeof(cr_slot_world_context) == 48, "cr_slot_world_context");
+CR_STATIC_ASSERT(sizeof(cr_slot_world_context) == 56, "cr_slot_world_context");
 CR_STATIC_ASSERT(sizeof(cr_slot_input) == 64, "cr_slot_input");
 CR_STATIC_ASSERT(sizeof(cr_slot_player_state) == 96, "cr_slot_player_state");
 CR_STATIC_ASSERT(sizeof(cr_skyrim_player) == 72, "cr_skyrim_player");
@@ -572,16 +703,25 @@ CR_STATIC_ASSERT(__builtin_offsetof(cr_msg_collision_tris, tris) == 40, "cr_msg_
 CR_STATIC_ASSERT(CR_COLLISION_TRIS_SIZE(CR_TRIS_PER_MESSAGE) <= 0xFFF8u, "a full collision message fits a ring message");
 CR_STATIC_ASSERT(sizeof(cr_ring) == 128 + CR_RING_BYTES, "cr_ring");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, world_context) == 64, "cr_shared.world_context");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 352, "cr_shared.to_halo");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 360, "cr_shared.to_halo");
 CR_STATIC_ASSERT(sizeof(cr_display) == 16, "cr_display");
 CR_STATIC_ASSERT(sizeof(cr_slot_display) == 24, "cr_slot_display");
-CR_STATIC_ASSERT(sizeof(cr_frame_header) == 32, "cr_frame_header");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 160, "cr_frames.pixels");
-#define CR_OFFSET_DISPLAY (352u + 2u * (128u + CR_RING_BYTES))
+CR_STATIC_ASSERT(sizeof(cr_frame_header) == 48, "cr_frame_header");
+CR_STATIC_ASSERT(sizeof(cr_camera) == 64, "cr_camera");
+CR_STATIC_ASSERT(sizeof(cr_slot_camera) == 72, "cr_slot_camera");
+CR_STATIC_ASSERT(sizeof(cr_actor) == 32, "cr_actor");
+CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 32 * CR_ACTORS_MAX, "cr_slot_actors");
+CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
+CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
+CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
+CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
+#define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u, "cr_shared.frames");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + 1552u + 40u, "cr_shared.frames");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) % 64u == 0, "cr_shared.frames: on a line");
-CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 160u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
+CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 1592u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
 
 #ifdef __cplusplus
 }

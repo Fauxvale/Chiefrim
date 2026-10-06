@@ -6,6 +6,7 @@
 #include "Collision.h"
 
 #include "Link.h"
+#include "Settings.h"
 
 #include <chrono>
 #include <unordered_map>
@@ -17,7 +18,9 @@ namespace chiefrim::Collision
 	{
 		using Clock = std::chrono::steady_clock;
 
-		constexpr int  kRadiusXY = 2;   // regions around the player's: what Halo builds from
+		// regions around the player's: what Halo builds from, and a ring more
+		// (so they're there when he walks on): Settings::CollisionRadius
+		int RadiusXY() { return int(Settings::CollisionRadius()) + 1; }
 		constexpr int  kBelow = 1;
 		constexpr int  kAbove = 1;
 		constexpr auto kFrameBudget = std::chrono::microseconds(2500);
@@ -150,7 +153,18 @@ namespace chiefrim::Collision
 		}
 		inline float Dot(const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-		// What Chief collides with: the world, not actors, projectiles or clutter.
+		// Physics objects (barrels, crates, carts): Halo's shots and grenades hit
+		// them too, but only at rest (they move between Halo's builds, seconds
+		// apart; a near region is harvested again each second, so where one
+		// settles arrives soon) and not the small ones (cups, plates: many
+		// triangles, little to hit).
+		bool Clutter(RE::COL_LAYER a_layer)
+		{
+			return a_layer == RE::COL_LAYER::kClutter || a_layer == RE::COL_LAYER::kDebrisLarge;
+		}
+		constexpr float kSmallestClutter = 24.0f;  // Skyrim units across, at the widest
+
+		// What Chief collides with: the world, not actors or projectiles.
 		bool Included(RE::COL_LAYER a_layer)
 		{
 			switch (a_layer) {
@@ -572,7 +586,7 @@ namespace chiefrim::Collision
 		{
 			s.bodies.clear();
 			const float k = SkyrimPerHavok();
-			auto addIsland = [&](RE::hkpSimulationIsland* a_island) {
+			auto addIsland = [&](RE::hkpSimulationIsland* a_island, bool a_atRest) {
 				if (!a_island) {
 					return;
 				}
@@ -583,7 +597,8 @@ namespace chiefrim::Collision
 						continue;
 					}
 					const auto& collidable = entity->collidable;
-					if (!Included(collidable.GetCollisionLayer())) {
+					const bool  clutter = Clutter(collidable.GetCollisionLayer());
+					if (!Included(collidable.GetCollisionLayer()) && !(clutter && a_atRest)) {
 						continue;
 					}
 					const auto* shape = collidable.shape;
@@ -598,17 +613,20 @@ namespace chiefrim::Collision
 					const auto layer = collidable.GetCollisionLayer();
 					Body body{ shape, xf, {}, {}, layer == RE::COL_LAYER::kTerrain || layer == RE::COL_LAYER::kGround };
 					HkAabbToSky(box, k, body.lo, body.hi);
+					if (clutter && std::max({ body.hi[0] - body.lo[0], body.hi[1] - body.lo[1], body.hi[2] - body.lo[2] }) < kSmallestClutter) {
+						continue;
+					}
 					if (Finite(body.lo, 3) && Finite(body.hi, 3)) {
 						s.bodies.push_back(body);
 					}
 				}
 			};
-			addIsland(a_world->fixedIsland);
+			addIsland(a_world->fixedIsland, true);
 			for (std::int32_t i = 0; i < a_world->activeSimulationIslands.size(); ++i) {
-				addIsland(a_world->activeSimulationIslands.data()[i]);
+				addIsland(a_world->activeSimulationIslands.data()[i], false);  // moving now
 			}
 			for (std::int32_t i = 0; i < a_world->inactiveSimulationIslands.size(); ++i) {
-				addIsland(a_world->inactiveSimulationIslands.data()[i]);
+				addIsland(a_world->inactiveSimulationIslands.data()[i], true);  // asleep: at rest
 			}
 		}
 
@@ -765,8 +783,8 @@ namespace chiefrim::Collision
 	void Update(RE::PlayerCharacter* a_player)
 	{
 		if (s.offsets.empty()) {
-			for (int dx = -kRadiusXY; dx <= kRadiusXY; ++dx) {
-				for (int dy = -kRadiusXY; dy <= kRadiusXY; ++dy) {
+			for (int dx = -RadiusXY(); dx <= RadiusXY(); ++dx) {
+				for (int dy = -RadiusXY(); dy <= RadiusXY(); ++dy) {
 					for (int dz = -kBelow; dz <= kAbove; ++dz) {
 						s.offsets.push_back({ dx, dy, dz });
 					}
@@ -832,7 +850,7 @@ namespace chiefrim::Collision
 		if (s.harvested.size() > s.offsets.size() * 2) {
 			const auto isFar = [&](std::uint64_t a_key) {
 				const auto unpack = [](std::uint64_t v) { return static_cast<int>(static_cast<std::int32_t>(static_cast<std::uint32_t>(v & 0x1FFFFF) << 11) >> 11); };
-				return std::abs(unpack(a_key >> 42) - prx) > kRadiusXY + 2 || std::abs(unpack(a_key >> 21) - pry) > kRadiusXY + 2 ||
+				return std::abs(unpack(a_key >> 42) - prx) > RadiusXY() + 2 || std::abs(unpack(a_key >> 21) - pry) > RadiusXY() + 2 ||
 				       std::abs(unpack(a_key) - prz) > kBelow + 2;
 			};
 			std::erase_if(s.harvested, [&](const auto& a_entry) { return isFar(a_entry.first); });

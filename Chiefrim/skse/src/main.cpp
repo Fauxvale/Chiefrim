@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Camera.h"
+#include "Combat.h"
 #include "Input.h"
 #include "Overlay.h"
 #include "Puppet.h"
@@ -28,6 +29,7 @@ namespace
 			chiefrim::Camera::Install();
 			chiefrim::Puppet::Install();
 			chiefrim::Overlay::Install();
+			chiefrim::Combat::Install();
 		}
 	}
 }
@@ -35,7 +37,7 @@ namespace
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
-	SKSE::AllocTrampoline(1 << 8);  // Camera's call-site hooks
+	SKSE::AllocTrampoline(1 << 9);  // Camera's and Overlay's call-site hooks
 	SetupLog();
 	logger::info("Chiefrim {} loading (runtime {})", "0.0.1", a_skse->RuntimeVersion().string());
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);

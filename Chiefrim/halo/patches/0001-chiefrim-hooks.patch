@@ -1,5 +1,5 @@
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
-index 43c924d2..a8038028 100644
+index 43c924d2..fc48394e 100644
 --- a/port/linux/src/d3d8_gl.c
 +++ b/port/linux/src/d3d8_gl.c
 @@ -25,6 +25,7 @@ Conventions carried over from the Xbox:
@@ -65,17 +65,45 @@ index 43c924d2..a8038028 100644
  	if (flags & D3DCLEAR_TARGET)
  	{
  		/* the Xbox clears the channels named (D3DCLEAR_TARGET_R, _G, _B, _A):
-@@ -3680,6 +3699,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -3579,6 +3598,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+ 		glScissor(x0, y0, target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0,
+ 			target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
+ 		glClear(mask);
++		if (chiefrim_coverage_bound && (mask & GL_COLOR_BUFFER_BIT)) /* CHIEFRIM: the world's depth */
++			chiefrim_overlay_cleared();
+ 		glDisable(GL_SCISSOR_TEST);
+ 		xgpu_gl_state_invalidate();
+ 		return;
+@@ -3673,6 +3694,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+ 	{
+ 		struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
+ 		int window_width, window_height, width, height, x, y;
++		int chiefrim_published; /* CHIEFRIM */
+ 
+ 		if (trace_frame())
+ 			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
+@@ -3680,6 +3702,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		if (screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0)
  			write_screenshot(back_buffer);
  
-+		chiefrim_overlay_present(back_buffer->target.texture, back_buffer->target.gl_width, /* CHIEFRIM */
++		/* CHIEFRIM: published for Skyrim, Halo's window isn't swapped (its vsync would hold up the lockstep) */
++		chiefrim_published = chiefrim_overlay_present(back_buffer->target.texture, back_buffer->target.gl_width,
 +			back_buffer->target.gl_height);
  		platform_video_drawable_size(&window_width, &window_height);
  		/* letterbox to the back buffer's aspect ratio */
  		width = window_width;
+@@ -3700,7 +3725,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+ 		/* row 0 of the render target is the top of the picture */
+ 		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
+ 			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+-		platform_video_swap();
++		if (!chiefrim_published)
++			platform_video_swap();
+ 		xgpu_gl_state_invalidate();
+ 		xgpu_texture_cache_begin_frame();
+ #ifdef HALO_ANDROID
 diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
-index bbea0de6..aa839b27 100644
+index bbea0de6..1b9042af 100644
 --- a/port/linux/src/nv2a_psh.c
 +++ b/port/linux/src/nv2a_psh.c
 @@ -17,6 +17,7 @@ Register values are clamped to [-1, 1] between stages, as on the hardware.
@@ -86,21 +114,29 @@ index bbea0de6..aa839b27 100644
  
  #include <stdio.h>
  #include <stdlib.h>
-@@ -554,6 +555,8 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+@@ -554,6 +555,9 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  		"in float xFog;\n"
  		"layout(location = 0) out vec4 fragment_color;\n"
  		XGPU_PIXEL_UNIFORMS);
 +	if (chiefrim_overlay_enabled()) /* CHIEFRIM: the overlay's coverage (chiefrim_overlay_gl.h) */
-+		xgpu_text_append(&text, "layout(location = 1) out vec4 chiefrim_coverage;\n");
++		xgpu_text_append(&text, "layout(location = 1) out vec4 chiefrim_coverage;\n"
++			"layout(location = 2) out vec4 chiefrim_depth;\n");
  	for (stage = 0; stage < 4; stage++)
  		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
  	xgpu_text_append(&text,
-@@ -659,6 +662,8 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+@@ -659,6 +663,15 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  	if (key->count_samples)
  		xgpu_text_append(&text, "\tatomicCounterIncrement(visible_samples);\n");
  #endif
 +	if (chiefrim_overlay_enabled()) /* CHIEFRIM */
-+		xgpu_text_append(&text, "\tchiefrim_coverage = vec4(1.0, 1.0, 1.0, clamp(result.a, 0.0, 1.0));\n");
++	{
++		/* what the transmittance's blend reads (chiefrim_overlay_gl.c), and
++		the view depth where the draw shows anything */
++		xgpu_text_append(&text, "\tvec4 shown = clamp(result, 0.0, 1.0);\n"
++			"\tchiefrim_coverage = vec4(dot(shown.rgb, vec3(1.0 / 3.0)), 0.0, 0.0, shown.a);\n"
++			"\tchiefrim_depth = vec4(max(max(shown.r, shown.g), max(shown.b, shown.a)) > 0.004 ?\n"
++			"\t\t1.0 / gl_FragCoord.w : 1.0e30);\n");
++	}
  	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
  	return text.buffer;
  }
@@ -179,6 +215,40 @@ index 72798d4b..015440ec 100644
  					}
  				}
  				else
+diff --git a/source/game/players.c b/source/game/players.c
+index a834d481..94d17bf0 100644
+--- a/source/game/players.c
++++ b/source/game/players.c
+@@ -275,6 +275,7 @@ symbols in this file:
+ #include "units/units.h"
+ #include "units/vehicle_definitions.h"
+ #include "units/vehicles.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* network_game_globals.c's */
+ boolean network_game_distributed_client(void);
+@@ -3897,7 +3898,10 @@ void players_update_after_game(
+ 				else if (player->unit_index != NONE)
+ 				{
+ 					unit = unit_get(player->unit_index);
+-					if (!TEST_FLAG(unit->object.damage_flags, _object_die_act_of_god_bit))
++					/* CHIEFRIM: Chief stands where Skyrim's player does, and Skyrim's
++					people's proxies where they do: touching them in a fight isn't
++					a telefrag (it killed him, and the level went back) */
++					if (!chiefrim_active() && !TEST_FLAG(unit->object.damage_flags, _object_die_act_of_god_bit))
+ 					{
+ 						players_show_telefragged(iterator.datum_index);
+ 						player_telefrag_effect_stop(iterator.datum_index);
+@@ -3932,7 +3936,8 @@ void players_update_after_game(
+ 						&scenario->bsp_switch_trigger_volumes,
+ 						bsp_switch_trigger_volume_index,
+ 						struct scenario_bsp_switch_trigger_volume);
+-					if (bsp_switch_trigger_volume->source_structure_bsp_index ==
++					if (!chiefrim_active() && /* CHIEFRIM: Chief is in Skyrim; the level's volumes mean nothing there */
++						bsp_switch_trigger_volume->source_structure_bsp_index ==
+ 						global_structure_bsp_index &&
+ 						scenario_trigger_volume_test_object(
+ 							bsp_switch_trigger_volume->trigger_volume_index,
 diff --git a/source/input/input_abstraction.c b/source/input/input_abstraction.c
 index a9decc9c..f8550cb1 100644
 --- a/source/input/input_abstraction.c
@@ -208,6 +278,35 @@ index a9decc9c..f8550cb1 100644
  	return;
  }
  
+diff --git a/source/interface/hud_messaging.c b/source/interface/hud_messaging.c
+index 1413e765..fcd41f87 100644
+--- a/source/interface/hud_messaging.c
++++ b/source/interface/hud_messaging.c
+@@ -145,6 +145,7 @@ symbols in this file:
+ #include "text/font_group.h"
+ #include "text/text_group.h"
+ #include "text/unicode.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ #include <stddef.h>
+ 
+@@ -1532,7 +1533,16 @@ void hud_messaging_update(
+ 					case _hud_message_type_icon:
+ 						{
+ 							short icon_index = NONE;
++							wchar_t const *chiefrim_key = NULL;
+ 
++							/* CHIEFRIM: the player's Skyrim key, written, for one of Chief's actions */
++							if (element->data >= _icon_action && element->data <= _icon_zoom)
++								chiefrim_key = chiefrim_control_key_name(button_mappings[element->data - _icon_action]);
++							if (chiefrim_key)
++							{
++								render_state_text(&line_bounds, &line_cursor, chiefrim_key, FALSE);
++								break;
++							}
+ 							if (element->data > _icon_right_stick)
+ 							{
+ 								if (element->data <= _icon_look)
 diff --git a/source/interface/interface.c b/source/interface/interface.c
 index 996b8957..da90305b 100644
 --- a/source/interface/interface.c
@@ -232,8 +331,24 @@ index 996b8957..da90305b 100644
  		}
  		else
  		{
+diff --git a/source/items/items.c b/source/items/items.c
+index 3e2c7c0c..e4cc47f6 100644
+--- a/source/items/items.c
++++ b/source/items/items.c
+@@ -678,6 +678,11 @@ boolean item_update(
+ 					switch (collision.type)
+ 					{
+ 					case _collision_result_structure:
++						/* CHIEFRIM: Skyrim's collision has more surfaces than the short
++						holds (400,000 and more): there, the item rests on no surface in
++						particular (only breakable glass needs it, which Skyrim's hasn't) */
++						if (collision.surface_index > 0x7fff)
++							break;
+ 						SET_FLAG(item->item.flags, _item_on_structure_bit, TRUE);
+ 						item->item.rested_surface_index =
+ 							(short)collision.surface_index;
 diff --git a/source/main/main.c b/source/main/main.c
-index e35691e1..a1b87c1a 100644
+index e35691e1..33935254 100644
 --- a/source/main/main.c
 +++ b/source/main/main.c
 @@ -388,6 +388,7 @@ symbols in this file:
@@ -244,7 +359,15 @@ index e35691e1..a1b87c1a 100644
  
  /* ---------- constants */
  
-@@ -3082,6 +3083,7 @@ void main_loop(
+@@ -3026,6 +3027,7 @@ static void main_game_render(
+ 			window->local_player_index = last_local_player_index;
+ 			observer = observer_get_camera(window->local_player_index);
+ 			observer = render_interpolation_camera(window->local_player_index, observer);
++			observer = chiefrim_render_camera(window->local_player_index, observer); /* CHIEFRIM: Skyrim's camera */
+ 		}
+ 		else
+ 		{
+@@ -3082,6 +3084,7 @@ void main_loop(
  	main_globals.switch_to_structure_bsp_index = NONE;
  	main_globals.halt_time_scale = TRUE;
  
@@ -252,7 +375,7 @@ index e35691e1..a1b87c1a 100644
  	console_initialize();
  	debug_keys_initialize();
  	game_initialize();
-@@ -3266,6 +3268,7 @@ void main_loop(
+@@ -3266,6 +3269,7 @@ void main_loop(
  					collision_log_continue_period(1);
  					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
@@ -260,19 +383,41 @@ index e35691e1..a1b87c1a 100644
  					collision_log_end_period();
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
+diff --git a/source/objects/damage.c b/source/objects/damage.c
+index 5f00c31c..16053cde 100644
+--- a/source/objects/damage.c
++++ b/source/objects/damage.c
+@@ -131,6 +131,7 @@ symbols in this file:
+ #include "rasterizer/rasterizer.h"
+ #include "render/render.h"
+ #include "scenario/scenario.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ #include "tag_files/tag_files.h"
+ #include "text/draw_string.h"
+ #include "units/unit_definitions.h"
+@@ -2482,6 +2483,8 @@ static void area_of_effect_cause_damage_to_object(
+ 
+ 		if (scale > 0.f)
+ 		{
++			if (chiefrim_active()) /* CHIEFRIM: an explosion's hit on a Skyrim actor's proxy */
++				chiefrim_note_area_damage(object_index, &damage->epicenter);
+ 			object_cause_damage(
+ 				damage,
+ 				object_index,
 diff --git a/source/render/render.c b/source/render/render.c
-index 68a746c2..eb2d26c1 100644
+index 68a746c2..24b5171a 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
-@@ -87,6 +87,7 @@ symbols in this file:
+@@ -87,6 +87,8 @@ symbols in this file:
  #include "effects/weather_particle_systems.h"
  #include "main/main.h"
  #include "structures/structures.h"
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
++void render_frustum_get_projection_bounds(struct render_frustum const *frustum, real_rectangle2d *bounds); /* CHIEFRIM: render_cameras.c's */
  
  /* ---------- constants */
  
-@@ -310,6 +311,9 @@ static void render_window(
+@@ -310,6 +312,9 @@ static void render_window(
  {
  	struct rasterizer_window_begin_parameters parameters;
  	short rendered_cluster_index;
@@ -282,17 +427,61 @@ index 68a746c2..eb2d26c1 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -329,7 +333,22 @@ static void render_window(
+@@ -323,13 +328,67 @@ static void render_window(
+ 	parameters.rasterizer_target = rasterizer_target;
+ 	parameters.has_mirror = has_mirror;
+ 	parameters.window_index = render.window_index;
++	if (overlay) /* CHIEFRIM: the host map's fog isn't Skyrim's air */
++		memset(&render.fog, 0, sizeof(render.fog));
+ 	parameters.fog = render.fog;
+ 
+ 	structure_visibility_compute();
  	player_effect_get_screen_flash(local_player_index, &parameters.screen_flash);
  	rasterizer_window_begin(&parameters);
  
 -	if (!bink_playback_in_progress())
-+	if (!bink_playback_in_progress() && overlay) /* CHIEFRIM */
++	if (!bink_playback_in_progress() && overlay) /* CHIEFRIM: two layers (docs §9) */
 +	{
++		/* the world layer: objects (not the first-person weapon), decals,
++		effects, with their depth for Skyrim to hide what's behind its own */
++		chiefrim_set_render_layer(CHIEFRIM_LAYER_WORLD);
++		if (render.frustum.projection_valid) /* the view, for Skyrim to reproject the world layer */
++		{
++			real_rectangle2d bounds;
++
++			render_frustum_get_projection_bounds(&render.frustum, &bounds);
++			chiefrim_note_projection(bounds.x0, bounds.x1, bounds.y0, bounds.y1);
++		}
++		else
++		{
++			chiefrim_note_projection(0.f, 0.f, 0.f, 0.f);
++		}
 +		build_sprite_prepare_for_window();
 +		first_person_weapon_render_update();
 +		lights_preprocess_scene();
-+		render_objects(); /* only the first-person weapon (render_objects.c) */
++		render_objects();
++		for (rendered_cluster_index = 0; rendered_cluster_index < 4; rendered_cluster_index++)
++		{
++			static short const layers[4] = { _decal_layer_light, _decal_layer_alpha_tested,
++				_decal_layer_primary, _decal_layer_secondary };
++			short cluster;
++
++			rasterizer_decals_begin(layers[rendered_cluster_index]);
++			for (cluster = 0; cluster < render.rendered_cluster_count; cluster++)
++				rasterizer_decals_draw(rendered_cluster_get(cluster)->cluster_index);
++			rasterizer_decals_end();
++		}
++		render_particles();
++		particle_systems_render();
++		render_contrails_normal();
++		rasterizer_transparent_geometry_draw(TRUE);
++		rasterizer_transparent_geometry_draw(FALSE);
++		rasterizer_transparent_geometry_stop();
++		chiefrim_overlay_world_done();
++
++		/* the screen layer: the first-person weapon and the HUD, over all */
++		chiefrim_set_render_layer(CHIEFRIM_LAYER_SCREEN);
++		render_objects();
 +		rasterizer_transparent_geometry_draw(TRUE);
 +		rasterizer_transparent_geometry_draw(FALSE);
 +		rasterizer_transparent_geometry_stop();
@@ -301,12 +490,13 @@ index 68a746c2..eb2d26c1 100644
 +		halo_screen_ui_offset(TRUE);
 +		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 +		halo_screen_ui_offset(FALSE);
++		chiefrim_set_render_layer(CHIEFRIM_LAYER_ALL);
 +	}
 +	else if (!bink_playback_in_progress())
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -528,7 +547,7 @@ static void render_player_frame(
+@@ -528,7 +587,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  
@@ -339,7 +529,7 @@ index bcd26cd0..176277d3 100644
  
  boolean render_camera_world_to_screen(
 diff --git a/source/render/render_objects.c b/source/render/render_objects.c
-index dad616be..4257955b 100644
+index dad616be..7a438ac6 100644
 --- a/source/render/render_objects.c
 +++ b/source/render/render_objects.c
 @@ -106,6 +106,7 @@ symbols in this file:
@@ -350,15 +540,33 @@ index dad616be..4257955b 100644
  #include "camera/director.h"
  #include "cutscene/cinematics.h"
  #include "tag_files/tag_files.h"
-@@ -356,7 +357,7 @@ void render_objects(
+@@ -352,11 +353,14 @@ void render_objects(
+ 
+ 	do
+ 	{
++		/* CHIEFRIM: in overlay mode, the world layer has the objects and the
++		screen layer the first-person weapon (render.c, docs §9) */
+ 		if (first_person_pass != rasterizer_debug_options.draw_first_person_weapon_first)
  		{
- 			first_person_weapon_draw();
+-			first_person_weapon_draw();
++			if (chiefrim_overlay_layer() != CHIEFRIM_LAYER_WORLD)
++				first_person_weapon_draw();
  		}
 -		else
-+		else if (!chiefrim_overlay_wanted()) /* CHIEFRIM: Skyrim draws the world (docs §9) */
++		else if (chiefrim_overlay_layer() != CHIEFRIM_LAYER_SCREEN)
  		{
  			process_rendered_objects(&data);
  		}
+@@ -471,7 +475,8 @@ static void render_object_list(
+ 	{
+ 		struct object_datum *object = object_get(object_index);
+ 
+-		if (!object_is_first_person_camera(object_index) || render.camera.mirrored)
++		if ((!object_is_first_person_camera(object_index) || render.camera.mirrored) &&
++			!chiefrim_object_unseen(object_index)) /* CHIEFRIM: proxies of Skyrim's people are hit, never seen */
+ 		{
+ 			struct render_model_effect model_effect;
+ 
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index 265149a3..76b6189b 100644
 --- a/source/scenario/scenario.c

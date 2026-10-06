@@ -57,8 +57,15 @@ and builds are shared with the worker, so they use the C library's. */
 /* ---------- constants */
 
 #define REGION_SLOTS         4096     /* power of two */
-#define BUILD_RADIUS_XY      1        /* regions around Chief's, in a build: at least 1024 units ahead of him */
+/* regions around Chief's in a build (Skyrim's [Collision] iRadius): shots hit
+at least that many regions' worth (1024 units each) ahead of him */
+static long build_radius_xy = 1;
+#define BUILD_RADIUS_XY      build_radius_xy
 #define BUILD_RADIUS_Z       1
+/* a build's most triangles: rings of regions further out than Chief's and
+the 8 around it are left out where they'd go over (dense towns at a larger
+radius): Halo is a 32-bit process, and builds run seconds already */
+#define BUILD_TRIANGLE_BUDGET 600000
 #define EVICT_RADIUS         5        /* regions further away are dropped */
 #define BUILD_INTERVAL_MS    250
 #define SUPPORT_PROBE_ABOVE  0.1f /* world units: a biped's ground, from just above its feet... */
@@ -665,10 +672,19 @@ static boolean chiefrim_world_install_floor(void)
 }
 
 /* Collects the complete regions around Chief and hands them to the worker. */
+static long chiefrim_region_ring(struct region const *region, long cx, long cy)
+{
+	long dx = labs(region->rx - cx), dy = labs(region->ry - cy);
+
+	return dx > dy ? dx : dy;
+}
+
 static void chiefrim_world_start_build(long cx, long cy, long cz)
 {
 #ifdef __linux__
-	long count = 0, i, n;
+	static long last_radius = -1;
+	long count = 0, i, n, radius;
+	long ring_totals[EVICT_RADIUS + 1] = { 0 };
 	struct chiefrim_triangle *triangles;
 
 	for (i = 0; i < REGION_SLOTS; i++)
@@ -679,8 +695,23 @@ static void chiefrim_world_start_build(long cx, long cy, long cz)
 			labs(region->rx - cx) <= BUILD_RADIUS_XY && labs(region->ry - cy) <= BUILD_RADIUS_XY &&
 			labs(region->rz - cz) <= BUILD_RADIUS_Z)
 		{
-			count += (long)region->total;
+			ring_totals[chiefrim_region_ring(region, cx, cy)] += (long)region->total;
 		}
+	}
+	/* whole rings outward, while within the budget (the nearest two always) */
+	for (radius = 0; radius <= BUILD_RADIUS_XY; radius++)
+	{
+		if (radius > 1 && count + ring_totals[radius] > BUILD_TRIANGLE_BUDGET)
+			break;
+		count += ring_totals[radius];
+	}
+	radius--;
+	if (radius != last_radius)
+	{
+		if (radius < BUILD_RADIUS_XY)
+			error(_error_silent, "chiefrim: a dense place: collision from %ld x %ld regions around Chief, not %ld x %ld (%ld triangles at most)",
+				2 * radius + 1, 2 * radius + 1, 2 * BUILD_RADIUS_XY + 1, 2 * BUILD_RADIUS_XY + 1, (long)BUILD_TRIANGLE_BUDGET);
+		last_radius = radius;
 	}
 	if (count == 0)
 		return;
@@ -694,7 +725,7 @@ static void chiefrim_world_start_build(long cx, long cy, long cz)
 		unsigned long t;
 
 		if (!(region->used && region->complete && region->epoch == world.epoch &&
-			labs(region->rx - cx) <= BUILD_RADIUS_XY && labs(region->ry - cy) <= BUILD_RADIUS_XY &&
+			chiefrim_region_ring(region, cx, cy) <= radius &&
 			labs(region->rz - cz) <= BUILD_RADIUS_Z))
 		{
 			continue;
@@ -1087,6 +1118,20 @@ boolean chiefrim_world_room_for(real_point3d const *feet, real height)
 		return TRUE;
 	centre.z += MAX(height * 0.55f, radius + 0.1f);
 	return !collision_bsp_test_sphere(&world.current->bsp, 0, NULL, &centre, radius, sphere);
+}
+
+void chiefrim_world_build_radius(unsigned long radius)
+{
+	long wanted = radius ? (long)radius : 1;
+
+	if (wanted > EVICT_RADIUS - 2)
+		wanted = EVICT_RADIUS - 2;
+	if (wanted != build_radius_xy)
+	{
+		build_radius_xy = wanted;
+		error(_error_silent, "chiefrim: collision from %ld x %ld regions around Chief: shots hit %ld units ahead and more",
+			2 * wanted + 1, 2 * wanted + 1, (long)(wanted * CR_REGION_UNITS));
+	}
 }
 
 void chiefrim_world_generation(unsigned long generation)

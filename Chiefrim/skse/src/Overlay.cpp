@@ -17,36 +17,86 @@ namespace chiefrim::Overlay
 		using PresentFn = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
 		PresentFn originalPresent = nullptr;
 
+		// One of Halo's pictures, as a texture.
+		struct Layer
+		{
+			ID3D11Texture2D*          texture = nullptr;
+			ID3D11ShaderResourceView* srv = nullptr;
+			UINT                      width = 0, height = 0;
+		};
+
+		struct alignas(16) Params
+		{
+			float depth[4];       // Skyrim's near, far, 1 if its depth is reversed, Skyrim units per Halo world unit
+			float now[4][4];      // Skyrim's camera now: forward, up, right (xyz), and its tangents (x, y)
+			float halo[4][4];     // the camera Halo's frame was drawn through, and Halo's tangents
+		};
+
+		// A camera Skyrim published, for mapping Halo's frame onto the camera
+		// of the moment (Halo's frames are a frame or two behind).
+		struct PublishedCamera
+		{
+			std::uint32_t frame = 0;
+			RE::NiPoint3  forward, up, right;
+			float         tangentX = 0.0f, tangentY = 0.0f;
+		};
+		constexpr std::uint32_t kCameraRing = 64;
+
 		struct
 		{
 			ID3D11Device*             device = nullptr;
 			ID3D11DeviceContext*      context = nullptr;
-			ID3D11Texture2D*          texture = nullptr;
-			ID3D11ShaderResourceView* srv = nullptr;
-			UINT                      textureWidth = 0, textureHeight = 0;
+			Layer                     screen, world, worldDepth;
 			ID3D11VertexShader*       vs = nullptr;
-			ID3D11PixelShader*        ps = nullptr;
+			ID3D11PixelShader*        screenPs = nullptr;
+			ID3D11PixelShader*        worldPs = nullptr;
 			ID3D11BlendState*         blend = nullptr;
-			ID3D11SamplerState*       sampler = nullptr;
+			ID3D11SamplerState*       linear = nullptr;
+			ID3D11SamplerState*       point = nullptr;
 			ID3D11RasterizerState*    raster = nullptr;
 			ID3D11DepthStencilState*  depth = nullptr;
+			ID3D11Buffer*             params = nullptr;
 			bool                      initFailed = false;
 
+			// Skyrim's depth, copied as its world rendering finishes
+			ID3D11Texture2D*          depthCopy = nullptr;
+			ID3D11ShaderResourceView* depthCopySrv = nullptr;
+			bool                      depthCopied = false;  // this frame
+			float                     nearPlane = 15.0f, farPlane = 353840.0f;
+			int                       reversed = -1;         // unknown until a look at the depth
+			std::uint32_t             depthCopies = 0;
+
+			PublishedCamera cameras[kCameraRing];
+			PublishedCamera current;           // this frame's
+			std::uint32_t   haloCamera = 0;    // the camera of Halo's frame in the textures
+			float           haloTangentX = 0.0f, haloTangentY = 0.0f;
+			std::uint64_t   reprojected = 0, unknownCamera = 0;
+			float           lastLoggedTangent = 0.0f;
+
 			std::uint32_t displayFrame = 0;
-			std::uint32_t lastFrame = 0;      // Halo's frame count in the texture
+			std::uint32_t cameraFrame = 0;    // the last camera published to Halo
+			std::uint32_t cameraPending = 0;  // published this frame: wait for Halo's frame of it
+			std::uint32_t lastFrame = 0;      // Halo's frame count in the textures
 			bool          haveFrame = false;
+			bool          worldShown = false; // the world layer in the textures has something
 			std::uint32_t lastPublished = 0;
 			ULONGLONG     lastPublishedAt = 0;
-			std::uint64_t uploads = 0, torn = 0;
+			std::uint64_t uploads = 0, torn = 0, waits = 0, late = 0, matched = 0;
+			double        waitMs = 0.0;
 			ULONGLONG     nextReport = 0;
 			bool          shown = false;
 		} s;
 
-		// A full-screen triangle; the picture is premultiplied, scaled to the
-		// back buffer if Halo's is smaller (screens over CR_FRAME_MAX_*).
+		// Full-screen triangles. Halo's pictures are premultiplied, scaled to
+		// the back buffer if Halo's are smaller (screens over CR_FRAME_MAX_*).
+		// The world layer's pixels behind Skyrim's own are dropped.
 		constexpr char kShader[] = R"(
+cbuffer Params : register(b0) { float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4]; };
 Texture2D picture : register(t0);
+Texture2D<float> haloDepth : register(t1);
+Texture2D<float> skyrimDepth : register(t2);
 SamplerState linear_clamp : register(s0);
+SamplerState point_clamp : register(s1);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID)
 {
@@ -56,15 +106,68 @@ VSOut VSMain(uint id : SV_VertexID)
 	o.uv = uv;
 	return o;
 }
-float4 PSMain(VSOut i) : SV_Target
+float4 PSScreen(VSOut i) : SV_Target
 {
 	return picture.Sample(linear_clamp, i.uv);
 }
+// Skyrim's view distance (along the view, Skyrim units) from its depth buffer.
+float SkyrimViewDepth(float d)
+{
+	float n = depthParams.x, f = depthParams.y;
+	return depthParams.z > 0.5 ? n * f / (n + d * (f - n)) : n * f / (f - d * (f - n));
+}
+// The world layer was drawn through an older camera (haloBasis: forward, up,
+// right, tangents); this pixel's view ray, from the camera of the moment
+// (nowBasis), is where in Halo's picture to look. Exact for turning; walking
+// leaves a parallax of a frame's step.
+float4 PSWorld(VSOut i) : SV_Target
+{
+	float2 ndc = float2(i.uv.x * 2 - 1, 1 - i.uv.y * 2);
+	float3 ray = nowBasis[0].xyz + ndc.x * nowBasis[3].x * nowBasis[2].xyz + ndc.y * nowBasis[3].y * nowBasis[1].xyz;
+	float  ahead = dot(ray, haloBasis[0].xyz);
+	if (ahead <= 1e-4)
+		discard;
+	float2 h = float2(dot(ray, haloBasis[2].xyz), dot(ray, haloBasis[1].xyz)) / ahead / haloBasis[3].xy;
+	if (any(abs(h) > 1))
+		discard;
+	float2 uv = float2(h.x * 0.5 + 0.5, 0.5 - h.y * 0.5);
+	float4 c = picture.Sample(linear_clamp, uv);
+	if (all(c == 0))
+		discard;
+	// Halo's depth is along its forward; along this camera's: the same point
+	float halo = haloDepth.SampleLevel(point_clamp, uv, 0) * depthParams.w / ahead;
+	float skyrim = SkyrimViewDepth(skyrimDepth.SampleLevel(point_clamp, i.uv, 0));
+	// a little slack: Halo's decals lie on Skyrim's own surfaces
+	if (halo > skyrim * 1.003 + 4.0)
+		discard;
+	return c;
+}
 )";
+
+		void PutBasis(float (&a_out)[4][4], const PublishedCamera& a_camera, float a_tangentX, float a_tangentY)
+		{
+			const RE::NiPoint3* axes[3]{ &a_camera.forward, &a_camera.up, &a_camera.right };
+			for (int i = 0; i < 3; ++i) {
+				a_out[i][0] = axes[i]->x;
+				a_out[i][1] = axes[i]->y;
+				a_out[i][2] = axes[i]->z;
+				a_out[i][3] = 0.0f;
+			}
+			a_out[3][0] = a_tangentX;
+			a_out[3][1] = a_tangentY;
+			a_out[3][2] = a_out[3][3] = 0.0f;
+		}
 
 		bool Enabled()
 		{
 			static const bool value = Settings::ReadBool(L"Overlay", L"bEnabled", true);
+			return value;
+		}
+
+		// How long Present waits for Halo's frame of this frame's camera.
+		double WaitLimitMs()
+		{
+			static const double value = std::clamp(Settings::ReadFloat(L"Overlay", L"fWaitMs", 0.0f), 0.0f, 50.0f);
 			return value;
 		}
 
@@ -75,6 +178,14 @@ float4 PSMain(VSOut i) : SV_Target
 				a_ptr->Release();
 				a_ptr = nullptr;
 			}
+		}
+
+		double NowMs()
+		{
+			LARGE_INTEGER now{}, frequency{};
+			::QueryPerformanceCounter(&now);
+			::QueryPerformanceFrequency(&frequency);
+			return double(now.QuadPart) * 1000.0 / double(frequency.QuadPart);
 		}
 
 		bool Compile(const char* a_entry, const char* a_target, ID3DBlob** a_out)
@@ -90,27 +201,33 @@ float4 PSMain(VSOut i) : SV_Target
 			return SUCCEEDED(hr);
 		}
 
-		bool InitResources(IDXGISwapChain* a_swapChain)
+		bool InitResources(ID3D11Device* a_device)
 		{
 			if (s.device) {
 				return true;
 			}
-			if (s.initFailed || FAILED(a_swapChain->GetDevice(__uuidof(ID3D11Device), reinterpret_cast<void**>(&s.device)))) {
+			if (s.initFailed || !a_device) {
 				s.initFailed = true;
 				return false;
 			}
+			s.device = a_device;
+			s.device->AddRef();
 			s.device->GetImmediateContext(&s.context);
 
-			ID3DBlob *vsBlob = nullptr, *psBlob = nullptr;
-			if (!Compile("VSMain", "vs_5_0", &vsBlob) || !Compile("PSMain", "ps_5_0", &psBlob)) {
+			ID3DBlob *vsBlob = nullptr, *screenBlob = nullptr, *worldBlob = nullptr;
+			if (!Compile("VSMain", "vs_5_0", &vsBlob) || !Compile("PSScreen", "ps_5_0", &screenBlob) ||
+				!Compile("PSWorld", "ps_5_0", &worldBlob)) {
 				SafeRelease(vsBlob);
+				SafeRelease(screenBlob);
 				s.initFailed = true;
 				return false;
 			}
 			s.device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &s.vs);
-			s.device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &s.ps);
+			s.device->CreatePixelShader(screenBlob->GetBufferPointer(), screenBlob->GetBufferSize(), nullptr, &s.screenPs);
+			s.device->CreatePixelShader(worldBlob->GetBufferPointer(), worldBlob->GetBufferSize(), nullptr, &s.worldPs);
 			SafeRelease(vsBlob);
-			SafeRelease(psBlob);
+			SafeRelease(screenBlob);
+			SafeRelease(worldBlob);
 
 			D3D11_BLEND_DESC bd{};
 			bd.RenderTarget[0].BlendEnable = TRUE;
@@ -127,7 +244,9 @@ float4 PSMain(VSOut i) : SV_Target
 			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
 			sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 			sd.MaxLOD = D3D11_FLOAT32_MAX;
-			s.device->CreateSamplerState(&sd, &s.sampler);
+			s.device->CreateSamplerState(&sd, &s.linear);
+			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+			s.device->CreateSamplerState(&sd, &s.point);
 
 			D3D11_RASTERIZER_DESC rd{};
 			rd.FillMode = D3D11_FILL_SOLID;
@@ -140,42 +259,67 @@ float4 PSMain(VSOut i) : SV_Target
 			dd.StencilEnable = FALSE;
 			s.device->CreateDepthStencilState(&dd, &s.depth);
 
-			const bool ok = s.vs && s.ps && s.blend && s.sampler && s.raster && s.depth;
+			D3D11_BUFFER_DESC cbd{};
+			cbd.ByteWidth = sizeof(Params);
+			cbd.Usage = D3D11_USAGE_DYNAMIC;
+			cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+			s.device->CreateBuffer(&cbd, nullptr, &s.params);
+
+			const bool ok = s.vs && s.screenPs && s.worldPs && s.blend && s.linear && s.point && s.raster && s.depth && s.params;
 			logger::info("overlay: compositor {}", ok ? "ready" : "failed to initialize");
 			s.initFailed = !ok;
 			return ok;
 		}
 
-		bool EnsureTexture(UINT a_width, UINT a_height)
+		bool EnsureLayer(Layer& a_layer, UINT a_width, UINT a_height, DXGI_FORMAT a_format, const char* a_what)
 		{
-			if (s.texture && s.textureWidth == a_width && s.textureHeight == a_height) {
+			if (a_layer.texture && a_layer.width == a_width && a_layer.height == a_height) {
 				return true;
 			}
-			SafeRelease(s.srv);
-			SafeRelease(s.texture);
+			SafeRelease(a_layer.srv);
+			SafeRelease(a_layer.texture);
 			D3D11_TEXTURE2D_DESC td{};
 			td.Width = a_width;
 			td.Height = a_height;
 			td.MipLevels = 1;
 			td.ArraySize = 1;
-			td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			td.Format = a_format;
 			td.SampleDesc.Count = 1;
 			td.Usage = D3D11_USAGE_DYNAMIC;
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 			td.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-			if (FAILED(s.device->CreateTexture2D(&td, nullptr, &s.texture)) ||
-				FAILED(s.device->CreateShaderResourceView(s.texture, nullptr, &s.srv))) {
-				logger::error("overlay: a {}x{} texture can't be made", a_width, a_height);
-				SafeRelease(s.texture);
+			if (FAILED(s.device->CreateTexture2D(&td, nullptr, &a_layer.texture)) ||
+				FAILED(s.device->CreateShaderResourceView(a_layer.texture, nullptr, &a_layer.srv))) {
+				logger::error("overlay: a {}x{} texture for the {} can't be made", a_width, a_height, a_what);
+				SafeRelease(a_layer.texture);
 				return false;
 			}
-			s.textureWidth = a_width;
-			s.textureHeight = a_height;
-			logger::info("overlay: Halo's frames are {}x{}", a_width, a_height);
+			a_layer.width = a_width;
+			a_layer.height = a_height;
+			logger::info("overlay: Halo's {} is {}x{}", a_what, a_width, a_height);
 			return true;
 		}
 
-		// Halo's newest frame into the texture, if there's a new one. Halo
+		bool Upload(Layer& a_layer, const std::uint8_t* a_source, UINT a_height, std::size_t a_rowBytes)
+		{
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (FAILED(s.context->Map(a_layer.texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+				return false;
+			}
+			auto* destination = static_cast<std::uint8_t*>(mapped.pData);
+			if (mapped.RowPitch == a_rowBytes) {
+				std::memcpy(destination, a_source, a_rowBytes * a_height);
+			} else {
+				for (UINT y = 0; y < a_height; ++y) {
+					std::memcpy(destination + std::size_t(y) * mapped.RowPitch, a_source + std::size_t(y) * a_rowBytes, a_rowBytes);
+				}
+			}
+			s.context->Unmap(a_layer.texture, 0);
+			return true;
+		}
+
+		// Halo's newest frame into the textures, if there's a new one. Halo
 		// writes the slots round-robin under seqlocks: a slot that changed
 		// during the copy is torn (a frame half-old, half three newer) and
 		// copied again next time.
@@ -190,25 +334,22 @@ float4 PSMain(VSOut i) : SV_Target
 			const auto  frame = header.frame;
 			const auto  width = header.width;
 			const auto  height = header.height;
+			const auto  flags = header.flags;
+			const auto  cameraFrame = header.camera_frame;
 			if ((seq & 1) || (s.haveFrame && frame == s.lastFrame) || width == 0 || height == 0 ||
-				width > CR_FRAME_MAX_WIDTH || height > CR_FRAME_MAX_HEIGHT || !EnsureTexture(width, height)) {
+				width > CR_FRAME_MAX_WIDTH || height > CR_FRAME_MAX_HEIGHT ||
+				!EnsureLayer(s.screen, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, "screen layer")) {
 				return;
 			}
-			D3D11_MAPPED_SUBRESOURCE mapped{};
-			if (FAILED(s.context->Map(s.texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+			const auto* pixels = a_frames->pixels[latest - 1];
+			if (!Upload(s.screen, pixels, height, std::size_t(width) * 4)) {
 				return;
 			}
-			const auto* source = a_frames->pixels[latest - 1];
-			const auto  rowBytes = std::size_t(width) * 4;
-			auto*       destination = static_cast<std::uint8_t*>(mapped.pData);
-			if (mapped.RowPitch == rowBytes) {
-				std::memcpy(destination, source, rowBytes * height);
-			} else {
-				for (UINT y = 0; y < height; ++y) {
-					std::memcpy(destination + std::size_t(y) * mapped.RowPitch, source + std::size_t(y) * rowBytes, rowBytes);
-				}
-			}
-			s.context->Unmap(s.texture, 0);
+			const bool world = (flags & CR_FRAME_WORLD) &&
+			                   EnsureLayer(s.world, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, "world layer") &&
+			                   EnsureLayer(s.worldDepth, width, height, DXGI_FORMAT_R32_FLOAT, "world layer's depth") &&
+			                   Upload(s.world, pixels + CR_FRAME_LAYER_BYTES, height, std::size_t(width) * 4) &&
+			                   Upload(s.worldDepth, pixels + 2 * std::size_t(CR_FRAME_LAYER_BYTES), height, std::size_t(width) * 4);
 			CR_FENCE_ACQ();
 			if (CR_LOAD_ACQ(&header.seq) != seq) {
 				++s.torn;
@@ -216,7 +357,64 @@ float4 PSMain(VSOut i) : SV_Target
 			}
 			s.lastFrame = frame;
 			s.haveFrame = true;
+			s.worldShown = world;
+			s.haloCamera = cameraFrame;
+			s.haloTangentX = header.tangent_x;
+			s.haloTangentY = header.tangent_y;
 			++s.uploads;
+			if (cameraFrame && cameraFrame == s.cameraFrame) {
+				++s.matched;
+			}
+		}
+
+		// Lockstep (docs §9): Halo draws the frame of the camera published as
+		// Skyrim's world rendering began; wait a moment for it, so Halo's world
+		// layer sits on this frame's picture, not on one a frame or two old.
+		void WaitForCameraFrame(const cr_frames* a_frames)
+		{
+			const auto pending = std::exchange(s.cameraPending, 0u);
+			if (!pending || WaitLimitMs() <= 0.0) {
+				return;
+			}
+			++s.waits;
+			const double start = NowMs();
+			for (;;) {
+				const auto latest = CR_LOAD_ACQ(&a_frames->latest);
+				if (latest >= 1 && latest <= CR_FRAME_SLOTS) {
+					const auto& header = a_frames->slots[latest - 1];
+					const auto  seq = CR_LOAD_ACQ(&header.seq);
+					if (!(seq & 1) && static_cast<std::int32_t>(header.camera_frame - pending) >= 0) {
+						break;
+					}
+				}
+				const double waited = NowMs() - start;
+				if (waited >= WaitLimitMs()) {
+					++s.late;
+					break;
+				}
+				::SwitchToThread();
+			}
+			s.waitMs += NowMs() - start;
+		}
+
+		void SetParams()
+		{
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (SUCCEEDED(s.context->Map(s.params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+				auto* p = static_cast<Params*>(mapped.pData);
+				p->depth[0] = s.nearPlane;
+				p->depth[1] = s.farPlane;
+				p->depth[2] = s.reversed == 1 ? 1.0f : 0.0f;
+				p->depth[3] = CR_SKY_UNITS_PER_WU;
+				PutBasis(p->now, s.current, s.current.tangentX, s.current.tangentY);
+				// the camera of Halo's frame; unknown (too old, or Halo's own): as now
+				const auto& then = s.cameras[s.haloCamera % kCameraRing];
+				const bool  known = s.haloCamera && then.frame == s.haloCamera && s.haloTangentX > 0.0f && s.haloTangentY > 0.0f;
+				PutBasis(p->halo, known ? then : s.current, known ? s.haloTangentX : s.current.tangentX,
+					known ? s.haloTangentY : s.current.tangentY);
+				++(known ? s.reprojected : s.unknownCamera);
+				s.context->Unmap(s.params, 0);
+			}
 		}
 
 		void Draw(IDXGISwapChain* a_swapChain)
@@ -257,8 +455,9 @@ float4 PSMain(VSOut i) : SV_Target
 			ID3D11HullShader*         oldHs = nullptr;
 			ID3D11DomainShader*       oldDs = nullptr;
 			ID3D11PixelShader*        oldPs = nullptr;
-			ID3D11ShaderResourceView* oldSrv = nullptr;
-			ID3D11SamplerState*       oldSampler = nullptr;
+			ID3D11ShaderResourceView* oldSrvs[3]{};
+			ID3D11SamplerState*       oldSamplers[2]{};
+			ID3D11Buffer*             oldCb = nullptr;
 			context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, oldRtv, &oldDsv);
 			context->OMGetBlendState(&oldBlend, oldFactor, &oldMask);
 			context->RSGetState(&oldRaster);
@@ -271,11 +470,13 @@ float4 PSMain(VSOut i) : SV_Target
 			context->HSGetShader(&oldHs, nullptr, nullptr);
 			context->DSGetShader(&oldDs, nullptr, nullptr);
 			context->PSGetShader(&oldPs, nullptr, nullptr);
-			context->PSGetShaderResources(0, 1, &oldSrv);
-			context->PSGetSamplers(0, 1, &oldSampler);
+			context->PSGetShaderResources(0, 3, oldSrvs);
+			context->PSGetSamplers(0, 2, oldSamplers);
+			context->PSGetConstantBuffers(0, 1, &oldCb);
 
 			const D3D11_VIEWPORT viewport{ 0.0f, 0.0f, float(bbDesc.Width), float(bbDesc.Height), 0.0f, 1.0f };
 			const float          factor[4]{};
+			ID3D11SamplerState*  samplers[2]{ s.linear, s.point };
 			context->OMSetRenderTargets(1, &rtv, nullptr);
 			context->OMSetBlendState(s.blend, factor, 0xFFFFFFFF);
 			context->OMSetDepthStencilState(s.depth, 0);
@@ -287,10 +488,24 @@ float4 PSMain(VSOut i) : SV_Target
 			context->GSSetShader(nullptr, nullptr, 0);
 			context->HSSetShader(nullptr, nullptr, 0);
 			context->DSSetShader(nullptr, nullptr, 0);
-			context->PSSetShader(s.ps, nullptr, 0);
-			context->PSSetShaderResources(0, 1, &s.srv);
-			context->PSSetSamplers(0, 1, &s.sampler);
-			context->Draw(3, 0);
+			context->PSSetSamplers(0, 2, samplers);
+			context->PSSetConstantBuffers(0, 1, &s.params);
+
+			// The world layer, where Skyrim's own picture isn't nearer; then
+			// the screen layer over everything.
+			if (s.worldShown && s.depthCopied && s.reversed >= 0 && s.current.frame) {
+				ID3D11ShaderResourceView* srvs[3]{ s.world.srv, s.worldDepth.srv, s.depthCopySrv };
+				SetParams();
+				context->PSSetShader(s.worldPs, nullptr, 0);
+				context->PSSetShaderResources(0, 3, srvs);
+				context->Draw(3, 0);
+			}
+			{
+				ID3D11ShaderResourceView* srvs[3]{ s.screen.srv, nullptr, nullptr };
+				context->PSSetShader(s.screenPs, nullptr, 0);
+				context->PSSetShaderResources(0, 3, srvs);
+				context->Draw(3, 0);
+			}
 
 			context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, oldRtv, oldDsv);
 			context->OMSetBlendState(oldBlend, oldFactor, oldMask);
@@ -304,9 +519,16 @@ float4 PSMain(VSOut i) : SV_Target
 			context->HSSetShader(oldHs, nullptr, 0);
 			context->DSSetShader(oldDs, nullptr, 0);
 			context->PSSetShader(oldPs, nullptr, 0);
-			context->PSSetShaderResources(0, 1, &oldSrv);
-			context->PSSetSamplers(0, 1, &oldSampler);
+			context->PSSetShaderResources(0, 3, oldSrvs);
+			context->PSSetSamplers(0, 2, oldSamplers);
+			context->PSSetConstantBuffers(0, 1, &oldCb);
 			for (auto*& old : oldRtv) {
+				SafeRelease(old);
+			}
+			for (auto*& old : oldSrvs) {
+				SafeRelease(old);
+			}
+			for (auto*& old : oldSamplers) {
 				SafeRelease(old);
 			}
 			SafeRelease(oldDsv);
@@ -319,8 +541,7 @@ float4 PSMain(VSOut i) : SV_Target
 			SafeRelease(oldHs);
 			SafeRelease(oldDs);
 			SafeRelease(oldPs);
-			SafeRelease(oldSrv);
-			SafeRelease(oldSampler);
+			SafeRelease(oldCb);
 			SafeRelease(rtv);
 		}
 
@@ -328,9 +549,11 @@ float4 PSMain(VSOut i) : SV_Target
 		{
 			auto& link = Link::Get();
 			const auto* frames = link.Frames();
+			const bool  depthCopied = std::exchange(s.depthCopied, false);
 			if (!frames) {
 				s.haveFrame = false;
 				s.lastPublished = 0;
+				s.cameraPending = 0;
 				return;
 			}
 
@@ -344,10 +567,21 @@ float4 PSMain(VSOut i) : SV_Target
 			display.flags = Enabled() ? CR_DISPLAY_OVERLAY : 0u;
 			display.frame = ++s.displayFrame;
 			link.SendDisplay(display);
-			if (!Enabled() || !InitResources(a_swapChain)) {
+			if (!Enabled()) {
+				return;
+			}
+			if (!s.device) {
+				ID3D11Device* device = nullptr;
+				if (SUCCEEDED(a_swapChain->GetDevice(__uuidof(ID3D11Device), reinterpret_cast<void**>(&device)))) {
+					InitResources(device);
+					device->Release();
+				}
+			}
+			if (!s.device || s.initFailed) {
 				return;
 			}
 
+			WaitForCameraFrame(frames);
 			const auto now = ::GetTickCount64();
 			const auto published = CR_LOAD_ACQ(&frames->published);
 			if (published != s.lastPublished) {
@@ -363,13 +597,25 @@ float4 PSMain(VSOut i) : SV_Target
 			}
 			if (now >= s.nextReport) {
 				if (s.nextReport && (s.uploads || s.torn)) {
-					logger::info("overlay: {} frames from Halo in the last 30 s ({} torn copies)", s.uploads, s.torn);
+					logger::info("overlay: in the last 30 s, {} frames from Halo ({} torn copies), {} for this frame's camera;"
+								 " waited for {} frames, {:.1f} ms on average, {} too late; world layer reprojected {} times"
+								 " ({} from an unknown camera); Skyrim's depth {}",
+						s.uploads, s.torn, s.matched, s.waits, s.waits ? s.waitMs / double(s.waits) : 0.0, s.late,
+						s.reprojected, s.unknownCamera, s.reversed < 0 ? "not read yet" : s.reversed ? "reversed" : "standard");
+					if (s.haloTangentY > 0.0f && std::fabs(s.haloTangentY - s.lastLoggedTangent) > 0.001f) {
+						s.lastLoggedTangent = s.haloTangentY;
+						logger::info("overlay: views: Skyrim's {:.4f} x {:.4f}, Halo's {:.4f} x {:.4f} (the world layer is mapped from Halo's to Skyrim's)",
+							s.current.tangentX, s.current.tangentY, s.haloTangentX, s.haloTangentY);
+					}
 				}
-				s.uploads = s.torn = 0;
+				s.uploads = s.torn = s.waits = s.late = s.matched = s.reprojected = s.unknownCamera = 0;
+				s.waitMs = 0.0;
 				s.nextReport = now + 30000;
 			}
 			if (show) {
+				s.depthCopied = depthCopied;
 				Draw(a_swapChain);
+				s.depthCopied = false;
 			}
 		}
 
@@ -380,6 +626,189 @@ float4 PSMain(VSOut i) : SV_Target
 			} catch (...) {
 			}
 			return originalPresent(a_swapChain, a_sync, a_flags);
+		}
+
+		// ---- inside Skyrim's frame: the camera out, the depth in ----------
+
+		// The camera this frame is rendered with, to Halo (lockstep).
+		void PublishCamera()
+		{
+			auto& link = Link::Get();
+			auto* camera = RE::Main::WorldRootCamera();
+			if (!Enabled() || !link.Frames() || !camera) {
+				return;
+			}
+			const auto& world = camera->world;
+			const auto& frustum = camera->GetRuntimeData2().viewFrustum;
+			cr_camera out{};
+			out.frame = ++s.cameraFrame;
+			if (out.frame == 0) {
+				out.frame = ++s.cameraFrame;  // 0 means "none"
+			}
+			out.eye = { world.translate.x, world.translate.y, world.translate.z };
+			// NiCamera: its columns are forward, up, right
+			out.forward = { world.rotate.entry[0][0], world.rotate.entry[1][0], world.rotate.entry[2][0] };
+			out.up = { world.rotate.entry[0][1], world.rotate.entry[1][1], world.rotate.entry[2][1] };
+			out.vertical_fov = std::atan(frustum.fTop) - std::atan(frustum.fBottom);
+			out.near_plane = frustum.fNear;
+			out.far_plane = frustum.fFar;
+			link.SendCamera(out);
+			s.cameraPending = out.frame;
+			PublishedCamera kept;
+			kept.frame = out.frame;
+			kept.forward = { out.forward.x, out.forward.y, out.forward.z };
+			kept.up = { out.up.x, out.up.y, out.up.z };
+			kept.right = kept.forward.Cross(kept.up);  // screen right (Z up, right-handed), as Halo's view has it
+			kept.tangentX = 0.5f * std::fabs(frustum.fRight - frustum.fLeft);
+			kept.tangentY = 0.5f * std::fabs(frustum.fTop - frustum.fBottom);
+			s.cameras[out.frame % kCameraRing] = kept;
+			s.current = kept;
+			s.nearPlane = frustum.fNear;
+			s.farPlane = frustum.fFar;
+		}
+
+		// Skyrim's convention, from the depth itself: a perspective depth
+		// buffer is mostly near 1 (standard) or near 0 (reversed). Read once.
+		void LearnDepthConvention(ID3D11DeviceContext* a_context, ID3D11Texture2D* a_depth)
+		{
+			D3D11_TEXTURE2D_DESC dd{};
+			a_depth->GetDesc(&dd);
+			if (dd.Format != DXGI_FORMAT_R24G8_TYPELESS && dd.Format != DXGI_FORMAT_D24_UNORM_S8_UINT) {
+				logger::warn("overlay: Skyrim's depth is format {}, not read; taken as standard", static_cast<int>(dd.Format));
+				s.reversed = 0;
+				return;
+			}
+			D3D11_TEXTURE2D_DESC sd = dd;
+			sd.Usage = D3D11_USAGE_STAGING;
+			sd.BindFlags = 0;
+			sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+			sd.MiscFlags = 0;
+			ID3D11Texture2D* staging = nullptr;
+			if (FAILED(s.device->CreateTexture2D(&sd, nullptr, &staging))) {
+				return;
+			}
+			a_context->CopyResource(staging, a_depth);
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (SUCCEEDED(a_context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+				std::vector<float> values;
+				for (UINT y = 0; y < dd.Height; y += 16) {
+					const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(mapped.pData) + std::size_t(y) * mapped.RowPitch);
+					for (UINT x = 0; x < dd.Width; x += 16) {
+						values.push_back(float(row[x] & 0xFFFFFF) / 16777215.0f);
+					}
+				}
+				a_context->Unmap(staging, 0);
+				if (!values.empty()) {
+					std::nth_element(values.begin(), values.begin() + values.size() / 2, values.end());
+					const float median = values[values.size() / 2];
+					const auto [low, high] = std::minmax_element(values.begin(), values.end());
+					s.reversed = median < 0.5f ? 1 : 0;
+					logger::info("overlay: Skyrim's depth: median {:.5f}, {:.5f}-{:.5f}, near {:.1f}, far {:.0f}: {}", median, *low, *high,
+						s.nearPlane, s.farPlane, s.reversed ? "reversed" : "standard");
+				}
+			}
+			SafeRelease(staging);
+		}
+
+		// Skyrim's depth as its world rendering ends (before the HUD and
+		// post-processing), for the world layer's test at Present.
+		void CopyDepth()
+		{
+			auto* renderer = RE::BSGraphics::Renderer::GetSingleton();
+			if (!Enabled() || !s.device || !renderer || !Link::Get().Frames()) {
+				return;
+			}
+			const auto& depth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN];
+			auto*       texture = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
+			auto*       srv = reinterpret_cast<ID3D11ShaderResourceView*>(depth.depthSRV);
+			auto*       context = reinterpret_cast<ID3D11DeviceContext*>(renderer->GetRuntimeData().context);
+			if (!texture || !srv || !context) {
+				return;
+			}
+			D3D11_TEXTURE2D_DESC dd{};
+			texture->GetDesc(&dd);
+			if (s.depthCopy) {
+				D3D11_TEXTURE2D_DESC cd{};
+				s.depthCopy->GetDesc(&cd);
+				if (cd.Width != dd.Width || cd.Height != dd.Height || cd.Format != dd.Format) {
+					SafeRelease(s.depthCopySrv);
+					SafeRelease(s.depthCopy);
+				}
+			}
+			if (!s.depthCopy) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+				srv->GetDesc(&sv);
+				D3D11_TEXTURE2D_DESC cd = dd;
+				cd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				cd.Usage = D3D11_USAGE_DEFAULT;
+				cd.CPUAccessFlags = 0;
+				cd.MiscFlags = 0;
+				if (dd.SampleDesc.Count != 1 || FAILED(s.device->CreateTexture2D(&cd, nullptr, &s.depthCopy)) ||
+					FAILED(s.device->CreateShaderResourceView(s.depthCopy, &sv, &s.depthCopySrv))) {
+					static bool logged = false;
+					if (!std::exchange(logged, true)) {
+						logger::error("overlay: no copy of Skyrim's depth ({}x{}, format {}, {} samples): Halo's world layer won't show",
+							dd.Width, dd.Height, static_cast<int>(dd.Format), dd.SampleDesc.Count);
+					}
+					SafeRelease(s.depthCopy);
+					return;
+				}
+				logger::info("overlay: Skyrim's depth is {}x{}, format {}", dd.Width, dd.Height, static_cast<int>(dd.Format));
+			}
+			context->CopyResource(s.depthCopy, texture);
+			s.depthCopied = true;
+			// after a few seconds of play, when the picture has a world in it
+			if (s.reversed < 0 && ++s.depthCopies >= 300 && Input::InGameplay()) {
+				LearnDepthConvention(context, texture);
+			}
+		}
+
+		struct RenderWorldHook
+		{
+			static void thunk(bool a_arg)
+			{
+				try {
+					PublishCamera();
+				} catch (...) {
+				}
+				func(a_arg);
+				try {
+					CopyDepth();
+				} catch (...) {
+				}
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Main::RenderWorld's call in the frame function (AE; SkyCraft's
+		// in-frame drawing hooks it too).
+		void HookRenderWorld()
+		{
+			if (!REL::Module::IsAE()) {
+				logger::warn("overlay: Skyrim's world rendering is hooked on AE only: no world layer");
+				return;
+			}
+			const auto target = REL::ID(107142).address();
+			const auto text = REL::Module::get().segment(REL::Segment::textx);
+			const auto base = text.address();
+			const auto* code = reinterpret_cast<const std::uint8_t*>(base);
+			std::vector<std::uintptr_t> sites;
+			for (std::size_t i = 0; i + 5 <= text.size(); ++i) {
+				if (code[i] != 0xE8) {
+					continue;
+				}
+				std::int32_t rel;
+				std::memcpy(&rel, code + i + 1, 4);
+				if (base + i + 5 + static_cast<std::intptr_t>(rel) == target) {
+					sites.push_back(base + i);
+				}
+			}
+			if (sites.size() != 1) {
+				logger::warn("overlay: {} calls to Main::RenderWorld, not one: no world layer", sites.size());
+				return;
+			}
+			RenderWorldHook::func = SKSE::GetTrampoline().write_call<5>(sites[0], RenderWorldHook::thunk);
+			logger::info("overlay: hooked Skyrim's world rendering (camera to Halo, depth for the world layer)");
 		}
 	}
 
@@ -400,5 +829,6 @@ float4 PSMain(VSOut i) : SV_Target
 		vtable[8] = reinterpret_cast<void*>(&PresentHook);
 		::VirtualProtect(&vtable[8], sizeof(void*), oldProtect, &oldProtect);
 		logger::info("overlay: Present hooked ({})", Enabled() ? "on" : "off: [Overlay] bEnabled=0");
+		HookRenderWorld();
 	}
 }

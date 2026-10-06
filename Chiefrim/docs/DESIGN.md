@@ -259,8 +259,12 @@ collision code.
     thinner than ~0.12 wu, Halo's biped tunnels through surfaces (at 18 he walked through a wall in
     the fake-Skyrim test, and in game sank into floors, the floor guard bouncing him back ~4 times
     a second);
-  - a build takes Chief's region and the 8 around it (3 x 3 x 3 regions of 1024 units), so the
-    edge is always at least 1024 units ahead of him: ~0.1-0.8 s a build on Skyrim's meshes;
+  - a build takes Chief's region and those around it, `[Collision] iRadius` rings (default 2: 5 x 5
+    x 3 regions of 1024 units; Skyrim sends a ring more, protocol 10), so the edge, and how far his
+    shots hit Skyrim's world, is always at least that many regions ahead: with 3 x 3 (1024 units,
+    ~15 m) shots at walls and NPCs further away passed through (the second in-game test). A build is
+    at most 600,000 triangles: rings beyond the nearest two that would go over are left out, logged
+    (Halo is 32-bit; in-game 3 x 3 builds were 100,000-200,000 triangles, 1-2.4 s);
   - open: on the latest Skyrim dumps 0.5-1.5% of surfaces miss Halo's ray query (sphere queries
     all hit), clustered where many planes meet nearly at a point. Not the near-plane band, closed
     meshes, one-sided faces or the exporter's subdivision (all tested). Chief falling through a
@@ -290,7 +294,9 @@ stay slopes, and there are no micro-steps.
 **Where the data comes from (Skyrim side, WorldExporter, `skse/src/Collision.cpp`):** stage C
 straight away, adapted from SkyCraft's harvester (MIT), which already reads AE's Havok shapes:
 the world's static bodies (static, animated static, trees, props, terrain, ground, invisible
-walls, stair helpers), their shape trees (MOPP, compressed and extended meshes, lists,
+walls, stair helpers), and physics objects (clutter, large debris) at rest (asleep in Havok:
+moving ones are left out until they settle; a near region is harvested again each second) and at
+least 24 units across, their shape trees (MOPP, compressed and extended meshes, lists,
 transforms), and boxes, capsules and convex hulls as outward-wound triangles; every read is
 fault-guarded. Triangles go to Halo in Skyrim units, per 1024-unit cube region (each triangle in
 the one region holding its centre), within ±2 regions around and ±1 below/above the player, at
@@ -317,7 +323,11 @@ definition comes from that map. Chiefrim loads one **host map**.
   spawns nobody. The port's own profile-training script skips them for the same reason.
 - **Phase 0 uses `b30`** (The Silent Cartographer), the decomp's own default campaign level.
 - **In Chiefrim mode the level's logic is off:** `game_tick` skips `hs_update` (scripts and
-  cutscenes) and `ai_update`, and Chiefrim erases the level's actors once Chief exists. What is
+  cutscenes) and `ai_update`, and Chiefrim erases the level's actors and other objects once Chief
+  exists. Its BSP-switch trigger volumes are off too (`players.c`): Chief, at Skyrim's
+  coordinates, walked into one of b30's, the level switched BSPs under Chiefrim's collision, and
+  Halo's state went bad (the third in-game test: the overlay flashed through assets, assertions
+  followed). What is
   left is Halo's engine with Chief in it.
 - Chief first spawns at the level's own starting location, on the level's own collision. When
   Skyrim's world context arrives, Chiefrim installs its collision and moves him (§6).
@@ -404,6 +414,11 @@ only raw keys are Chiefrim's own two hotkeys.
   and Skyrim gets everything as usual. The plugin publishes neutral input the moment any menu
   opens (PlayerCharacter::Update doesn't run while Skyrim is paused), and Halo treats input older
   than 150 ms as none, so Chief never keeps walking on a stale key.
+- **Halo's prompts name Skyrim's keys** (protocol 12). Twice a second the plugin names the key
+  each of Chief's actions is bound to (Windows' key names; mouse and gamepad buttons by their own
+  names), for the device the player last used, and sends them when they change
+  (`CR_MSG_KEY_NAMES`). hud_messaging.c writes the name where Halo would draw its Xbox button:
+  "Hold E to swap for" (offline, with the fake Skyrim's names).
 
 ### Default mapping (`Chiefrim.ini`, `[Controls]`)
 
@@ -443,6 +458,62 @@ strafe, and running yaw and pitch totals (so look motion isn't lost or doubled b
 games' frames).
 
 ## 8. Combat
+
+**Built (2026-10-05), to be tried in game** (`halo/src/chiefrim_combat.c`, `skse/src/Combat.cpp`,
+protocol 8):
+
+- Skyrim lists the 48 nearest living actors within ~5300 units each frame (the `actors` slot).
+  Halo keeps a proxy for each: the host map's armoured marine (`characters\marine_armored`, found
+  by name; Chief's own biped if none), scaled to the actor's height, on the Covenant's team (so
+  Chief's hits count in full, the motion tracker shows them, and aim assist works), never drawn
+  (a hook in `render_object_list`: hiding objects Halo's way would also stop collision and splash).
+- A proxy has 100,000 vitality, all body. Each frame, what it lost is divided by its biped's own
+  vitality (shields and body) and sent (`CR_MSG_HIT_ACTOR`); the proxy is refilled. Every weapon,
+  headshot multiplier, melee and splash is Halo's own: 3 s of MA5B fire at 400 units landed 14 hits
+  of 0.10 (offline test).
+- Skyrim applies it level-scaled (§13) through its own hit processing (found by the call the
+  melee handler makes), and starts combat. Big hits (half a proxy or more) stagger. On the
+  author's 1.6.1170 the direct call wasn't found (nor by SkyCraft): another plugin likely hooks
+  that call, so it leads out of Skyrim's code. The plugin now follows the call at the melee
+  handler's +0x4A8, and when it leads to another module (logged by name) it still uses the hit
+  processing; bullets add the flinch below. `bSkyrimHitProcessing=0`, or a call into some other
+  part of Skyrim, keeps the piece-by-piece hit:
+  damage, then a stagger away from Chief (`staggerStart`) or a flinch (`recoilStart`, at most
+  once a second per actor), then a `TESHitEvent` for scripts. Either way an Iron Dagger's impact
+  set gives the blood and the hit sound.
+- Explosions (Halo's area damage: grenades, rockets, the fuel rod) throw and burn. damage.c's hook
+  marks a proxy an explosion reached, and its hit goes with `CR_HIT_EXPLOSION` and the blast's
+  centre (protocol 11). Skyrim knocks the actor down away from it first (`AIProcess::
+  KnockExplosion`, the ragdoll Skyrim's own explosions use), with `fBlastForce` ×0.5 to ×1.5 by the
+  hit's size, so one it kills flies too, then sets them alight: `FireFXShader` (0x1B212) for
+  `fBurnSeconds` and `fBurnDamage` of their health over that time (fire resistance counts). An
+  explosion hit doesn't stagger or flinch. Offline: a frag grenade 3 m past the actor sent its
+  hit with the blast's centre.
+- The player is essential while linked; each frame the health Skyrim took is refunded and sent
+  (`CR_MSG_PLAYER_HURT`, as a fraction of Chief's vitality: damage ÷ `fIncomingReference`, with
+  the attacker's position and the kind from the last hit event). Halo applies it with
+  `object_cause_damage` and a damage effect of the map's: the MA5B's melee for melee, its bullet
+  for arrows and the rest, the plasma rifle's bolt for magic. Shields take it first and recharge
+  as ever; the HUD shows where it came from. Unlike the plan, Skyrim's health stays full rather
+  than following Chief's body: lowered, the essential player would kneel in bleedout.
+- Chief is deathless in Halo while linked, and Halo's telefrag (a player blocked inside another
+  unit for 3 s dies) is off: in a fight Chief stands inside Skyrim's people's proxies, and it
+  killed him, bypassing deathless (the fourth in-game test); the campaign death then reverted the
+  game to its checkpoint, before the level was cleared, and b30's trees and Covenant scenery
+  floated around the player. Any loss of Chief's unit (dead, gone, another) now counts as a death
+  for Skyrim, and a changed unit (a respawn or revert) clears the level again and forgets the
+  proxies (their indices mean nothing after a revert). A proxy that dies (a headshot kills a marine
+  outright) sends a whole proxy's hit, at most, and is replaced. With his body at 0 Skyrim is told
+  (`CR_MSG_PLAYER_DIED`) and kills its player (killer: the last attacker). A new world (the
+  reload) makes him whole and clears the proxies.
+- Chief's aim follows Skyrim's view only to 85 degrees up or down: Halo asserts beyond 85.5 (the
+  second in-game test crashed looking down at a weapon to pick it up). The view itself is Skyrim's.
+- Picking up and swapping weapons is Skyrim's Activate (`sAction`); Halo's prompt still names the
+  Xbox button ("X"): to show the Skyrim key, later.
+- Debug (§8.4): `[Controls] iGiveWeaponKey` (F7; F9 is Skyrim's Quickload) gives Chief the map's next weapon (`CR_MSG_GIVE_WEAPON`;
+  vehicle guns skipped; a dropped weapon resting on a surface past 32,767 crashed Halo, which keeps
+  that index in a short: now it rests on no surface in particular, `items.c`; b30 has the MA5B, M6D, plasma rifle and pistol, rocket launcher, needler,
+  fuel rod and energy sword; the list is in Halo's log), dropping the one in hand if he has two.
 
 ### 8.1 Skyrim NPCs inside Halo: proxy bipeds
 
@@ -539,6 +610,44 @@ using the camera Skyrim is about to use. It draws three layers:
   needs §8.4's weapon spawn command); the layers apart (the weapon under Skyrim's HUD, not over its compass and
   messages), the world layer with depth (Phase 3), hiding Skyrim's own crosshair and bars (§11),
   and object lighting from Skyrim (the weapon is lit by the host map's lightmap for now).
+**Phase 3 (done 2026-10-06, verified in game): the world layer, in lockstep.**
+
+- **Two layers.** In overlay mode `render_window` draws the **world layer** first (every object
+  but the first-person weapon, decals, particles, contrails, transparent geometry), keeps it
+  (`chiefrim_overlay_world_done`), then the **screen layer** (first-person weapon, HUD) on a cleared
+  picture. The host level's objects (scenery, vehicles, weapons: 898 on b30) are erased with its
+  actors, or they'd stand around Skyrim's origin. The host map's fog is off.
+- **Transmittance, not coverage.** The second target now keeps how much of Skyrim's picture shows
+  through (T, sent as alpha = 1 - T): a blend `S * src + D * dst` turns T into `D * T`, plus
+  `src * T` where S is the destination's colour. So modulating draws darken Skyrim's picture too:
+  Halo's bullet holes are 2x-modulate decals, and showed nothing with coverage.
+- **Depth.** A third target keeps each world pixel's view distance: the pixel shaders write
+  `1 / gl_FragCoord.w` (the clip w, the distance along the view) where they show anything,
+  min-blended. Skyrim copies its main depth buffer as `Main::RenderWorld` returns (before the HUD
+  and post-processing) and, at Present, drops world pixels behind its own, with a little slack for
+  decals on its surfaces (0.3% + 4 units). Its convention (standard or reversed) is read once from
+  the depth itself (the median is near 1 or near 0).
+- **Lockstep.** As `Main::RenderWorld` starts, Skyrim publishes the camera it renders with (the
+  world root camera: eye, forward, up; the `camera` slot). Halo, which in overlay mode no longer
+  swaps its own window (whose vsync would pace it), waits for each new camera (30 ms at most), draws
+  through it (`chiefrim_render_camera` in place of the observer's: Skyrim's eye, forward and up,
+  Halo's field of view, which Skyrim's follows), reads both layers back at once and names the
+  camera in the frame. At Present Skyrim waits up to `[Overlay] fWaitMs` (12) for that frame, so the
+  world layer sits on this frame's picture rather than one or two frames old.
+- **Reprojection (protocol 9).** The first in-game test showed the lockstep mostly missing:
+  Halo's frame of the moment was ready in time for ~20% of frames (894 of 1078 waits ran out its
+  12 ms), so the world layer showed a camera a frame or two old (decals slid when turning) and the
+  waits cost frame rate (~33 fps). Now each frame carries Halo's projection (`tangent_x/y`, from
+  its frustum), Skyrim keeps its last 64 cameras, and the world-layer shader maps each pixel's view
+  ray from the camera of the moment into the camera and projection Halo drew through (depth
+  compared along the ray). Exact for turning, and for any field of view mismatch; walking leaves a
+  frame's parallax. Skyrim no longer waits (`fWaitMs` 0); Checked under Proton with DXVK: a marker
+  at the centre of Halo's frame lands at column 69-70 of 160 after a 10 degree turn (70.2 expected).
+- **Checked offline** (fake Skyrim, `--fire-at`, `--pitch`, `--speed 0`): frames name the camera
+  they were drawn through; muzzle flash, smoke, sparks and bullet holes are in the world layer; a
+  camera 120 units up looking 60 degrees down puts the holes at 123-146 units (120 / sin 60 = 139).
+  Under Proton with DXVK, the composite shows world pixels in front of Skyrim's surface, on it and
+  against the sky, and hides those behind.
 - **Halo side, later layers:** `render_window` (`source/render/render.c:302`) gets a Chiefrim mode that skips
   `render_sky`, the structure lightmap and visibility passes, and the parts of the world Skyrim
   already draws.
@@ -606,7 +715,8 @@ Initial message catalog:
 | H→S | `HitActor {...}` | Event |
 | H→S | `PlayerDied` | Event |
 | S→H | `display` slot `{width, height, flags, frame}` (protocol 6) | Per frame (Present) |
-| H→S | `frames`: 3 slots of RGBA8 premultiplied pixels, each `{seq, width, height, frame, display_frame, time_us}` (protocol 6) | Per frame |
+| S→H | `camera` slot `{frame, eye, forward, up, vertical_fov, near, far}` (protocol 7) | Per frame (world rendering starts) |
+| H→S | `frames`: 3 slots, each the screen layer and the world layer (RGBA8 premultiplied) and the world's depth (float), `{seq, width, height, frame, camera_frame, time_us, flags}` (protocol 7) | Per frame |
 | H→S | `MenuState {haloScreenOpen}` | On change |
 | H→S | `SaveState {blob}` | Reply |
 
@@ -626,8 +736,19 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
 - **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
   stamina and the crosshair, because Halo's HUD replaces them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.
-- **Launching (v1):** the user starts Halo with a launch script (Chiefrim mode, host map; Phase 0
-  has `tools/run_phase0.sh` for the test stand).
+- **Launching and recovery (2026-10-05):** `tools/launch_halo.sh` supervises Halo: it starts it,
+  starts it again whenever it exits or crashes (after 1, 4, 9 ... up to 30 s while it keeps crashing
+  within 30 s of starting), and obeys Skyrim through `/dev/shm/chiefrim_control` ("<count>
+  restart|stop|start"). As Skyrim's Steam launch options (`launch_halo.sh --steam %command%`) it
+  runs alongside Skyrim, outside Proton's container, and stops Halo when Skyrim exits. The plugin
+  asks for a restart when Halo stops responding (a hang: a crash the supervisor sees by itself),
+  and on its keys: `iRestartHaloKey` (F11) kills and restarts Halo, `iToggleChiefrimKey` (F10)
+  turns Chiefrim off (unlinked: Skyrim's own player, controls, camera and health; Halo stopped)
+  and on. The keys are applied in the next `Link::Update`, so the unlinking path restores Skyrim's
+  controls. A new Halo in the same shared file is noticed by its process id (relinked: hello and
+  the world again); Halo no longer truncates the file on start (a Skyrim still mapping it would
+  fault on its pages). Checked offline: a SIGKILL, a restart, off and on, and Skyrim exiting.
+  Phase 0 has `tools/run_phase0.sh` for the test stand.
 - **Hidden window:** the port's own hidden-window mode (`HALO_HIDDEN_WINDOW`) crashes the GL
   driver within seconds in the lens-flare occlusion query (`rasterizer_lens_flares_submit_occlusion_tests`).
   This also happens on stock b30 without Chiefrim, so it's an upstream bug. The Phase 0 test stand
@@ -645,7 +766,7 @@ Each phase ends in something you can play.
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
 | 1 | **Walk Skyrim as Chief** | **Status: done (2026-10-05), verified in game.** Skyrim moves the player and Chief follows (§7, `bSkyrimMoves=1`): Skyrim's own controller walks, jumps, sprints and sneaks on Skyrim's meshes; Chief is placed there each frame and aimed along the camera. Chief's actions are Skyrim's (InputBridge, §7; rebinding carries over): fire, zoom (with the view narrowing), reload, grenade, melee, weapon and grenade switch, flashlight, all verified. The camera is Skyrim's, with Chief's field of view (85, zoom from Halo) and no third-person switch while linked. Halo's collision (§5.2, the runtime BSP builder) is built from Skyrim's Havok shapes for shots and grenades. Unlinking leaves Skyrim fully playable (controls reset as pausing does). The Halo-driven mode (`bSkyrimMoves=0`, CameraDriver §6 and the movement safeguards) stays: it walked, but caught and bounced on Skyrim's meshes. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
-| 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
+| 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |
 | 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
@@ -654,10 +775,15 @@ Each phase ends in something you can play.
 
 Proposed. Each one needs the user's call before the phase that depends on it.
 
-1. **Damage scaling** (Phase 3): outgoing damage as a fraction of the proxy's vitality × NPC max
-   health × `fDamageMult`. Incoming damage ÷ `fIncomingReference` × Chief's vitality. Both are ini
-   values. (§8)
-2. **Weapon acquisition** (Phase 3): starting loadout + a debug spawn command for v1. (§8.4)
+1. **Damage scaling** (Phase 3): **decided 2026-10-05: level-scaled.** Outgoing: a hit's fraction of
+   the proxy's vitality × the NPC's max health × `fDamageMult`, divided by a toughness that grows
+   with the NPC's level against the player's: `clamp((npcLevel / playerLevel)^fLevelExponent, 0.5,
+   3)` (`fLevelExponent` 0.5: an NPC at four times the player's level takes twice the hits). So a
+   weapon kills a peer in as many hits as it kills the proxy in Halo, and Skyrim's difficulty curve
+   stays. Incoming: Skyrim damage ÷ `fIncomingReference` (250) × Chief's vitality, shields first.
+   All ini values. (§8)
+2. **Weapon acquisition** (Phase 3): **decided 2026-10-05: the starting loadout (b30's: MA5B, M6D,
+   frag grenades) and a debug command** that gives Chief any weapon in the host map. (§8.4)
 3. **Deep water** (Phase 4): walk on the bottom, or hand over to Skyrim's swimming. (§6)
 4. **Host map:** a campaign level, `b30` for now. Final choice from the tag-listing tool's output.
    (§5.3)

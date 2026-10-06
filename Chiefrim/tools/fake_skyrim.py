@@ -27,23 +27,27 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 6
+VERSION = 12
 RING_BYTES = 4 * 1024 * 1024
-OFF_DISPLAY = 352 + 2 * (128 + RING_BYTES)
-OFF_FRAMES = OFF_DISPLAY + 96
+OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
+OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
+OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
-FRAME_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
-TOTAL_SIZE = OFF_FRAMES + 160 + FRAME_SLOTS * FRAME_BYTES
+FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
+FRAME_BYTES = 3 * FRAME_LAYER_BYTES
+OFF_CAMERA = OFF_DISPLAY + 24
+TOTAL_SIZE = OFF_FRAMES + 192 + FRAME_SLOTS * FRAME_BYTES
 
 # offsets (chiefrim_protocol.h)
 SKYRIM_PID, HALO_PID = 16, 20
 SKYRIM_STATE, HALO_STATE = 24, 28
 SKYRIM_HEARTBEAT, HALO_HEARTBEAT = 32, 36
-SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER, SLOT_SKYRIM_PLAYER = 64, 112, 176, 272
-RING_TO_HALO, RING_TO_SKYRIM = 352, 352 + 128 + RING_BYTES
+SLOT_WORLD, SLOT_INPUT, SLOT_PLAYER, SLOT_SKYRIM_PLAYER = 64, 120, 184, 280
+RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
+MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES = 6, 7, 8, 9, 10
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
 REGION_UNITS = 1024.0
@@ -300,14 +304,35 @@ def grab_frame(link, directory, index):
     if not latest:
         return False
     slot = latest - 1
-    header = OFF_FRAMES + 32 + 32 * slot
-    seq, width, height, frame, display_frame, time_us, flags, _ = struct.unpack_from("<8I", link.shm, header)
+    header = OFF_FRAMES + 32 + 48 * slot
+    seq, width, height, frame, camera_frame, time_us, flags, tangent_x, tangent_y = struct.unpack_from("<7I2f", link.shm, header)
     if seq & 1 or not (0 < width <= FRAME_MAX_W and 0 < height <= FRAME_MAX_H):
         return False
-    start = OFF_FRAMES + 160 + slot * FRAME_BYTES
+    start = OFF_FRAMES + 192 + slot * FRAME_BYTES
     pixels = bytes(link.shm[start:start + width * height * 4])
+    world = bytes(link.shm[start + FRAME_LAYER_BYTES:start + FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
+    depth = bytes(link.shm[start + 2 * FRAME_LAYER_BYTES:start + 2 * FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     if link.u32(header) != seq:
         return False
+    saved = [write_png(directory, f"overlay{index:03}.png", width, height, pixels)]
+    note = ""
+    if world:
+        saved.append(write_png(directory, f"world{index:03}.png", width, height, world))
+        values = [v for v in struct.unpack(f"<{width * height}f", depth) if v < 1e29]
+        if values:
+            note = (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
+                    f"-{max(values) * 213.36:.0f} Skyrim units")
+    print(f"fake_skyrim: frame {frame} ({width}x{height}, flags {flags}, camera {camera_frame} of"
+          f" {LAST_CAMERA[0]}, tangents {tangent_x:.4f} x {tangent_y:.4f}{note}) -> {', '.join(saved)}", flush=True)
+    return True
+
+
+LAST_CAMERA = [0]
+
+
+def write_png(directory, name, width, height, pixels):
+    """premultiplied RGBA over a grey checkerboard, as a PNG"""
+    import zlib
     rows = []
     covered = 0
     for y in range(height):
@@ -325,12 +350,10 @@ def grab_frame(link, directory, index):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
     png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(b"".join(rows), 6)) + chunk(b"IEND", b"")
-    path = os.path.join(directory, f"overlay{index:03}.png")
+    path = os.path.join(directory, name)
     with open(path, "wb") as out:
         out.write(png)
-    print(f"fake_skyrim: overlay frame {frame} ({width}x{height}, flags {flags}, display frame {display_frame},"
-          f" {100.0 * covered / (width * height):.1f}% covered) -> {path}", flush=True)
-    return True
+    return f"{path} ({100.0 * covered / (width * height):.1f}% covered)"
 
 
 def main():
@@ -380,6 +403,29 @@ def main():
     parser.add_argument("--grab", default="",
                         help="with --overlay: save a frame to this directory every --grab-every seconds")
     parser.add_argument("--grab-every", type=float, default=5.0)
+    parser.add_argument("--actor", type=float, default=0.0,
+                        help="Skyrim units: a hostile actor (128 tall) stands this far north of the start; Halo's hits on it are printed")
+    parser.add_argument("--hurt-at", type=float, default=0.0,
+                        help="seconds in: the player is hurt, --hurt-count times a second apart (melee, from the north)")
+    parser.add_argument("--hurt-amount", type=float, default=0.2, help="each hurt, of Chief's whole vitality")
+    parser.add_argument("--hurt-count", type=int, default=3)
+    parser.add_argument("--give-at", type=float, default=0.0,
+                        help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
+    parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--key-names", default="",
+                        help="comma-separated, per CR_ACTION_* (jump,crouch,fire,zoom,reload,grenade,melee,action,...): "
+                             "the keys Halo's prompts show")
+    parser.add_argument("--collision-radius", type=int, default=2,
+                        help="regions around Chief's that Halo builds its collision from, as the plugin sends it")
+    parser.add_argument("--speed", type=float, default=300.0,
+                        help="with --skyrim-moves: units per second the player walks north (0: stands)")
+    parser.add_argument("--pitch", type=float, default=0.0,
+                        help="with --skyrim-moves: degrees the player looks up (negative: down)")
+    parser.add_argument("--fire-at", type=float, default=0.0,
+                        help="seconds in: hold fire for --fire-for seconds (bullets, casings, decals: the world layer)")
+    parser.add_argument("--fire-for", type=float, default=3.0)
+    parser.add_argument("--grenade-at", type=float, default=0.0,
+                        help="seconds in: throw a grenade (an explosion's hits on --actor say so)")
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
@@ -426,8 +472,8 @@ def main():
         struct.pack("<II48s", VERSION, os.getpid(), b"fake_skyrim.py"))
     # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, chief_height, reserved
     start_z = options.z - options.start_below
-    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfff",
-        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius))
+    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffII",
+        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius, options.collision_radius, 0))
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, start_z, math.radians(options.heading)))
     if options.terrain:
@@ -481,14 +527,20 @@ def main():
                     print(f"fake_skyrim: Halo says hello (protocol {version}, pid {pid}, {text(body[8:56])})", flush=True)
                 elif msg_type == MSG_LOG:
                     print(f"halo: {text(body)}", flush=True)
+                elif msg_type == MSG_HIT_ACTOR:
+                    form_id, flags, fraction, _, bx, by, bz = struct.unpack_from("<IIff3f", body)
+                    blast = f", explosion at ({bx:.0f} {by:.0f} {bz:.0f})" if flags & 1 else ""
+                    print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy{blast}", flush=True)
+                elif msg_type == MSG_PLAYER_DIED:
+                    print("fake_skyrim: Chief died: Skyrim's player would die now", flush=True)
             if (options.recenter_every > 0 and last_position and
                     time.monotonic() - last_recenter >= options.recenter_every):
                 # wherever a build is: the race between a build and a new origin
                 px, py, pz, yaw = last_position
                 generation += 1
                 epoch += 1
-                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfff",
-                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius))
+                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffII",
+                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius, options.collision_radius, 0))
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
                 print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 if options.terrain:
@@ -502,14 +554,36 @@ def main():
             if options.skyrim_moves:
                 # the player walks north at 300 units a second after 2 s, on the terrain
                 t = time.monotonic() - started
-                walked = max(0.0, t - 2.0) * 300.0
+                walked = max(0.0, t - 2.0) * options.speed
                 px, py = options.x, options.y + walked
                 pz = options.z + terrain_height(px - options.x, py - options.y)
                 drive_state["skyrim_frame"] = drive_state.get("skyrim_frame", 0) + 1
+                pitch = math.radians(options.pitch)
+                fy, fz = math.cos(pitch), math.sin(pitch)
                 link.slot_write(SLOT_SKYRIM_PLAYER, struct.pack("<II3fff3f3f3f2I",
-                    drive_state["skyrim_frame"], 0x1 | 0x2, px, py, pz, 0.0, 0.0,
-                    px, py, pz + 120.0, 0.0, 1.0, 0.0, 0.0, 300.0 if t > 2 else 0.0, 0.0, 0, 0))
+                    drive_state["skyrim_frame"], 0x1 | 0x2, px, py, pz, 0.0, -pitch,
+                    px, py, pz + 120.0, 0.0, fy, fz, 0.0, options.speed if t > 2 else 0.0, 0.0, 0, 0))
+                if display:
+                    # the camera Skyrim renders with (lockstep): the same eye and view
+                    LAST_CAMERA[0] += 1
+                    link.slot_write(OFF_CAMERA, struct.pack("<II3f3f3f3f2I", LAST_CAMERA[0], 0,
+                        px, py, pz + 120.0, 0.0, fy, fz, 0.0, -fz, fy, math.radians(60.0), 5.0, 300000.0, 0, 0))
                 drive_state["skyrim_pos"] = (px, py, pz)
+            if options.fire_at and not options.drive:
+                t = time.monotonic() - started
+                firing = options.fire_at <= t < options.fire_at + options.fire_for
+                frame += 1
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 2) if firing else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
+            if options.grenade_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                if t >= options.grenade_at and not drive_state.get("thrown"):
+                    presses[5] = (presses[5] + 1) & 0xFF  # CR_ACTION_GRENADE
+                    drive_state["thrown"] = True
+                    print("fake_skyrim: throw a grenade", flush=True)
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
             if options.zoom_at and not options.drive:
                 t = time.monotonic() - started
                 frame += 1
@@ -523,6 +597,25 @@ def main():
                     print("fake_skyrim: zoom held", flush=True)
                 link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 3) if zooming else 0, 1,
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
+            t = time.monotonic() - started
+            if options.actor:
+                link.slot_write(OFF_ACTORS, struct.pack("<II", frame, 1) +
+                    struct.pack("<II3ffff", 0x0001A2B3, 0x1, options.x, options.y + options.actor, options.z, math.pi, 128.0, 20.0))
+            if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
+                drive_state["hurts"] = drive_state.get("hurts", 0) + 1
+                link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,
+                    options.x, options.y + 300.0, options.z + 60.0, 0, 0))
+                print(f"fake_skyrim: player hurt #{drive_state['hurts']} ({options.hurt_amount:.2f} of Chief)", flush=True)
+            if options.key_names and not drive_state.get("named"):
+                # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
+                names = options.key_names.split(",") + [""] * 12
+                link.push(RING_TO_HALO, MSG_KEY_NAMES, b"".join(n.encode()[:15].ljust(16, b"\0") for n in names[:12]))
+                drive_state["named"] = True
+                print(f"fake_skyrim: key names {names[:12]}", flush=True)
+            if options.give_at and t >= options.give_at + drive_state.get("gives", 0) and drive_state.get("gives", 0) < options.give_count:
+                drive_state["gives"] = drive_state.get("gives", 0) + 1
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI", -1, 0))
+                print(f"fake_skyrim: give weapon #{drive_state['gives']}", flush=True)
             if display:
                 display[2] += 1
                 link.slot_write(OFF_DISPLAY, struct.pack("<4I", display[0], display[1], 0x1, display[2]))

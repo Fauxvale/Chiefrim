@@ -181,6 +181,10 @@ namespace chiefrim::Input
 			std::uint32_t frame{ 0 };
 			LARGE_INTEGER lastPublish{};
 			bool          handlersOff{ false };
+			bool          gamepad{ false };    // the player last played with a gamepad
+			cr_msg_key_names keyNames{};       // as last sent to Halo
+			bool          keyNamesSent{ false };
+			ULONGLONG     nextKeyNames{ 0 };
 		} s;
 
 		void Press(std::uint32_t a_action, bool a_down, bool a_pressed)
@@ -221,6 +225,133 @@ namespace chiefrim::Input
 			s.pitchTotal += static_cast<double>((invert ? a_dy : -a_dy) * scale);
 		}
 
+		// ---- the player's keys, named, for Halo's prompts (CR_MSG_KEY_NAMES)
+
+		std::string KeyName(RE::INPUT_DEVICE a_device, std::uint32_t a_id)
+		{
+			switch (a_device) {
+			case RE::INPUT_DEVICE::kKeyboard:
+				{
+					// Skyrim's keyboard codes are DirectInput scan codes (a US layout's
+					// names, as Skyrim's Controls menu shows them)
+					static constexpr std::array<std::pair<std::uint32_t, const char*>, 103> names{ {
+						{ 0x01, "Esc" }, { 0x02, "1" }, { 0x03, "2" }, { 0x04, "3" }, { 0x05, "4" }, { 0x06, "5" }, { 0x07, "6" },
+						{ 0x08, "7" }, { 0x09, "8" }, { 0x0A, "9" }, { 0x0B, "0" }, { 0x0C, "-" }, { 0x0D, "=" }, { 0x0E, "Backspace" },
+						{ 0x0F, "Tab" }, { 0x10, "Q" }, { 0x11, "W" }, { 0x12, "E" }, { 0x13, "R" }, { 0x14, "T" }, { 0x15, "Y" },
+						{ 0x16, "U" }, { 0x17, "I" }, { 0x18, "O" }, { 0x19, "P" }, { 0x1A, "[" }, { 0x1B, "]" }, { 0x1C, "Enter" },
+						{ 0x1D, "Left Ctrl" }, { 0x1E, "A" }, { 0x1F, "S" }, { 0x20, "D" }, { 0x21, "F" }, { 0x22, "G" }, { 0x23, "H" },
+						{ 0x24, "J" }, { 0x25, "K" }, { 0x26, "L" }, { 0x27, ";" }, { 0x28, "'" }, { 0x29, "`" }, { 0x2A, "Left Shift" },
+						{ 0x2B, "\\" }, { 0x2C, "Z" }, { 0x2D, "X" }, { 0x2E, "C" }, { 0x2F, "V" }, { 0x30, "B" }, { 0x31, "N" },
+						{ 0x32, "M" }, { 0x33, "," }, { 0x34, "." }, { 0x35, "/" }, { 0x36, "Right Shift" }, { 0x37, "Num *" },
+						{ 0x38, "Left Alt" }, { 0x39, "Space" }, { 0x3A, "Caps Lock" }, { 0x3B, "F1" }, { 0x3C, "F2" }, { 0x3D, "F3" },
+						{ 0x3E, "F4" }, { 0x3F, "F5" }, { 0x40, "F6" }, { 0x41, "F7" }, { 0x42, "F8" }, { 0x43, "F9" }, { 0x44, "F10" },
+						{ 0x45, "Num Lock" }, { 0x46, "Scroll Lock" }, { 0x47, "Num 7" }, { 0x48, "Num 8" }, { 0x49, "Num 9" },
+						{ 0x4A, "Num -" }, { 0x4B, "Num 4" }, { 0x4C, "Num 5" }, { 0x4D, "Num 6" }, { 0x4E, "Num +" }, { 0x4F, "Num 1" },
+						{ 0x50, "Num 2" }, { 0x51, "Num 3" }, { 0x52, "Num 0" }, { 0x53, "Num ." }, { 0x57, "F11" }, { 0x58, "F12" },
+						{ 0x9C, "Num Enter" }, { 0x9D, "Right Ctrl" }, { 0xB5, "Num /" }, { 0xB8, "Right Alt" }, { 0xC5, "Pause" },
+						{ 0xC7, "Home" }, { 0xC8, "Up" }, { 0xC9, "Page Up" }, { 0xCB, "Left" }, { 0xCD, "Right" }, { 0xCF, "End" },
+						{ 0xD0, "Down" }, { 0xD1, "Page Down" }, { 0xD2, "Insert" }, { 0xD3, "Delete" }, { 0xDB, "Left Win" },
+						{ 0xDC, "Right Win" }, { 0xB7, "Print Screen" } } };
+					for (const auto& [code, keyName] : names) {
+						if (code == a_id) {
+							return keyName;
+						}
+					}
+					// anything else: Windows' own name for the scan code
+					char name[32]{};
+					const LONG lparam = static_cast<LONG>(((a_id & 0x7F) << 16) | ((a_id & 0x80) ? (1 << 24) : 0));
+					if (::GetKeyNameTextA(lparam, name, sizeof(name)) > 0) {
+						return name;
+					}
+					return std::format("Key {:02X}", a_id);
+				}
+			case RE::INPUT_DEVICE::kMouse:
+				{
+					constexpr std::array names{ "Left Mouse", "Right Mouse", "Middle Mouse", "Mouse 4", "Mouse 5", "Mouse 6",
+						"Mouse 7", "Mouse 8", "Mouse Wheel", "Mouse Wheel" };
+					return a_id < names.size() ? names[a_id] : std::format("Mouse {}", a_id + 1);
+				}
+			case RE::INPUT_DEVICE::kGamepad:
+				{
+					// Skyrim's gamepad codes: XInput's button bits, the triggers 9 and 10
+					constexpr std::array<std::pair<std::uint32_t, const char*>, 16> names{ {
+						{ 0x0001, "D-Pad Up" }, { 0x0002, "D-Pad Down" }, { 0x0004, "D-Pad Left" }, { 0x0008, "D-Pad Right" },
+						{ 0x0010, "Start" }, { 0x0020, "Back" }, { 0x0040, "LS" }, { 0x0080, "RS" },
+						{ 0x0100, "LB" }, { 0x0200, "RB" }, { 0x1000, "A" }, { 0x2000, "B" },
+						{ 0x4000, "X" }, { 0x8000, "Y" }, { 0x0009, "LT" }, { 0x000A, "RT" } } };
+					for (const auto& [code, name] : names) {
+						if (code == a_id) {
+							return name;
+						}
+					}
+					return std::format("Button {:X}", a_id);
+				}
+			default:
+				return {};
+			}
+		}
+
+		// What does a user event on the device the player is using (a key, or
+		// for the keyboard-and-mouse player, a mouse button); empty: unbound.
+		std::string EventKeyName(RE::ControlMap* a_map, std::string_view a_event)
+		{
+			const auto mapped = [&](RE::INPUT_DEVICE a_device) {
+				return a_map->GetMappedKey(a_event, a_device, RE::UserEvents::INPUT_CONTEXT_ID::kGameplay);
+			};
+			if (s.gamepad) {
+				const auto key = mapped(RE::INPUT_DEVICE::kGamepad);
+				return key != RE::ControlMap::kInvalid ? KeyName(RE::INPUT_DEVICE::kGamepad, key) : std::string{};
+			}
+			for (const auto device : { RE::INPUT_DEVICE::kKeyboard, RE::INPUT_DEVICE::kMouse }) {
+				if (const auto key = mapped(device); key != RE::ControlMap::kInvalid) {
+					return KeyName(device, key);
+				}
+			}
+			return {};
+		}
+
+		// Twice a second, and on linking: the names, sent when they change
+		// (a rebind, or the player switching between gamepad and keyboard).
+		void SendKeyNames()
+		{
+			const auto now = ::GetTickCount64();
+			if (s.keyNamesSent && now < s.nextKeyNames) {
+				return;
+			}
+			s.nextKeyNames = now + 500;
+			auto* map = RE::ControlMap::GetSingleton();
+			if (!map) {
+				return;
+			}
+			std::array<std::string, CR_ACTION_COUNT> names;
+			for (const auto& [eventName, action] : config.eventActions) {
+				if (names[action].empty()) {
+					names[action] = EventKeyName(map, eventName);
+				}
+			}
+			names[CR_ACTION_CROUCH] = EventKeyName(map, "Sneak");
+			for (const auto* hotkey : { &config.switchGrenade, &config.flashlight }) {
+				if (s.gamepad ? hotkey->button != 0 : hotkey->key != 0) {
+					names[hotkey->action] = s.gamepad ? KeyName(RE::INPUT_DEVICE::kGamepad, hotkey->button) :
+					                                    KeyName(RE::INPUT_DEVICE::kKeyboard, hotkey->key);
+				}
+			}
+			cr_msg_key_names message{};
+			for (std::size_t action = 0; action < CR_ACTION_COUNT; ++action) {
+				std::strncpy(message.names[action], names[action].c_str(), CR_KEY_NAME_LENGTH - 1);
+			}
+			if (s.keyNamesSent && std::memcmp(message.names, s.keyNames.names, sizeof(message.names)) == 0) {
+				return;
+			}
+			if (Link::Get().PushRaw(CR_MSG_KEY_NAMES, &message, sizeof(message))) {
+				s.keyNames = message;
+				s.keyNamesSent = true;
+				logger::info("Halo's prompts name the {} keys: action {}, reload {}, fire {}, grenade {}",
+					s.gamepad ? "gamepad" : "keyboard and mouse", message.names[CR_ACTION_ACTION], message.names[CR_ACTION_RELOAD],
+					message.names[CR_ACTION_FIRE], message.names[CR_ACTION_GRENADE]);
+			}
+		}
+
 		class InputSink final : public RE::BSTEventSink<RE::InputEvent*>
 		{
 		public:
@@ -244,6 +375,7 @@ namespace chiefrim::Input
 					case RE::INPUT_EVENT_TYPE::kMouseMove:
 						{
 							const auto* move = static_cast<RE::MouseMoveEvent*>(event);
+							s.gamepad = false;
 							if (IsEvent(move->QUserEvent(), events->look)) {
 								Look(static_cast<float>(move->mouseInputX), static_cast<float>(move->mouseInputY));
 							}
@@ -252,6 +384,9 @@ namespace chiefrim::Input
 					case RE::INPUT_EVENT_TYPE::kThumbstick:
 						{
 							const auto* stick = static_cast<RE::ThumbstickEvent*>(event);
+							if (std::fabs(stick->xValue) + std::fabs(stick->yValue) > 0.3f) {
+								s.gamepad = true;
+							}
 							if (IsEvent(stick->QUserEvent(), events->move)) {
 								s.moveX = stick->xValue;
 								s.moveY = stick->yValue;
@@ -276,6 +411,7 @@ namespace chiefrim::Input
 
 				// Chiefrim's own hotkeys: raw keys (the only ones).
 				const auto device = a_button.GetDevice();
+				s.gamepad = device == RE::INPUT_DEVICE::kGamepad;
 				for (const auto* hotkey : { &config.switchGrenade, &config.flashlight, &config.mark }) {
 					const bool match =
 						(device == RE::INPUT_DEVICE::kKeyboard && hotkey->key && a_button.GetIDCode() == hotkey->key) ||
@@ -495,6 +631,7 @@ namespace chiefrim::Input
 		s.yawTotal = s.pitchTotal = 0.0;
 		++s.session;
 		::QueryPerformanceCounter(&s.lastPublish);
+		s.keyNamesSent = false;
 		logger::info("Chief's controls:");
 		LogBindings();
 	}
@@ -558,5 +695,6 @@ namespace chiefrim::Input
 		input.yaw_total = s.yawTotal;
 		input.pitch_total = s.pitchTotal;
 		Link::Get().SendInput(input);
+		SendKeyNames();
 	}
 }

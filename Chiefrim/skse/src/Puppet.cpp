@@ -4,6 +4,7 @@
 
 #include "Camera.h"
 #include "Collision.h"
+#include "Combat.h"
 #include "Input.h"
 #include "Link.h"
 
@@ -204,6 +205,7 @@ namespace chiefrim::Puppet
 		void SendWorld(RE::PlayerCharacter* a_player, RE::FormID a_id, bool a_interior)
 		{
 			const auto position = a_player->GetPosition();
+			Combat::Release(a_player);  // a load (after a death too): Halo brings Chief back whole
 			cr_world_context context{};
 			context.world_id = a_id;
 			context.is_interior = a_interior ? 1u : 0u;
@@ -213,6 +215,7 @@ namespace chiefrim::Puppet
 			context.field_of_view = Camera::FieldOfView();
 			context.chief_height = ChiefHeight(a_player);
 			context.chief_radius = ChiefRadius(a_player);
+			context.collision_radius = Settings::CollisionRadius();
 
 			auto& link = Link::Get();
 			link.SendWorldContext(context);
@@ -435,7 +438,7 @@ namespace chiefrim::Puppet
 			Camera::Drive(a_player, shown, true);
 		}
 
-		void PerFrame(RE::PlayerCharacter* a_player)
+		void PerFrame(RE::PlayerCharacter* a_player, float a_delta)
 		{
 			auto& link = Link::Get();
 			const bool wasConnected = link.Connected();
@@ -444,6 +447,7 @@ namespace chiefrim::Puppet
 				if (wasConnected) {
 					Input::OnUnlinked();  // Skyrim's own controls back
 					Camera::Release(a_player);
+					Combat::Release(a_player);
 					RestoreController(a_player);
 				}
 				WatchAfterUnlink(a_player);
@@ -503,6 +507,7 @@ namespace chiefrim::Puppet
 				return;
 			}
 
+			Combat::PerFrame(a_player, a_delta);
 			if (Settings::SkyrimMoves()) {
 				PublishPlayer(a_player);
 				s.lastPuppetPosition = position;  // a jump further than a frame's walk is a teleport
@@ -521,7 +526,7 @@ namespace chiefrim::Puppet
 			{
 				func(a_this, a_delta);
 				try {
-					PerFrame(a_this);
+					PerFrame(a_this, a_delta);
 				} catch (const std::exception& e) {
 					logger::error("per-frame update: {}", e.what());
 				}

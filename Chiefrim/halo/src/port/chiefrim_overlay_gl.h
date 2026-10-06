@@ -13,9 +13,12 @@ as scratch). So the back buffer's framebuffer gets a second colour target,
 the coverage: every pixel shader also writes (1, 1, 1, its alpha) there,
 and each draw's blend is turned into what that blend does to the coverage
 (an opaque draw makes it 1, an alpha blend mixes it, an additive one leaves
-it). At Present, the picture and its coverage become one premultiplied RGBA
-image, read back through pixel buffers a frame behind, into the link's
-frame slots (chiefrim_protocol.h).
+it). A third target keeps the world layer's view depth: each pixel
+shader writes 1 / gl_FragCoord.w (the clip w: the distance along the view)
+where it shows anything, blended to the nearest. The world layer (render.c
+draws it first) and the screen layer each become one premultiplied RGBA
+image, read back at Present into the link's frame slots
+(chiefrim_protocol.h).
 */
 
 #ifndef __CHIEFRIM_OVERLAY_GL_H
@@ -40,11 +43,21 @@ bits (1 red, 2 green, 4 blue, 8 alpha). */
 void chiefrim_overlay_draw_state(unsigned long blend_enable, unsigned long source, unsigned long destination,
 	int adds, unsigned char color_mask);
 
-/* at Present, before the window blit: publishes the back buffer */
-void chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned long height);
+/* after a clear of that framebuffer's colour: the depth target to "nothing" */
+void chiefrim_overlay_cleared(void);
+
+/* render.c, between the layers: keeps the world layer (picture, coverage,
+depth) and clears the picture for the screen layer */
+void chiefrim_overlay_world_done(void);
+
+/* at Present, before the window blit: publishes both layers, waiting for
+the GPU. TRUE if published: then Halo's own window is left alone (its
+vsync would hold the lockstep up) */
+int chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned long height);
 
 /* Halo's side (source/chiefrim/chiefrim.c): Skyrim's screen, if it wants the
-overlay and the link is up; frame is its frame count */
-int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame);
+overlay and the link is up, and the Skyrim camera this frame is drawn
+through (0: Halo's own) */
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *camera_frame);
 
 #endif

@@ -42,6 +42,15 @@ def run(*args, cwd=WORK):
     subprocess.run([str(a) for a in args], cwd=cwd, check=True)
 
 
+def install(source, destination):
+    """Copies a file whose contents changed, stamped now: ninja rebuilds by
+    time, and a copy keeping the source's older time (shutil.copy2) left
+    objects built from an edited work tree in place."""
+    if destination.exists() and destination.read_bytes() == source.read_bytes():
+        return
+    shutil.copyfile(source, destination)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--release", action="store_true")
@@ -63,16 +72,16 @@ def main():
         if source.is_file():
             destination = WORK / source.relative_to(overrides)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
+            install(source, destination)
 
     target = WORK / "source" / "chiefrim"
     target.mkdir(exist_ok=True)
     for source in sorted((HALO / "src").iterdir()):
         if source.is_file():
-            shutil.copy2(source, target / source.name)
+            install(source, target / source.name)
     for source in sorted((HALO / "src" / "port").iterdir()):
-        shutil.copy2(source, WORK / "port" / "linux" / "src" / source.name)
-    shutil.copy2(ROOT / "protocol" / "chiefrim_protocol.h", target / "chiefrim_protocol.h")
+        install(source, WORK / "port" / "linux" / "src" / source.name)
+    install(ROOT / "protocol" / "chiefrim_protocol.h", target / "chiefrim_protocol.h")
 
     run(sys.executable, ROOT / "tools" / "check_licenses.py", "--halo", cwd=ROOT)
     if options.no_build:

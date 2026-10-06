@@ -116,6 +116,11 @@ static struct
 	uint32_t last_skyrim_heartbeat;
 	uint32_t last_skyrim_heartbeat_change;
 	uint32_t skyrim_pid;          /* from its hello */
+	uint32_t camera_frame;        /* Skyrim's camera this frame is drawn through (0: Halo's) */
+	uint32_t last_camera_frame;   /* the last one drawn */
+	long render_layer;            /* CHIEFRIM_LAYER_*: what render_window draws now */
+	float tangent_x, tangent_y;   /* the projection of the frame being drawn (0: unknown) */
+	long chief_unit;              /* Chief's unit last frame (NONE: none) */
 } chiefrim;
 
 /* ---------- private code */
@@ -201,6 +206,8 @@ static void chiefrim_apply_world(void)
 		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
+	chiefrim_world_build_radius(world.collision_radius);
+	chiefrim_combat_reset(chiefrim_local_unit()); /* a load, a door: Skyrim's people again, Chief whole */
 	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
 	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
@@ -231,6 +238,38 @@ static void chiefrim_say_hello(void)
 #endif
 	csstrncpy(hello.build, "halo-ce-universal + chiefrim phase 0", sizeof(hello.build) - 1);
 	cr_ring_push(&chiefrim.shm->to_skyrim, CR_MSG_HELLO, &hello, sizeof(hello));
+}
+
+/* The player's Skyrim keys for Chief's actions (CR_MSG_KEY_NAMES), for
+Halo's prompts: "Press E to swap" in place of its Xbox X. */
+static wchar_t chiefrim_key_names[CR_ACTION_COUNT][CR_KEY_NAME_LENGTH];
+
+static void chiefrim_key_names_set(cr_msg_key_names const *message)
+{
+	long action, i;
+
+	for (action = 0; action < (long)CR_ACTION_COUNT; action++)
+	{
+		for (i = 0; i + 1 < (long)CR_KEY_NAME_LENGTH && message->names[action][i]; i++)
+			chiefrim_key_names[action][i] = (unsigned char)message->names[action][i];
+		chiefrim_key_names[action][i] = 0;
+	}
+}
+
+wchar_t const *chiefrim_control_key_name(long control)
+{
+	/* Halo's controls (player_control.c's control_button) as Chief's actions;
+	start and back (8, 9) aren't Chief's */
+	static long const actions[12] = {
+		CR_ACTION_JUMP, CR_ACTION_SWITCH_GRENADE, CR_ACTION_ACTION, CR_ACTION_SWITCH_WEAPON,
+		CR_ACTION_MELEE, CR_ACTION_FLASHLIGHT, CR_ACTION_GRENADE, CR_ACTION_FIRE,
+		NONE, NONE, CR_ACTION_CROUCH, CR_ACTION_ZOOM
+	};
+	long action;
+
+	if (!chiefrim_active() || control < 0 || control >= 12 || (action = actions[control]) == NONE)
+		return NULL;
+	return chiefrim_key_names[action][0] ? chiefrim_key_names[action] : NULL;
 }
 
 static void chiefrim_pump_events(void)
@@ -276,6 +315,14 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_COLLISION_RESET:
 		case CR_MSG_COLLISION_TRIS:
 			chiefrim_world_message(type, buffer);
+			break;
+		case CR_MSG_KEY_NAMES:
+			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
+			break;
+		case CR_MSG_PLAYER_HURT:
+		case CR_MSG_GIVE_WEAPON:
+			if (chiefrim.world_valid)
+				chiefrim_combat_message(chiefrim_local_unit(), type, buffer, chiefrim.world.origin);
 			break;
 		default:
 			break;
@@ -733,7 +780,7 @@ boolean chiefrim_overlay_wanted(void)
 	return chiefrim_read_display(&display);
 }
 
-int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame)
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *camera_frame)
 {
 	cr_display display;
 
@@ -741,8 +788,122 @@ int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsign
 		return 0;
 	*width = display.width;
 	*height = display.height;
-	*frame = display.frame;
+	*camera_frame = chiefrim.camera_frame;
 	return 1;
+}
+
+void chiefrim_note_projection(real x0, real x1, real y0, real y1)
+{
+	static real logged_x, logged_y;
+	static uint32_t logged_ms;
+
+	chiefrim.tangent_x = 0.5f * (real)fabs(x1 - x0);
+	chiefrim.tangent_y = 0.5f * (real)fabs(y1 - y0);
+	/* when it changes, at most every 10 s (zooming changes it every frame) */
+	if (chiefrim.camera_frame && (!logged_ms || chiefrim_now_ms() - logged_ms >= 10000) &&
+		(fabs(chiefrim.tangent_x - logged_x) > 0.01f * logged_x + 0.001f ||
+		fabs(chiefrim.tangent_y - logged_y) > 0.01f * logged_y + 0.001f))
+	{
+		logged_ms = chiefrim_now_ms();
+		logged_x = chiefrim.tangent_x;
+		logged_y = chiefrim.tangent_y;
+		error(_error_silent, "chiefrim: Halo draws through Skyrim's camera with a view %.4f x %.4f (%.1f degrees vertically)",
+			chiefrim.tangent_x, chiefrim.tangent_y, 2.f * RADIANS_TO_DEGREES(atan(chiefrim.tangent_y)));
+	}
+}
+
+void chiefrim_overlay_projection(float *tangent_x, float *tangent_y)
+{
+	*tangent_x = chiefrim.tangent_x;
+	*tangent_y = chiefrim.tangent_y;
+}
+
+long chiefrim_overlay_layer(void)
+{
+	return chiefrim.render_layer;
+}
+
+void chiefrim_set_render_layer(long layer)
+{
+	chiefrim.render_layer = layer;
+}
+
+/* Lockstep with Skyrim (docs §9): the frame Halo draws next is for the
+camera Skyrim published as it began rendering its own, so the world layer
+sits on Skyrim's picture. Waits up to 30 ms for a camera newer than the
+last drawn (Skyrim paused: Halo draws at ~30 frames a second meanwhile),
+then sees through it: Skyrim's eye, forward and up, Halo's field of view
+(which Skyrim's follows). */
+struct observer_result const *chiefrim_render_camera(short local_player_index, struct observer_result const *observer)
+{
+	static struct observer_result result;
+	cr_camera camera;
+	uint32_t start = chiefrim_now_ms();
+	boolean have = FALSE;
+
+	chiefrim.camera_frame = 0;
+	if (!observer || local_player_index != 0 || !chiefrim_overlay_wanted() || !chiefrim.world_valid)
+		return observer;
+	for (;;)
+	{
+		if (CR_SLOT_READ(&chiefrim.shm->camera, &camera) && camera.frame)
+		{
+			have = TRUE;
+			if (camera.frame != chiefrim.last_camera_frame)
+				break;
+		}
+		if (chiefrim_now_ms() - start >= 30)
+			break;
+		{
+			struct timespec pause = { 0, 100000 }; /* 0.1 ms */
+
+			nanosleep(&pause, NULL);
+		}
+	}
+	if (!have)
+		return observer;
+	result = *observer;
+	{
+		cr_vec3 eye = cr_sky_to_halo(camera.eye, chiefrim.world.origin);
+
+		result.position.x = eye.x;
+		result.position.y = eye.y;
+		result.position.z = eye.z;
+	}
+	result.forward.i = camera.forward.x;
+	result.forward.j = camera.forward.y;
+	result.forward.k = camera.forward.z;
+	result.up.i = camera.up.x;
+	result.up.j = camera.up.y;
+	result.up.k = camera.up.z;
+	if (normalize3d(&result.forward) == 0.f || normalize3d(&result.up) == 0.f)
+		return observer;
+	chiefrim.camera_frame = camera.frame;
+	chiefrim.last_camera_frame = camera.frame;
+	return &result;
+}
+
+/* Everything the host level placed (scenery, vehicles, weapons, machines)
+but Chief and what he carries: in Skyrim it would stand around the
+origin. */
+static void chiefrim_clear_level_objects(long chief)
+{
+	struct object_iterator iterator;
+	static long doomed[2048];
+	long count = 0, index;
+
+	object_iterator_new(&iterator, _object_mask_all, 0);
+	while (object_iterator_next(&iterator) && count < (long)NUMBEROF(doomed))
+	{
+		if (iterator.index != chief && object_get_ultimate_parent(iterator.index) != chief)
+			doomed[count++] = iterator.index;
+	}
+	for (index = 0; index < count; index++)
+	{
+		if (object_try_and_get(doomed[index]))
+			object_delete(doomed[index]);
+	}
+	error(_error_silent, "chiefrim: erased the level's %ld other objects", count);
 }
 
 struct cr_shared *chiefrim_shared(void)
@@ -765,12 +926,16 @@ void chiefrim_initialize(void)
 	char const *flag = getenv("CHIEFRIM");
 
 	memset(&chiefrim, 0, sizeof(chiefrim));
+	chiefrim.chief_unit = NONE;
 	if (!flag || strcmp(flag, "1") != 0)
 		return;
 
 #ifdef __linux__
 	{
-		int fd = shm_open(CR_SHM_NAME, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		/* not truncated: a Skyrim still mapping the file of a Halo that died
+		(the supervisor restarts it, tools/launch_halo.sh) would fault on its
+		pages while the file was empty; sized in place and cleared below */
+		int fd = shm_open(CR_SHM_NAME, O_RDWR | O_CREAT, 0600);
 		void *address;
 
 		if (fd < 0 || ftruncate(fd, sizeof(cr_shared)) != 0)
@@ -854,7 +1019,23 @@ static void chiefrim_follow_skyrim(long unit_index, real_point3d *chief)
 	forward.j = player.forward.y;
 	forward.k = player.forward.z;
 	if (normalize3d(&forward) > 0.f)
+	{
+		/* Halo's aim stops at 85.5 degrees up or down (player_control.c asserts
+		it); Skyrim looks further, as when picking something off the floor */
+		real limit = DEGREES_TO_RADIANS(85.f);
+		real pitch = (real)asin(PIN(forward.k, -1.f, 1.f));
+		real across = (real)sqrt(forward.i * forward.i + forward.j * forward.j);
+		real yaw = across > 0.0001f ? (real)atan2(forward.j, forward.i) : cr_sky_heading_to_halo_yaw(player.yaw);
+
+		if (pitch > limit || pitch < -limit)
+		{
+			pitch = PIN(pitch, -limit, limit);
+			forward.i = (real)(cos(pitch) * cos(yaw));
+			forward.j = (real)(cos(pitch) * sin(yaw));
+			forward.k = (real)sin(pitch);
+		}
 		player_control_set_facing(0, &forward);
+	}
 	chiefrim.last_feet = position;
 }
 
@@ -988,9 +1169,27 @@ void chiefrim_frame(void)
 	if (!chiefrim.active)
 		return;
 
+	{
+		/* Chief's unit came back, or is another: Halo respawned him or went
+		back to a checkpoint (a death that wasn't Chiefrim's to prevent), which
+		also brings back the level's objects, AI and all. Skyrim's player dies
+		with him; the level is cleared again; the proxies are forgotten. */
+		long unit = chiefrim_local_unit();
+
+		if (chiefrim.chief_unit != NONE && unit != chiefrim.chief_unit && chiefrim.linked)
+		{
+			error(_error_silent, "chiefrim: Chief's unit changed (%ld to %ld): a respawn or a revert; clearing the level again",
+				chiefrim.chief_unit, unit);
+			chiefrim_combat_chief_lost();
+			chiefrim_combat_forget();
+			chiefrim.level_cleared = FALSE;
+		}
+		chiefrim.chief_unit = unit;
+	}
 	if (!chiefrim.level_cleared && chiefrim_local_unit() != NONE)
 	{
 		ai_erase(NONE, NONE, NONE, TRUE);
+		chiefrim_clear_level_objects(chiefrim_local_unit());
 		chiefrim.level_cleared = TRUE;
 		error(_error_silent, "chiefrim: erased the level's actors");
 	}
@@ -1006,9 +1205,9 @@ void chiefrim_frame(void)
 		chiefrim.recent_frames++;
 	}
 
-	/* No deaths while Skyrim drives (for now: deaths will follow Skyrim's
-	later). A campaign death waits for a checkpoint revert that Chiefrim
-	never makes, and Chief would never come back. */
+	/* No deaths of Halo's while linked: a campaign death waits for a
+	checkpoint revert that Chiefrim never makes, and Chief would never come
+	back. His body gone, Skyrim's player dies instead (chiefrim_combat.c). */
 	cheat.deathless_player = chiefrim.linked;
 	CR_STORE_REL(&chiefrim.shm->halo_heartbeat, chiefrim_now_ms());
 	chiefrim_watch_skyrim();
@@ -1136,6 +1335,8 @@ void chiefrim_frame(void)
 	}
 
 	chiefrim_debug_collision();
+	if (chiefrim.linked && chiefrim.world_valid)
+		chiefrim_combat_update(chiefrim_local_unit(), chiefrim.world.origin);
 	if (chiefrim.placement_pending && chiefrim_skyrim_drives())
 		chiefrim.placement_pending = FALSE; /* placed every frame where Skyrim's player is */
 	if (chiefrim.placement_pending)
@@ -1168,6 +1369,7 @@ void chiefrim_structure_bsp_loaded(void)
 	it, so the level can spawn Chief at its own starting location; then
 	Chiefrim's collision goes over it and Chief moves. */
 	chiefrim_world_map_loaded();
+	chiefrim_combat_map_loaded();
 	if (chiefrim.world_valid)
 		chiefrim.placement_pending = TRUE;
 }

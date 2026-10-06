@@ -44,7 +44,19 @@ boolean chiefrim_skyrim_drives(void);
 Chief's arms and weapon and the HUD (render.c, render_objects.c), and
 port/linux/src/chiefrim_overlay_gl.c sends them. */
 boolean chiefrim_overlay_wanted(void);
-int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame);
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *camera_frame);
+struct observer_result;
+/* main.c: the camera of local player 0's window, Skyrim's (lockstep) */
+struct observer_result const *chiefrim_render_camera(short local_player_index, struct observer_result const *observer);
+/* render.c: the layer being drawn (render_objects.c and the port follow it) */
+#define CHIEFRIM_LAYER_ALL    0 /* not in overlay mode: Halo's whole view */
+#define CHIEFRIM_LAYER_WORLD  1 /* projectiles, effects, decals, objects */
+#define CHIEFRIM_LAYER_SCREEN 2 /* the first-person weapon, the HUD */
+long chiefrim_overlay_layer(void);
+void chiefrim_note_projection(real x0, real x1, real y0, real y1); /* render.c: the view's tangents */
+void chiefrim_overlay_projection(float *tangent_x, float *tangent_y);
+void chiefrim_set_render_layer(long layer);
+void chiefrim_overlay_world_done(void); /* port: the world layer is drawn; on to the screen's */
 
 /* chiefrim_input.c (docs §7): Chief's controls from Skyrim's actions.
 input_abstraction.c (keyboard_controls_update) and player_control.c call
@@ -55,11 +67,23 @@ boolean chiefrim_input_look(short gamepad_index, real *yaw, real *pitch);
 boolean chiefrim_input_driving(short gamepad_index);
 boolean chiefrim_input_mark(void); /* the "mark stuck" hotkey, once per press */
 
+/* chiefrim_combat.c (docs §8): proxies for Skyrim's people, damage both ways */
+void chiefrim_combat_map_loaded(void);
+void chiefrim_combat_reset(long chief);                /* a new world */
+void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 origin);
+void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while linked */
+boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
+void chiefrim_combat_forget(void);                     /* Halo's game state went back */
+void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
+wchar_t const *chiefrim_control_key_name(long control); /* hud_messaging.c: the player's Skyrim key for one of Halo's controls, or NULL */
+void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter); /* damage.c: an explosion reached it */
+
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
 void chiefrim_world_initialize(void);
 void chiefrim_world_map_loaded(void);             /* a structure BSP loaded */
 void chiefrim_world_reset(cr_vec3 origin, real floor_z); /* a new world; floor in world units */
 void chiefrim_world_generation(unsigned long generation); /* the world context in force */
+void chiefrim_world_build_radius(unsigned long radius); /* regions around Chief's in a build */
 void chiefrim_world_message(int type, void const *message);
 void chiefrim_world_update(real_point3d const *chief); /* each frame; Chief or NULL */
 boolean chiefrim_world_below_collision(real_point3d const *point); /* below all of Skyrim's collision loaded */
