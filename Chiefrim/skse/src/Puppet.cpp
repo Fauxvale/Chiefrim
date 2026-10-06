@@ -6,6 +6,7 @@
 #include "Collision.h"
 #include "Combat.h"
 #include "Hud.h"
+#include "Lighting.h"
 #include "Input.h"
 #include "Link.h"
 
@@ -458,6 +459,7 @@ namespace chiefrim::Puppet
 			if (!wasConnected) {
 				s.worldSent = false;  // a new Halo: tell it everything again
 				Input::OnLinked();
+				Lighting::Reset();
 				SnapshotController(a_player);
 			}
 			Input::Publish(a_player);
@@ -511,6 +513,7 @@ namespace chiefrim::Puppet
 			}
 
 			Combat::PerFrame(a_player, a_delta);
+			Lighting::Update(a_player);
 			if (Settings::SkyrimMoves()) {
 				PublishPlayer(a_player);
 				s.lastPuppetPosition = position;  // a jump further than a frame's walk is a teleport

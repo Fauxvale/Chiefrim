@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 12
+VERSION = 13
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -47,7 +47,7 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
-MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES = 6, 7, 8, 9, 10
+MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
 REGION_UNITS = 1024.0
@@ -412,6 +412,8 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--light", type=float, default=-1.0,
+                        help="Skyrim's light for Halo's objects (CR_MSG_LIGHTING): ambient and a sun from above, this bright (0: dark)")
     parser.add_argument("--key-names", default="",
                         help="comma-separated, per CR_ACTION_* (jump,crouch,fire,zoom,reload,grenade,melee,action,...): "
                              "the keys Halo's prompts show")
@@ -606,6 +608,11 @@ def main():
                 link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,
                     options.x, options.y + 300.0, options.z + 60.0, 0, 0))
                 print(f"fake_skyrim: player hurt #{drive_state['hurts']} ({options.hurt_amount:.2f} of Chief)", flush=True)
+            if options.light >= 0.0 and time.monotonic() >= drive_state.get("next_light", 0.0):
+                drive_state["next_light"] = time.monotonic() + 0.1
+                a, k = 0.3 * options.light, 1.0 * options.light
+                link.push(RING_TO_HALO, MSG_LIGHTING, struct.pack("<3f3f3f3fI", a, a, a, 0.0, 0.0, 0.0, k, k * 0.95, k * 0.85,
+                                                                  0.3, 0.4, -0.866, 0) + bytes(4 * 28))
             if options.key_names and not drive_state.get("named"):
                 # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
                 names = options.key_names.split(",") + [""] * 12

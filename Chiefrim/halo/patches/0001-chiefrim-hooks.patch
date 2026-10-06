@@ -404,6 +404,29 @@ index 5f00c31c..16053cde 100644
  			object_cause_damage(
  				damage,
  				object_index,
+diff --git a/source/objects/object_lights.c b/source/objects/object_lights.c
+index f4ba4d79..8544f711 100644
+--- a/source/objects/object_lights.c
++++ b/source/objects/object_lights.c
+@@ -183,6 +183,7 @@ symbols in this file:
+ #include "structures/structure_visibility.h"
+ #include "tag_files/tag_groups.h"
+ #include "units/units.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -2277,6 +2278,10 @@ void lights_prepare_for_object_static(
+ 		"c:\\halo\\SOURCE\\objects\\object_lights.c",
+ 		970,
+ 		lighting);
++	if (chiefrim_object_lighting(object_index, lighting)) /* CHIEFRIM: Skyrim's light, not the host map's lightmap */
++	{
++		return;
++	}
+ 	if (TEST_FLAG(object->object.flags, _object_static_lighting_raycast_sideways_bit))
+ 	{
+ 		SET_FLAG(flags, _distant_lighting_raycast_sideways_bit, TRUE);
 diff --git a/source/render/render.c b/source/render/render.c
 index 68a746c2..24b5171a 100644
 --- a/source/render/render.c
@@ -529,7 +552,7 @@ index bcd26cd0..176277d3 100644
  
  boolean render_camera_world_to_screen(
 diff --git a/source/render/render_objects.c b/source/render/render_objects.c
-index dad616be..7a438ac6 100644
+index dad616be..2bf21eb3 100644
 --- a/source/render/render_objects.c
 +++ b/source/render/render_objects.c
 @@ -106,6 +106,7 @@ symbols in this file:
@@ -567,6 +590,16 @@ index dad616be..7a438ac6 100644
  		{
  			struct render_model_effect model_effect;
  
+@@ -900,7 +905,8 @@ static void object_render_state_refresh(
+ 		refresh_age = 1;
+ 	}
+ 
+-	if (TEST_FLAG(object_get(object_index)->object.flags, _object_static_lighting_recompute_bit))
++	if (TEST_FLAG(object_get(object_index)->object.flags, _object_static_lighting_recompute_bit) ||
++		chiefrim_active()) /* CHIEFRIM: Skyrim's light changes (a torch) with nothing moving */
+ 	{
+ 		if (level_of_detail_pixels > OBJECT_RENDER_STATE_LARGE_PIXELS)
+ 		{
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index 265149a3..76b6189b 100644
 --- a/source/scenario/scenario.c

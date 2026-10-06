@@ -608,8 +608,8 @@ using the camera Skyrim is about to use. It draws three layers:
 - **Still to come:** the zoom screen effect's tints on Skyrim's picture (night vision); checking
   the sniper's and rocket launcher's scopes in game (b30 starts Chief with the MA5B and M6D only:
   needs §8.4's weapon spawn command); the layers apart (the weapon under Skyrim's HUD, not over its compass and
-  messages), the world layer with depth (Phase 3), hiding Skyrim's own crosshair and bars (§11),
-  and object lighting from Skyrim (the weapon is lit by the host map's lightmap for now).
+  messages), the world layer with depth (Phase 3), hiding Skyrim's own crosshair and bars, and
+  object lighting from Skyrim (both done in Phase 4, below).
 **Phase 3 (done 2026-10-06, verified in game): the world layer, in lockstep.**
 
 - **Two layers.** In overlay mode `render_window` draws the **world layer** first (every object
@@ -670,6 +670,29 @@ using the camera Skyrim is about to use. It draws three layers:
 - **Sound:** Halo plays its own sound through SDL (gunfire, reloads, shield alarms, Chief's
   grunts), positioned at the shared camera. Skyrim keeps its own sound. Unlike SkyCraft, Halo is
   **not** muted.
+
+
+**Phase 4 (started 2026-10-06): Skyrim's HUD and light.**
+
+- **Skyrim's HUD.** Halo's HUD has the crosshair, shields and health, so while Chief is linked the
+  plugin hides Skyrim's crosshair and health, magicka and stamina bars (`hudmenu.swf`'s
+  `HUDMovieBaseInstance.CrosshairInstance`, `Health`, `Magica`, `Stamina`: `_visible` false each
+  frame, as Skyrim's HUD shows them again on every mode change) and puts them back when the link
+  closes. The compass, sneak eye, activate prompt, enemy health bar and notifications stay.
+  `[HUD] bHideCrosshair`, `bHideBars`.
+- **Skyrim's light on Halo's objects** (protocol 13). Halo lit objects from its map's lightmap under
+  them, which Chiefrim's collision BSP doesn't have: every object had the host map's default
+  light. Now ~10 times a second the plugin sends `CR_MSG_LIGHTING`: Skyrim's directional ambient
+  (`BSShaderManager::State::directionalAmbientTransform`: its translate is the average, its z
+  column what faces up adds), its key light (the scene's `sunLight`: sun or moon outside, the
+  cell's directional light inside, pointed down), and the 4 point lights nearest the player
+  (torches, fires, spells: the scene's active lights). object_lights.c's hook lights each object
+  from them at its own position (chiefrim_lighting.c): ambient, the key as distant light 0, the
+  strongest point light (or the sky's light from above) as distant light 1, the others into the
+  ambient; reflections and shadow as Halo derives them from a lightmap. Objects' lighting is
+  refreshed every tick (Halo only refreshed moving objects'), smoothed by Halo's own
+  interpolation. Offline: the MA5B in a 0.05 scene against a 1.0 scene, mean weapon brightness 52
+  against 79 (its ammo counter glows by itself). `[Lighting] bEnabled`, `fBrightness`, `fPointLights`.
 
 ## 10. Protocol / IPC
 

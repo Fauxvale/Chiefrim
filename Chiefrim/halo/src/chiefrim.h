@@ -76,6 +76,12 @@ boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a pr
 void chiefrim_combat_forget(void);                     /* Halo's game state went back */
 void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
 wchar_t const *chiefrim_control_key_name(long control); /* hud_messaging.c: the player's Skyrim key for one of Halo's controls, or NULL */
+/* chiefrim_lighting.c (docs §9): Skyrim's light on Halo's objects */
+void chiefrim_lighting_message(cr_msg_lighting const *message);
+void chiefrim_lighting_forget(void);
+struct render_lighting;
+boolean chiefrim_object_lighting(long object_index, struct render_lighting *lighting); /* object_lights.c: in place of the lightmap */
+boolean chiefrim_world_origin(cr_vec3 *origin);         /* Skyrim's world origin, if one is set */
 void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter); /* damage.c: an explosion reached it */
 
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */

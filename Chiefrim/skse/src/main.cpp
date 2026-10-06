@@ -2,6 +2,7 @@
 #include "Camera.h"
 #include "Combat.h"
 #include "Hud.h"
+#include "Lighting.h"
 #include "Input.h"
 #include "Overlay.h"
 #include "Puppet.h"
@@ -32,6 +33,7 @@ namespace
 			chiefrim::Overlay::Install();
 			chiefrim::Combat::Install();
 			chiefrim::Hud::Install();
+			chiefrim::Lighting::Install();
 		}
 	}
 }
