@@ -40,6 +40,12 @@ boolean chiefrim_linked(void);
 /* Skyrim moves the player and Chief follows (docs §7), rather than Halo moving Chief. */
 boolean chiefrim_skyrim_drives(void);
 
+/* Skyrim draws Halo's layers over its picture (docs §9): Halo draws only
+Chief's arms and weapon and the HUD (render.c, render_objects.c), and
+port/linux/src/chiefrim_overlay_gl.c sends them. */
+boolean chiefrim_overlay_wanted(void);
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame);
+
 /* chiefrim_input.c (docs §7): Chief's controls from Skyrim's actions.
 input_abstraction.c (keyboard_controls_update) and player_control.c call
 these for each local player's controller; they only answer for player 0. */

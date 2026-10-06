@@ -10,6 +10,17 @@
 
 namespace chiefrim::Input
 {
+	bool InGameplay()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		auto* map = RE::ControlMap::GetSingleton();
+		if (!ui || !map || ui->GameIsPaused() || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
+			return false;
+		}
+		const auto& stack = map->GetRuntimeData().contextPriorityStack;
+		return !stack.empty() && stack.back() == RE::UserEvents::INPUT_CONTEXT_ID::kGameplay;
+	}
+
 	void PublishNeutral();
 
 	namespace
@@ -388,17 +399,6 @@ namespace chiefrim::Input
 				modeSink->ProcessEvent(&mode, modeSource);
 			}
 			logger::info("Skyrim's player controls reset (as pausing does)");
-		}
-
-		bool InGameplay()
-		{
-			auto* ui = RE::UI::GetSingleton();
-			auto* map = RE::ControlMap::GetSingleton();
-			if (!ui || !map || ui->GameIsPaused() || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
-				return false;
-			}
-			const auto& stack = map->GetRuntimeData().contextPriorityStack;
-			return !stack.empty() && stack.back() == RE::UserEvents::INPUT_CONTEXT_ID::kGameplay;
 		}
 
 		// Logs the keys Chief's actions are bound to now, and warns when a

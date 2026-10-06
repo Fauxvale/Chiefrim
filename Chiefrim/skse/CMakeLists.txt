@@ -77,6 +77,7 @@ add_commonlibsse_plugin(
 
 target_include_directories(Chiefrim PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR}/../protocol)
 target_precompile_headers(Chiefrim PRIVATE src/PCH.h)
+target_link_libraries(Chiefrim PRIVATE d3dcompiler.lib) # the compositor's shaders (src/Overlay.cpp)
 target_compile_definitions(Chiefrim PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 	target_compile_options(Chiefrim PRIVATE /W4 /utf-8 -Wno-c++98-compat -Wno-unused-parameter)

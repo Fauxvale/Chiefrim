@@ -24,4 +24,7 @@ namespace chiefrim::Input
 	// (Skyrim's handlers back on).
 	void OnLinked();
 	void OnUnlinked();
+
+	// Gameplay has the controls: no menu, loading screen or console open.
+	bool InGameplay();
 }

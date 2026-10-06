@@ -703,6 +703,48 @@ real chiefrim_field_of_view_tangent_scale(void)
 	return tangent(DEGREES_TO_RADIANS(chiefrim.world.field_of_view) * 0.5f) / tangent(base * 0.5f);
 }
 
+/* Skyrim composites Halo's layers (docs §9): its screen, while it asks.
+A read that finds Skyrim writing keeps the last (going without the overlay
+for a frame would resize every target twice). */
+static boolean chiefrim_read_display(cr_display *display)
+{
+	static cr_display last;
+	static boolean have;
+	cr_display latest;
+
+	if (!chiefrim.active || !chiefrim.linked)
+	{
+		have = FALSE;
+		return FALSE;
+	}
+	if (CR_SLOT_READ(&chiefrim.shm->display, &latest))
+	{
+		last = latest;
+		have = TRUE;
+	}
+	*display = last;
+	return have && (last.flags & CR_DISPLAY_OVERLAY) && last.width && last.height;
+}
+
+boolean chiefrim_overlay_wanted(void)
+{
+	cr_display display;
+
+	return chiefrim_read_display(&display);
+}
+
+int chiefrim_overlay_display(unsigned long *width, unsigned long *height, unsigned long *frame)
+{
+	cr_display display;
+
+	if (!chiefrim_read_display(&display))
+		return 0;
+	*width = display.width;
+	*height = display.height;
+	*frame = display.frame;
+	return 1;
+}
+
 struct cr_shared *chiefrim_shared(void)
 {
 	return chiefrim.active ? chiefrim.shm : NULL;

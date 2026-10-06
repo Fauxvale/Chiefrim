@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 5u
+#define CR_PROTOCOL_VERSION 6u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -178,10 +178,23 @@ typedef struct cr_skyrim_player
 #define CR_SKYRIM_ON_GROUND 0x0002u
 #define CR_SKYRIM_SNEAKING  0x0004u
 
+/* Skyrim -> Halo. Skyrim's picture (docs §9): Halo draws Chief's layers at
+its size and shape. */
+typedef struct cr_display
+{
+	uint32_t width;         /* Skyrim's back buffer, pixels */
+	uint32_t height;
+	uint32_t flags;         /* CR_DISPLAY_* */
+	uint32_t frame;         /* bumps each Skyrim frame (Present) */
+} cr_display;
+
+#define CR_DISPLAY_OVERLAY 0x0001u /* Skyrim composites Halo's frames: draw them */
+
 CR_DECLARE_SLOT(cr_slot_world_context, cr_world_context);
 CR_DECLARE_SLOT(cr_slot_input, cr_input);
 CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
 CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
+CR_DECLARE_SLOT(cr_slot_display, cr_display);
 
 /* ---- rings (events) ---------------------------------------------------- */
 
@@ -282,6 +295,46 @@ typedef struct cr_msg_collision_tris
 #define CR_COLLISION_TRIS_SIZE(count) \
 	((uint32_t)__builtin_offsetof(cr_msg_collision_tris, tris) + (uint32_t)(count) * (uint32_t)sizeof(cr_triangle))
 
+/* ---- frames (H->S, docs §9) -------------------------------------------- */
+
+/* Halo's picture of what it draws over Skyrim's: Chief's arms and weapon,
+and the HUD, on transparent black. Pixels are RGBA8, premultiplied (draw
+with ONE, INV_SRC_ALPHA), top row first, rows of width * 4 bytes.
+
+Halo writes the slots round-robin, each under its own seqlock, and then
+names it the latest. Skyrim copies the latest slot out and checks its seq
+again: a slot changed meanwhile is torn and dropped (Halo would have to
+draw two more frames during one copy). Nobody owns a slot, so either side
+can restart at any time. */
+#define CR_FRAME_SLOTS      3u
+#define CR_FRAME_MAX_WIDTH  2560u /* larger screens get a smaller picture, scaled up */
+#define CR_FRAME_MAX_HEIGHT 1440u
+#define CR_FRAME_BYTES      (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
+
+typedef struct cr_frame_header
+{
+	uint32_t seq;           /* odd while Halo writes the slot */
+	uint32_t width;         /* pixels */
+	uint32_t height;
+	uint32_t frame;         /* Halo's frame count */
+	uint32_t display_frame; /* the cr_display.frame Halo had read */
+	uint32_t time_us;       /* Halo's clock when drawn (wraps) */
+	uint32_t flags;         /* CR_FRAME_* */
+	uint32_t reserved;
+} cr_frame_header;
+
+#define CR_FRAME_VISIBLE 0x0001u /* something to draw: else the picture is all transparent */
+
+typedef struct cr_frames
+{
+	uint32_t latest;        /* the newest complete slot + 1; 0: none yet */
+	uint32_t published;     /* frames published (wraps) */
+	uint32_t reserved[6];
+	cr_frame_header slots[CR_FRAME_SLOTS];
+	uint32_t pad[8];        /* pixels start on a 64-byte line */
+	uint8_t  pixels[CR_FRAME_SLOTS][CR_FRAME_BYTES];
+} cr_frames;
+
 /* ---- the whole mapping ------------------------------------------------- */
 
 typedef struct cr_shared
@@ -309,6 +362,11 @@ typedef struct cr_shared
 	/* rings */
 	cr_ring to_halo;
 	cr_ring to_skyrim;
+
+	/* protocol 6: after the rings, so the offsets above stay */
+	cr_slot_display display;              /* S->H */
+	uint32_t reserved2[18];
+	cr_frames frames;                     /* H->S */
 } cr_shared;
 
 /* ---- seqlock helpers ---------------------------------------------------- */
@@ -515,7 +573,15 @@ CR_STATIC_ASSERT(CR_COLLISION_TRIS_SIZE(CR_TRIS_PER_MESSAGE) <= 0xFFF8u, "a full
 CR_STATIC_ASSERT(sizeof(cr_ring) == 128 + CR_RING_BYTES, "cr_ring");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, world_context) == 64, "cr_shared.world_context");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, to_halo) == 352, "cr_shared.to_halo");
-CR_STATIC_ASSERT(sizeof(cr_shared) == 352 + 2 * (128 + CR_RING_BYTES), "cr_shared");
+CR_STATIC_ASSERT(sizeof(cr_display) == 16, "cr_display");
+CR_STATIC_ASSERT(sizeof(cr_slot_display) == 24, "cr_slot_display");
+CR_STATIC_ASSERT(sizeof(cr_frame_header) == 32, "cr_frame_header");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 160, "cr_frames.pixels");
+#define CR_OFFSET_DISPLAY (352u + 2u * (128u + CR_RING_BYTES))
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u, "cr_shared.frames");
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) % 64u == 0, "cr_shared.frames: on a line");
+CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 160u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
 
 #ifdef __cplusplus
 }

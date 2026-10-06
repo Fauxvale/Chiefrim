@@ -30,6 +30,11 @@ namespace chiefrim
 		std::optional<cr_player_state> ReadPlayerState();
 		void SendSkyrimPlayer(const cr_skyrim_player& a_player);
 
+		// The compositor (docs §9), on the thread that runs Update: Skyrim's
+		// screen to Halo, and Halo's frames; nullptr while unlinked.
+		void SendDisplay(const cr_display& a_display);
+		const cr_frames* Frames() const { return shm_ ? &shm_->frames : nullptr; }
+
 	private:
 		bool TryOpen(ULONGLONG a_now);
 		void Close(const char* a_reason);

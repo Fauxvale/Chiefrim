@@ -9,6 +9,9 @@ can be tested without Skyrim.
 
 Usage: tools/fake_skyrim.py [--seconds N] [--x X --y Y --z Z --heading DEG]
   The default position is outside Whiterun's gate in Tamriel.
+  --overlay WxH asks Halo for its overlay frames (docs §9) at that size, and
+  --grab DIR saves one every few seconds there as a PNG (over a grey
+  checkerboard, so transparency shows).
 
 The layout below mirrors protocol/chiefrim_protocol.h; the script checks the
 mapping's total_size, which the header pins with static_asserts.
@@ -24,9 +27,13 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 5
+VERSION = 6
 RING_BYTES = 4 * 1024 * 1024
-TOTAL_SIZE = 352 + 2 * (128 + RING_BYTES)
+OFF_DISPLAY = 352 + 2 * (128 + RING_BYTES)
+OFF_FRAMES = OFF_DISPLAY + 96
+FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
+FRAME_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
+TOTAL_SIZE = OFF_FRAMES + 160 + FRAME_SLOTS * FRAME_BYTES
 
 # offsets (chiefrim_protocol.h)
 SKYRIM_PID, HALO_PID = 16, 20
@@ -286,6 +293,46 @@ def text(raw):
     return raw.split(b"\0", 1)[0].decode(errors="replace")
 
 
+def grab_frame(link, directory, index):
+    """The latest overlay frame (cr_frames) as a PNG over a checkerboard; False if none or torn."""
+    import zlib
+    latest = link.u32(OFF_FRAMES)
+    if not latest:
+        return False
+    slot = latest - 1
+    header = OFF_FRAMES + 32 + 32 * slot
+    seq, width, height, frame, display_frame, time_us, flags, _ = struct.unpack_from("<8I", link.shm, header)
+    if seq & 1 or not (0 < width <= FRAME_MAX_W and 0 < height <= FRAME_MAX_H):
+        return False
+    start = OFF_FRAMES + 160 + slot * FRAME_BYTES
+    pixels = bytes(link.shm[start:start + width * height * 4])
+    if link.u32(header) != seq:
+        return False
+    rows = []
+    covered = 0
+    for y in range(height):
+        row = bytearray(b"\0")
+        line = pixels[y * width * 4:(y + 1) * width * 4]
+        for x in range(width):
+            r, g, b, a = line[x * 4:x * 4 + 4]
+            if a:
+                covered += 1
+            grey = 150 if ((x >> 4) + (y >> 4)) & 1 else 100
+            keep = 255 - a
+            row += bytes((min(255, r + grey * keep // 255), min(255, g + grey * keep // 255), min(255, b + grey * keep // 255)))
+        rows.append(bytes(row))
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(b"".join(rows), 6)) + chunk(b"IEND", b"")
+    path = os.path.join(directory, f"overlay{index:03}.png")
+    with open(path, "wb") as out:
+        out.write(png)
+    print(f"fake_skyrim: overlay frame {frame} ({width}x{height}, flags {flags}, display frame {display_frame},"
+          f" {100.0 * covered / (width * height):.1f}% covered) -> {path}", flush=True)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seconds", type=float, default=60)
@@ -328,6 +375,14 @@ def main():
                         help="Chief's collision radius in Skyrim units, as the plugin sends it (0: Halo's own)")
     parser.add_argument("--height", type=float, default=128.0,
                         help="Chief's height in Skyrim units, as the plugin sends it (0: Halo's own)")
+    parser.add_argument("--overlay", default="",
+                        help="WxH: ask Halo for overlay frames at this size, as the plugin does (docs §9)")
+    parser.add_argument("--grab", default="",
+                        help="with --overlay: save a frame to this directory every --grab-every seconds")
+    parser.add_argument("--grab-every", type=float, default=5.0)
+    parser.add_argument("--zoom-at", type=float, default=0.0,
+                        help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
+                             " (without --drive: the input slot is otherwise unused)")
     options = parser.parse_args()
     if options.dump:
         global DUMP
@@ -384,6 +439,13 @@ def main():
         PLANK = options.plank
         send_terrain(link, 1, *(options.dump_origin if DUMP else (options.x, options.y, options.z)))
 
+    display = None
+    if options.overlay:
+        w, h = (int(v) for v in options.overlay.lower().split("x"))
+        display = [w, h, 0]
+    if options.grab:
+        os.makedirs(options.grab, exist_ok=True)
+    last_grab, grabs = time.monotonic(), 0
     last_print = 0.0
     last_seq = 0
     last_tick = None
@@ -448,6 +510,26 @@ def main():
                     drive_state["skyrim_frame"], 0x1 | 0x2, px, py, pz, 0.0, 0.0,
                     px, py, pz + 120.0, 0.0, 1.0, 0.0, 0.0, 300.0 if t > 2 else 0.0, 0.0, 0, 0))
                 drive_state["skyrim_pos"] = (px, py, pz)
+            if options.zoom_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                if t >= options.zoom_at and not drive_state.get("switched"):
+                    presses[8] = (presses[8] + 1) & 0xFF  # CR_ACTION_SWITCH_WEAPON
+                    drive_state["switched"] = True
+                    print("fake_skyrim: switch weapon", flush=True)
+                zooming = t >= options.zoom_at + 2.0
+                if zooming and not drive_state.get("zoomed"):
+                    drive_state["zoomed"] = True
+                    print("fake_skyrim: zoom held", flush=True)
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 3) if zooming else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
+            if display:
+                display[2] += 1
+                link.slot_write(OFF_DISPLAY, struct.pack("<4I", display[0], display[1], 0x1, display[2]))
+                if options.grab and time.monotonic() - last_grab >= options.grab_every:
+                    if grab_frame(link, options.grab, grabs):
+                        grabs += 1
+                    last_grab = time.monotonic()
             if link.u32(HALO_STATE) == SIDE_CLOSING:
                 print("fake_skyrim: Halo is closing")
                 break

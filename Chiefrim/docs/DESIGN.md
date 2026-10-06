@@ -3,7 +3,7 @@
 > Play Skyrim as Master Chief: Halo: Combat Evolved's movement, shields, weapons, grenades, HUD
 > and first-person view, running in the real Skyrim world and fighting Skyrim's NPCs.
 
-Status: draft v0.2 · 2026-10-04 (Phase 0 findings folded in)
+Status: draft v0.3 · 2026-10-05 (Phase 2's compositor folded in)
 
 The approach follows [SkyCraft](https://github.com/chasmlol/SkyCraft) (Skyrim + Minecraft). Its
 `docs/DESIGN.md` is the reference for anything this doc does not change.
@@ -508,14 +508,47 @@ using the camera Skyrim is about to use. It draws three layers:
 | **First person** | Chief's arms and weapon (`first_person_weapon_render_update`), with Halo's fire, reload and melee animations | After Skyrim's scene, before its HUD |
 | **HUD** | Halo's HUD (`hud_draw_screen`): shields, health, ammo, grenades, motion tracker, crosshair, and any open Halo screen | On top of everything |
 
-- **Halo side:** `render_window` (`source/render/render.c:302`) gets a Chiefrim mode that skips
+**Built in Phase 2 (2026-10-05): the first-person and HUD layers, as one picture.**
+
+- **Halo side:** while Skyrim asks for the overlay (the `display` slot, below), `render_window`
+  draws only the first-person weapon (`render_objects` skips every other object), its transparent
+  parts, the HUD (`interface_draw_screen`), the screen flash and Halo's UI widgets. Halo's zoom
+  screen effect (`interface.c`: every weapon's zoom blur and mask, desaturation, the sniper's night
+  vision) is skipped: it redraws the whole screen from Halo's picture, which here is empty, and
+  covered Skyrim with black (the first in-game test, zooming the pistol). Scope masks are HUD
+  bitmaps and still show. Night vision and desaturation, if wanted, belong on Skyrim's picture. No sky,
+  structure, decals, particles, fog, lens flares or mirrors. The port's screen takes Skyrim's
+  shape: 480 lines and as many columns as the shape gives, its targets at Skyrim's pixels (at most
+  2560x1440; a bigger screen gets a smaller picture, scaled up).
+- **Coverage:** the picture's alpha can't say what Halo covered (the game uses destination alpha
+  as scratch). So the back buffer's framebuffer gets a second target: every pixel shader also
+  writes (1, 1, 1, alpha) there, and each draw's blend becomes what that blend does to coverage
+  (opaque: 1; alpha blend: mixed by alpha; additive: unchanged, as light covers nothing;
+  modulating: unchanged). The picture is then premultiplied over black: Skyrim draws it with
+  (ONE, INV_SRC_ALPHA). A resolve pass makes RGBA from the two (`halo/src/port/chiefrim_overlay_gl.c`,
+  hooked into the port's `d3d8_gl.c` and `nv2a_psh.c`).
+- **Skyrim side** (`skse/src/Overlay.cpp`): a hook on the swap chain's Present (vtable, so it
+  chains with SSE Display Tweaks') sends the screen size each frame, uploads Halo's newest frame
+  into a dynamic texture and draws it over the picture, only in gameplay (no menu, loading screen
+  or console; the same test as input routing) and only while Halo keeps publishing (hidden after
+  500 ms without a frame). `[Overlay] bEnabled` turns it off. The HLSL is compiled at start
+  (`d3dcompiler_47`): checked under Proton Experimental with DXVK, where its blend gives the
+  expected pixels for opaque, half-covered, additive and empty texels.
+- **Still to come:** the zoom screen effect's tints on Skyrim's picture (night vision); checking
+  the sniper's and rocket launcher's scopes in game (b30 starts Chief with the MA5B and M6D only:
+  needs §8.4's weapon spawn command); the layers apart (the weapon under Skyrim's HUD, not over its compass and
+  messages), the world layer with depth (Phase 3), hiding Skyrim's own crosshair and bars (§11),
+  and object lighting from Skyrim (the weapon is lit by the host map's lightmap for now).
+- **Halo side, later layers:** `render_window` (`source/render/render.c:302`) gets a Chiefrim mode that skips
   `render_sky`, the structure lightmap and visibility passes, and the parts of the world Skyrim
   already draws.
 - **Lighting:** with no lightmaps, object lighting comes from Skyrim. `WorldContext` carries the
   sun direction and colour and the ambient light, from Skyrim's weather and time of day.
 - **Transport (v1, CPU):** Halo reads color and depth back into the shared memory frame slots
-  through asynchronous PBOs (triple-buffered), and the plugin uploads them into D3D11 textures.
-  At 1080p that is about 16 MB per layer per frame. GPU sharing between Skyrim's D3D11 (under
+  through asynchronous PBOs (Phase 2: two, a frame behind), and the plugin uploads them into D3D11
+  textures. At 1080p that is about 8 MB per layer per frame (16 with depth). The slots (three) are
+  written round-robin, each under its own seqlock, so neither side owns one and either can restart;
+  a copy that sees its slot change is torn and dropped. GPU sharing between Skyrim's D3D11 (under
   DXVK on Vulkan) and Halo's native OpenGL is a later optimisation through Vulkan external memory,
   and only if the CPU path is too slow.
 - **Frame lockstep:** as in SkyCraft. Skyrim signals "begin frame N" with the camera. Halo renders
@@ -572,7 +605,8 @@ Initial message catalog:
 | H→S | `PlayerState {pos, yaw, pitch, pose, onGround, camera, bodyFrac, shieldFrac}` | Per frame |
 | H→S | `HitActor {...}` | Event |
 | H→S | `PlayerDied` | Event |
-| H→S | `FrameReady {frameId, layer offsets}` | Per frame |
+| S→H | `display` slot `{width, height, flags, frame}` (protocol 6) | Per frame (Present) |
+| H→S | `frames`: 3 slots of RGBA8 premultiplied pixels, each `{seq, width, height, frame, display_frame, time_us}` (protocol 6) | Per frame |
 | H→S | `MenuState {haloScreenOpen}` | On change |
 | H→S | `SaveState {blob}` | Reply |
 
@@ -610,7 +644,7 @@ Each phase ends in something you can play.
 |---|---|---|
 | 0 | **Link** | The SKSE plugin cross-compiles on Linux and loads in 1.6.1170. Both sides handshake over `/dev/shm` across the Proton boundary. The coordinate and yaw mapping is unit-tested. Halo runs on the host map with Chiefrim's collision BSP: a temporary flat floor at Skyrim ground height. Walking as Chief moves the Skyrim player. `tools/fake_skyrim.py` stands in for Skyrim. **Status: done (2026-10-04).** Verified in game on 1.6.1170: the plugin links to Halo across Proton, sends the world context and Teleport, Chief is placed and the Skyrim player follows him, and menus and loading screens keep the link (heartbeat thread). The first in-game test found three bugs, all fixed (a stale BSP surface index crash, a link timeout at connect, and Chief re-placed after Skyrim pauses). |
 | 1 | **Walk Skyrim as Chief** | **Status: done (2026-10-05), verified in game.** Skyrim moves the player and Chief follows (§7, `bSkyrimMoves=1`): Skyrim's own controller walks, jumps, sprints and sneaks on Skyrim's meshes; Chief is placed there each frame and aimed along the camera. Chief's actions are Skyrim's (InputBridge, §7; rebinding carries over): fire, zoom (with the view narrowing), reload, grenade, melee, weapon and grenade switch, flashlight, all verified. The camera is Skyrim's, with Chief's field of view (85, zoom from Halo) and no third-person switch while linked. Halo's collision (§5.2, the runtime BSP builder) is built from Skyrim's Havok shapes for shots and grenades. Unlinking leaves Skyrim fully playable (controls reset as pausing does). The Halo-driven mode (`bSkyrimMoves=0`, CameraDriver §6 and the movement safeguards) stays: it walked, but caught and bounced on Skyrim's meshes. |
-| 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. |
+| 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: built (2026-10-05), to be tried in game.** One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. |
 | 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |
 | 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
@@ -641,7 +675,8 @@ Chiefrim/
                                  cmake/clang-cl-xwin.cmake cross toolchain)
   halo/                          Halo-side changes (see below)
   tools/                         setup_halo.py, setup_skse.sh, package_skse.sh, launch_halo.sh,
-                                 run_phase0.sh, fake_skyrim.py, test_protocol.sh, linktest/;
+                                 run_phase0.sh, fake_skyrim.py (--overlay, --grab: Halo's
+                                 frames as PNGs), test_protocol.sh, linktest/;
                                  later: tag lister
   licenses.toml                  every third-party component and its license (LICENSING.md)
   build/                         (git-ignored) test builds, Halo test data root, screenshots
@@ -652,9 +687,12 @@ At the repo root: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`.
 **Halo-side changes (settled in Phase 0):** no fork. `halo/` holds:
 
 - `UPSTREAM`: the pinned halo-ce-universal commit.
-- `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (about 20 lines in
-  `main.c`, `game.c`, `scenario.c` and `scenario.h`).
-- `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`).
+- `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (`main.c`,
+  `game.c`, `scenario.c`/`.h`, `player_control.c`, `input_abstraction.c`, `render_cameras.c`,
+  `render.c`, `render_objects.c`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
+- `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`, ...); `src/port/` goes to
+  `port/linux/src/` instead (`chiefrim_overlay_gl.c`: code on the port's OpenGL device, built with
+  the platform layer's flags).
 - `overrides/`: whole upstream files Chiefrim replaces, for licensing (`port/linux/src/xiso.c`;
   see [LICENSING.md](LICENSING.md)).
 

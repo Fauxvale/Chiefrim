@@ -10,7 +10,9 @@ this script makes the work tree halo/.work (git-ignored) from it:
 3. copy halo/overrides/** over the tree: whole files Chiefrim replaces,
    for licensing (docs/LICENSING.md: xiso.c);
 4. copy halo/src/* and protocol/chiefrim_protocol.h to source/chiefrim/,
-   where the game's build picks up every .c file by itself;
+   where the game's build picks up every .c file by itself, and
+   halo/src/port/* to port/linux/src/ (code on the port's OpenGL device,
+   built with the platform layer's flags);
 5. check licenses (tools/check_licenses.py), then configure and build with
    ninja (unless --no-build).
 
@@ -66,7 +68,10 @@ def main():
     target = WORK / "source" / "chiefrim"
     target.mkdir(exist_ok=True)
     for source in sorted((HALO / "src").iterdir()):
-        shutil.copy2(source, target / source.name)
+        if source.is_file():
+            shutil.copy2(source, target / source.name)
+    for source in sorted((HALO / "src" / "port").iterdir()):
+        shutil.copy2(source, WORK / "port" / "linux" / "src" / source.name)
     shutil.copy2(ROOT / "protocol" / "chiefrim_protocol.h", target / "chiefrim_protocol.h")
 
     run(sys.executable, ROOT / "tools" / "check_licenses.py", "--halo", cwd=ROOT)

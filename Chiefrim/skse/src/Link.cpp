@@ -186,6 +186,13 @@ namespace chiefrim
 		}
 	}
 
+	void Link::SendDisplay(const cr_display& a_display)
+	{
+		if (shm_) {
+			CR_SLOT_WRITE(&shm_->display, a_display);
+		}
+	}
+
 	std::optional<cr_player_state> Link::ReadPlayerState()
 	{
 		if (!shm_) {

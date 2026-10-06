@@ -1,3 +1,109 @@
+diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
+index 43c924d2..a8038028 100644
+--- a/port/linux/src/d3d8_gl.c
++++ b/port/linux/src/d3d8_gl.c
+@@ -25,6 +25,7 @@ Conventions carried over from the Xbox:
+ #include "sdl_platform.h"
+ #include "halo_ui_pointer.h"
+ #include "port_config.h"
++#include "chiefrim_overlay_gl.h" /* CHIEFRIM */
+ 
+ #include <math.h>
+ #include <stdio.h>
+@@ -101,6 +102,8 @@ static void screen_mode_choose(long *width, float scale[2])
+ #else
+ 	long display_width, display_height;
+ 
++	if (chiefrim_overlay_screen_mode(width, scale)) /* CHIEFRIM: Skyrim's screen */
++		return;
+ 	*width = 640;
+ 	scale[0] = scale[1] = 1.0f;
+ 	if (platform_screen_mode(&display_width, &display_height) && display_width > 0 && display_height > 0)
+@@ -849,6 +852,8 @@ static GLuint framebuffer_get(GLuint color, GLuint depth)
+ 
+ /* the pixels per unit of the bound targets (render_target_get) */
+ static float target_scale[2] = { 1.0f, 1.0f };
++/* CHIEFRIM: the bound framebuffer has the overlay's coverage target */
++static BOOL chiefrim_coverage_bound;
+ 
+ /* the pixel edge of a coordinate in the bound targets' units */
+ static GLint target_pixel(float coordinate, int axis)
+@@ -872,7 +877,16 @@ static BOOL bind_targets(BOOL *has_depth)
+ 	/* viewports and clears are in the targets' units (render_target_get) */
+ 	target_scale[0] = color ? color->target.scale[0] : depth->target.scale[0];
+ 	target_scale[1] = color ? color->target.scale[1] : depth->target.scale[1];
+-	state_framebuffer(framebuffer_get(color ? color->target.texture : 0, depth ? depth->target.texture : 0));
++	{
++		/* CHIEFRIM: the back buffer with the overlay's coverage */
++		GLuint overlay = color && color->target.data == device.back_buffer.Data ?
++			chiefrim_overlay_framebuffer(color->target.texture, depth ? depth->target.texture : 0,
++				color->target.gl_width, color->target.gl_height) : 0;
++
++		chiefrim_coverage_bound = overlay != 0;
++		state_framebuffer(overlay ? overlay :
++			framebuffer_get(color ? color->target.texture : 0, depth ? depth->target.texture : 0));
++	}
+ 	*has_depth = depth != NULL;
+ 	return TRUE;
+ }
+@@ -2385,6 +2399,9 @@ static void apply_raster_state(BOOL has_depth)
+ 		gl_state.color_mask = color_mask;
+ 		glColorMask((color_mask & 1) != 0, (color_mask & 2) != 0, (color_mask & 4) != 0, (color_mask & 8) != 0);
+ 	}
++	if (chiefrim_coverage_bound) /* CHIEFRIM: the overlay's coverage */
++		chiefrim_overlay_draw_state(rs[D3DRS_ALPHABLENDENABLE], rs[D3DRS_SRCBLEND], rs[D3DRS_DESTBLEND],
++			blend_equation(rs[D3DRS_BLENDOP]) == GL_FUNC_ADD, color_mask);
+ 
+ 	/* the cull mode names the winding to discard; FRONTFACE names the
+ 	front winding */
+@@ -3545,6 +3562,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+ 			device.depth_stencil ? (unsigned long)device.depth_stencil->Data : 0);
+ 	stats.clears++;
+ 	color_to_vec4(color, rgba);
++	if (chiefrim_coverage_bound) /* CHIEFRIM: the overlay's picture is on nothing */
++		memset(rgba, 0, sizeof(rgba));
+ 	if (flags & D3DCLEAR_TARGET)
+ 	{
+ 		/* the Xbox clears the channels named (D3DCLEAR_TARGET_R, _G, _B, _A):
+@@ -3680,6 +3699,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+ 		if (screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0)
+ 			write_screenshot(back_buffer);
+ 
++		chiefrim_overlay_present(back_buffer->target.texture, back_buffer->target.gl_width, /* CHIEFRIM */
++			back_buffer->target.gl_height);
+ 		platform_video_drawable_size(&window_width, &window_height);
+ 		/* letterbox to the back buffer's aspect ratio */
+ 		width = window_width;
+diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
+index bbea0de6..aa839b27 100644
+--- a/port/linux/src/nv2a_psh.c
++++ b/port/linux/src/nv2a_psh.c
+@@ -17,6 +17,7 @@ Register values are clamped to [-1, 1] between stages, as on the hardware.
+ 
+ #include "xgpu.h"
+ #include "port_config.h"
++#include "chiefrim_overlay_gl.h" /* CHIEFRIM */
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -554,6 +555,8 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+ 		"in float xFog;\n"
+ 		"layout(location = 0) out vec4 fragment_color;\n"
+ 		XGPU_PIXEL_UNIFORMS);
++	if (chiefrim_overlay_enabled()) /* CHIEFRIM: the overlay's coverage (chiefrim_overlay_gl.h) */
++		xgpu_text_append(&text, "layout(location = 1) out vec4 chiefrim_coverage;\n");
+ 	for (stage = 0; stage < 4; stage++)
+ 		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
+ 	xgpu_text_append(&text,
+@@ -659,6 +662,8 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+ 	if (key->count_samples)
+ 		xgpu_text_append(&text, "\tatomicCounterIncrement(visible_samples);\n");
+ #endif
++	if (chiefrim_overlay_enabled()) /* CHIEFRIM */
++		xgpu_text_append(&text, "\tchiefrim_coverage = vec4(1.0, 1.0, 1.0, clamp(result.a, 0.0, 1.0));\n");
+ 	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
+ 	return text.buffer;
+ }
 diff --git a/source/game/game.c b/source/game/game.c
 index 0549cc04..8a62a182 100644
 --- a/source/game/game.c
@@ -102,6 +208,30 @@ index a9decc9c..f8550cb1 100644
  	return;
  }
  
+diff --git a/source/interface/interface.c b/source/interface/interface.c
+index 996b8957..da90305b 100644
+--- a/source/interface/interface.c
++++ b/source/interface/interface.c
+@@ -104,6 +104,7 @@ symbols in this file:
+ #include "text/draw_string.h"
+ #include "units/unit_definitions.h"
+ #include "units/units.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -702,7 +703,10 @@ void interface_draw_screen(
+ 				}
+ 			}
+ 
+-			rasterizer_screen_effect(&parameters);
++			/* CHIEFRIM: not over Skyrim's picture: the effect redraws the whole
++			screen from Halo's, which in overlay mode is empty, and covers Skyrim
++			with black (the pistol's zoom) */
++			rasterizer_screen_effect(chiefrim_overlay_wanted() ? NULL : &parameters);
+ 		}
+ 		else
+ 		{
 diff --git a/source/main/main.c b/source/main/main.c
 index e35691e1..a1b87c1a 100644
 --- a/source/main/main.c
@@ -130,6 +260,61 @@ index e35691e1..a1b87c1a 100644
  					collision_log_end_period();
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
+diff --git a/source/render/render.c b/source/render/render.c
+index 68a746c2..eb2d26c1 100644
+--- a/source/render/render.c
++++ b/source/render/render.c
+@@ -87,6 +87,7 @@ symbols in this file:
+ #include "effects/weather_particle_systems.h"
+ #include "main/main.h"
+ #include "structures/structures.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -310,6 +311,9 @@ static void render_window(
+ {
+ 	struct rasterizer_window_begin_parameters parameters;
+ 	short rendered_cluster_index;
++	/* CHIEFRIM: Skyrim draws the world; Halo only Chief's arms and weapon,
++	the HUD and its screens, for Skyrim to draw over its own (docs §9) */
++	boolean overlay = chiefrim_overlay_wanted();
+ 
+ 	profile_render_window_start(TRUE);
+ 	render.scene_index++;
+@@ -329,7 +333,22 @@ static void render_window(
+ 	player_effect_get_screen_flash(local_player_index, &parameters.screen_flash);
+ 	rasterizer_window_begin(&parameters);
+ 
+-	if (!bink_playback_in_progress())
++	if (!bink_playback_in_progress() && overlay) /* CHIEFRIM */
++	{
++		build_sprite_prepare_for_window();
++		first_person_weapon_render_update();
++		lights_preprocess_scene();
++		render_objects(); /* only the first-person weapon (render_objects.c) */
++		rasterizer_transparent_geometry_draw(TRUE);
++		rasterizer_transparent_geometry_draw(FALSE);
++		rasterizer_transparent_geometry_stop();
++		interface_draw_screen();
++		rasterizer_screen_flash();
++		halo_screen_ui_offset(TRUE);
++		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
++		halo_screen_ui_offset(FALSE);
++	}
++	else if (!bink_playback_in_progress())
+ 	{
+ 		build_sprite_prepare_for_window();
+ 		render_sky();
+@@ -528,7 +547,7 @@ static void render_player_frame(
+ 		&rasterizer_frustum,
+ 		TRUE);
+ 
+-	if (main_get_window_count() == 1)
++	if (main_get_window_count() == 1 && !chiefrim_overlay_wanted()) /* CHIEFRIM: no world, no mirrors */
+ 	{
+ 		if (structure_visibility_find_mirror(camera, &frustum, &mirror))
+ 		{
 diff --git a/source/render/render_cameras.c b/source/render/render_cameras.c
 index bcd26cd0..176277d3 100644
 --- a/source/render/render_cameras.c
@@ -153,6 +338,27 @@ index bcd26cd0..176277d3 100644
  }
  
  boolean render_camera_world_to_screen(
+diff --git a/source/render/render_objects.c b/source/render/render_objects.c
+index dad616be..4257955b 100644
+--- a/source/render/render_objects.c
++++ b/source/render/render_objects.c
+@@ -106,6 +106,7 @@ symbols in this file:
+ #include "shaders/shaders.h"
+ #include "game/players.h"
+ #include "interface/first_person_weapons.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ #include "camera/director.h"
+ #include "cutscene/cinematics.h"
+ #include "tag_files/tag_files.h"
+@@ -356,7 +357,7 @@ void render_objects(
+ 		{
+ 			first_person_weapon_draw();
+ 		}
+-		else
++		else if (!chiefrim_overlay_wanted()) /* CHIEFRIM: Skyrim draws the world (docs §9) */
+ 		{
+ 			process_rendered_objects(&data);
+ 		}
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index 265149a3..76b6189b 100644
 --- a/source/scenario/scenario.c
