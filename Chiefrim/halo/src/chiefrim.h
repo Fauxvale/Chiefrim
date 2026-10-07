@@ -75,7 +75,12 @@ void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while lin
 boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
 void chiefrim_combat_forget(void);                     /* Halo's game state went back */
 void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
+boolean chiefrim_combat_chief_dead(void);              /* Skyrim was told Chief died */
 wchar_t const *chiefrim_control_key_name(long control); /* hud_messaging.c: the player's Skyrim key for one of Halo's controls, or NULL */
+/* chiefrim_inventory.c (docs §11): Chief's kit in Skyrim's saves */
+void chiefrim_inventory_linked(void);                  /* Skyrim said hello */
+void chiefrim_inventory_message(cr_msg_chief_state const *message); /* CR_MSG_CHIEF_RESTORE */
+void chiefrim_inventory_update(long chief, boolean world_valid, boolean dead); /* each frame while linked, after the world */
 /* chiefrim_lighting.c (docs §9): Skyrim's light on Halo's objects */
 void chiefrim_lighting_message(cr_msg_lighting const *message);
 void chiefrim_lighting_forget(void);

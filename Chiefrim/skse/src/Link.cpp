@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Link.h"
+#include "CoSave.h"
 #include "Combat.h"
 
 namespace chiefrim
@@ -172,7 +173,7 @@ namespace chiefrim
 			return false;
 		}
 
-		alignas(8) unsigned char buffer[256];
+		alignas(8) unsigned char buffer[512];
 		int type;
 		while ((type = cr_ring_pop(&shm_->to_skyrim, buffer, sizeof(buffer))) >= 0) {
 			switch (type) {
@@ -190,6 +191,9 @@ namespace chiefrim
 				break;
 			case CR_MSG_PLAYER_DIED:
 				Combat::OnChiefDied();
+				break;
+			case CR_MSG_CHIEF_STATE:
+				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));
 				break;
 			default:
 				break;

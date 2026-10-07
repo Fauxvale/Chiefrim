@@ -749,7 +749,7 @@ Initial message catalog:
 | S→H | `Teleport {pos, yaw}` (load doors, fast travel, scripted moves) | Event |
 | S→H | `Input.routing = Skyrim` (a Skyrim menu, or a hand-off: Skyrim's animation, scene or swimming owns control, §11) | Every frame |
 | S→H | `BeginFrame {frameId, viewport, camera}` | Per frame |
-| S→H | `SaveRequest / LoadState {blob}` | Event |
+| S→H | `ChiefRestore {kit}`: a loaded save's, or the starting loadout; a new Halo gets the latest (protocol 14) | Event |
 | H→S | `PlayerState {pos, yaw, pitch, pose, onGround, camera, bodyFrac, shieldFrac}` | Per frame |
 | H→S | `HitActor {...}` | Event |
 | H→S | `PlayerDied` | Event |
@@ -757,16 +757,25 @@ Initial message catalog:
 | S→H | `camera` slot `{frame, eye, forward, up, vertical_fov, near, far}` (protocol 7) | Per frame (world rendering starts) |
 | H→S | `frames`: 3 slots, each the screen layer and the world layer (RGBA8 premultiplied) and the world's depth (float), `{seq, width, height, frame, camera_frame, time_us, flags}` (protocol 7) | Per frame |
 | H→S | `MenuState {haloScreenOpen}` | On change |
-| H→S | `SaveState {blob}` | Reply |
+| H→S | `ChiefState {kit}`: weapons, ammo, grenades, vitality, flashlight (protocol 14) | On change, ≤ 4 Hz |
 
 Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehicles).
 
 ## 11. Other systems
 
-- **Save and load:** SKSE serialization stores a Halo **player-state blob** in the Skyrim co-save:
-  weapons, ammo, grenades, body and shield vitality, flashlight charge. There is no Halo world to
-  snapshot, which makes this much simpler than SkyCraft's. Loading a Skyrim save restores the blob
-  into a freshly spawned Chief.
+- **Save and load (Phase 5, `skse/src/CoSave.cpp`, `halo/src/chiefrim_inventory.c`):** Chief's
+  **kit** goes into the SKSE co-save: his weapons (by tag path, so a save outlives the host map's
+  tag indices; one the map lacks is left out), their rounds and an energy weapon's battery, the
+  one in hand, his grenades and the type chosen, body and shield vitality, and flashlight charge.
+  There is no Halo world to snapshot, which makes this much simpler than SkyCraft's. Halo reports
+  the kit when it changes (`CR_MSG_CHIEF_STATE`, 4 Hz at most) and Skyrim keeps the latest, so a
+  save made while Halo is off (F10) or restarting (F11, a crash) keeps the last kit. Loading a
+  save sends its kit to Halo (`CR_MSG_CHIEF_RESTORE`) once the world has gone (after Halo makes
+  Chief whole for the new world), and Chief drops what he carries and takes it; a save without one
+  (a new game, a save from before Phase 5) gets the host map's starting loadout. A new Halo gets
+  the latest kit too. Each restore has a generation, and Halo's reports carry the last one
+  applied, so reports from before a restore can't overwrite the loaded kit. Test stand:
+  `fake_skyrim.py --restore-at`, `--restore-default-at`.
 - **Load doors, fast travel and teleports:** Skyrim is authoritative for these. The plugin sends
   `Teleport` (and `WorldContext` if the origin changes). Halo moves Chief and clears the
   CollisionField.
@@ -821,7 +830,7 @@ Each phase ends in something you can play.
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: done (2026-10-06), verified in game:** Skyrim's HUD and light on Halo's objects (§9); the hand-off to Skyrim's furniture, beds, mounts, scenes and swimming (§11; beast forms verified 2026-10-07); load doors, interiors and fast travel (a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). The one crash in testing was MaxsuCombatEscape's (combat pathing run inside a cell change; it crashes the same way without Chiefrim). |
-| 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
+| 5 | **Persistence and polish** | Co-save state (**built, to verify in game**, §11), weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
 ## 13. Decisions

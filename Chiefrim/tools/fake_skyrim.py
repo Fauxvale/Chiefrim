@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 13
+VERSION = 14
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -48,6 +48,8 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
+MSG_CHIEF_STATE, MSG_CHIEF_RESTORE = 12, 13
+KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
 REGION_UNITS = 1024.0
@@ -293,6 +295,30 @@ class Link:
             return msg_type, body
 
 
+def kit_unpack(body):
+    head = struct.unpack_from(KIT_HEAD, body)
+    weapons = [struct.unpack_from(KIT_WEAPON, body, 40 + 80 * i) for i in range(4)]
+    return {"generation": head[0], "flags": head[1], "current": head[2], "grenade": head[3],
+            "grenades": list(head[4:8]), "body": head[8], "shield": head[9], "flashlight": head[10],
+            "weapons": [{"tag": text(w[0]), "total": [w[1], w[2]], "loaded": [w[3], w[4]], "age": w[5]} for w in weapons]}
+
+
+def kit_pack(kit):
+    body = struct.pack(KIT_HEAD, kit["generation"], kit["flags"], kit["current"], kit["grenade"],
+                       *kit["grenades"], kit["body"], kit["shield"], kit["flashlight"], 0, 0)
+    for w in kit["weapons"]:
+        body += struct.pack(KIT_WEAPON, w["tag"].encode()[:63], *w["total"], *w["loaded"], w["age"], 0)
+    return body
+
+
+def kit_text(kit):
+    weapons = ", ".join(f"{w['tag'].rsplit(chr(92), 1)[-1]} {w['loaded'][0]}/{w['total'][0]}"
+                        + (" (in hand)" if i == kit["current"] else "")
+                        for i, w in enumerate(kit["weapons"]) if w["tag"])
+    return (f"gen {kit['generation']}: {weapons or 'no weapons'}; grenades {kit['grenades'][:2]} (type {kit['grenade']}); "
+            f"body {kit['body']:.2f}, shields {kit['shield']:.2f}, flashlight {kit['flashlight']:.2f}")
+
+
 def text(raw):
     return raw.split(b"\0", 1)[0].decode(errors="replace")
 
@@ -412,6 +438,12 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--restore-at", type=float, default=0.0,
+                        help="seconds in: as a save's load, send back Chief's last kit changed "
+                             "(weapons in reverse, the last in hand, half their rounds, 3 frags and 2 plasmas, "
+                             "body 0.5, shields 0.25) (CR_MSG_CHIEF_RESTORE)")
+    parser.add_argument("--restore-default-at", type=float, default=0.0,
+                        help="seconds in: as a save without a kit: the starting loadout")
     parser.add_argument("--light", type=float, default=-1.0,
                         help="Skyrim's light for Halo's objects (CR_MSG_LIGHTING): ambient and a sun from above, this bright (0: dark)")
     parser.add_argument("--light-to", type=float, default=-1.0, help="with --light: this bright from --light-at seconds in")
@@ -537,6 +569,13 @@ def main():
                     print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy{blast}", flush=True)
                 elif msg_type == MSG_PLAYER_DIED:
                     print("fake_skyrim: Chief died: Skyrim's player would die now", flush=True)
+                elif msg_type == MSG_CHIEF_STATE:
+                    kit = kit_unpack(body)
+                    shown = kit_text(dict(kit, body=round(kit["body"], 1), shield=round(kit["shield"], 1)))
+                    if shown != drive_state.get("kit_shown"):
+                        print(f"fake_skyrim: Chief's kit {kit_text(kit)}", flush=True)
+                        drive_state["kit_shown"] = shown
+                    drive_state["kit"] = kit
             if (options.recenter_every > 0 and last_position and
                     time.monotonic() - last_recenter >= options.recenter_every):
                 # wherever a build is: the race between a build and a new origin
@@ -622,6 +661,22 @@ def main():
                 link.push(RING_TO_HALO, MSG_KEY_NAMES, b"".join(n.encode()[:15].ljust(16, b"\0") for n in names[:12]))
                 drive_state["named"] = True
                 print(f"fake_skyrim: key names {names[:12]}", flush=True)
+            if options.restore_at and t >= options.restore_at and not drive_state.get("restored") and drive_state.get("kit"):
+                kit = drive_state["kit"]
+                held = [w for w in kit["weapons"] if w["tag"]][::-1]
+                weapons = [dict(w, total=[n // 2 for n in w["total"]], loaded=[n // 2 for n in w["loaded"]]) for w in held]
+                weapons += [{"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}] * (4 - len(weapons))
+                restore = dict(kit, generation=7, flags=0, current=len(held) - 1, grenade=1, grenades=[3, 2, 0, 0],
+                               body=0.5, shield=0.25, flashlight=0.4, weapons=weapons)
+                link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack(restore))
+                drive_state["restored"] = True
+                print(f"fake_skyrim: restore {kit_text(restore)}", flush=True)
+            if options.restore_default_at and t >= options.restore_default_at and not drive_state.get("defaulted"):
+                link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack({"generation": 8, "flags": 1, "current": -1, "grenade": -1,
+                    "grenades": [0, 0, 0, 0], "body": 0.0, "shield": 0.0, "flashlight": 0.0,
+                    "weapons": [{"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}] * 4}))
+                drive_state["defaulted"] = True
+                print("fake_skyrim: restore: the starting loadout", flush=True)
             if options.give_at and t >= options.give_at + drive_state.get("gives", 0) and drive_state.get("gives", 0) < options.give_count:
                 drive_state["gives"] = drive_state.get("gives", 0) + 1
                 link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI", -1, 0))

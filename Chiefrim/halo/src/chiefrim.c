@@ -302,6 +302,7 @@ static void chiefrim_pump_events(void)
 			chiefrim.linked = TRUE;
 			chiefrim.skyrim_pid = hello->pid;
 			error(_error_silent, "chiefrim: linked to Skyrim (pid %u, %s)", hello->pid, hello->build);
+			chiefrim_inventory_linked();
 			chiefrim_say_hello();
 			break;
 		}
@@ -326,6 +327,9 @@ static void chiefrim_pump_events(void)
 			break;
 		case CR_MSG_LIGHTING:
 			chiefrim_lighting_message((cr_msg_lighting const *)buffer);
+			break;
+		case CR_MSG_CHIEF_RESTORE:
+			chiefrim_inventory_message((cr_msg_chief_state const *)buffer);
 			break;
 		case CR_MSG_KEY_NAMES:
 			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
@@ -1348,6 +1352,8 @@ void chiefrim_frame(void)
 	chiefrim_debug_collision();
 	if (chiefrim.linked && chiefrim.world_valid)
 		chiefrim_combat_update(chiefrim_local_unit(), chiefrim.world.origin);
+	if (chiefrim.linked)
+		chiefrim_inventory_update(chiefrim_local_unit(), chiefrim.world_valid, chiefrim_combat_chief_dead());
 	if (chiefrim.placement_pending && chiefrim_skyrim_drives())
 		chiefrim.placement_pending = FALSE; /* placed every frame where Skyrim's player is */
 	if (chiefrim.placement_pending)

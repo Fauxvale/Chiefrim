@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 13u
+#define CR_PROTOCOL_VERSION 14u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -281,6 +281,8 @@ vehicles); docs §10. */
 #define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §8.4) */
 #define CR_MSG_KEY_NAMES    0x0Au /* S->H: the player's keys for Chief's actions, for Halo's prompts (protocol 12) */
 #define CR_MSG_LIGHTING     0x0Bu /* S->H: Skyrim's light where the player is, for Halo's objects (protocol 13) */
+#define CR_MSG_CHIEF_STATE   0x0Cu /* H->S: Chief's weapons, ammo, grenades and vitality, when they change (protocol 14) */
+#define CR_MSG_CHIEF_RESTORE 0x0Du /* S->H: Chief's, from a Skyrim save, or the starting loadout (protocol 14) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -390,6 +392,54 @@ typedef struct cr_msg_lighting
 	uint32_t point_count;      /* the point lights nearest the player (torches, fires, spells) */
 	cr_light_point points[CR_LIGHTING_POINTS];
 } cr_msg_lighting;
+
+/* Chief's kit (docs §11, save and load): what the Skyrim co-save keeps.
+Halo sends it (CR_MSG_CHIEF_STATE) when it changes, a few times a second at
+most; Skyrim keeps the latest and writes it into each save. Loading a save
+sends it back (CR_MSG_CHIEF_RESTORE), and Halo gives Chief exactly that; a
+save without one (older, or a new game) asks for the starting loadout. A new
+Halo (a restart) gets the latest too.
+
+generation: each restore's is new, and Halo's states carry the last one it
+applied (0: none yet, its own Chief), so Skyrim drops states from before
+the restore it is waiting on. Weapons are named by tag path, so a save
+survives the host map's tags moving; one the map doesn't have is skipped. */
+#define CR_CHIEF_WEAPONS     4u  /* Halo's MAXIMUM_WEAPONS_PER_UNIT */
+#define CR_CHIEF_GRENADES    4u  /* Halo has 2 types; room to grow */
+#define CR_WEAPON_TAG_LENGTH 64u
+
+typedef struct cr_chief_weapon
+{
+	char     tag[CR_WEAPON_TAG_LENGTH]; /* the weapon's tag path, NUL-terminated; empty: no weapon */
+	int16_t  rounds_total[2];   /* per magazine: all its rounds, those loaded too */
+	int16_t  rounds_loaded[2];
+	float    age;               /* energy weapons: battery spent, 0..1 */
+	uint32_t reserved;
+} cr_chief_weapon;
+
+typedef struct cr_chief_state
+{
+	uint32_t generation;
+	uint32_t flags;             /* CR_CHIEF_* */
+	int32_t  current_weapon;    /* index into weapons, -1: none */
+	int32_t  current_grenade;   /* grenade type, -1: none */
+	uint8_t  grenades[CR_CHIEF_GRENADES]; /* per type: frag, plasma */
+	float    body;              /* 0..1 of his body's vitality */
+	float    shield;            /* 0..1 (over 1: overshield) */
+	float    flashlight;        /* battery, 0..1 */
+	uint32_t reserved[2];
+	cr_chief_weapon weapons[CR_CHIEF_WEAPONS]; /* in Halo's inventory order */
+} cr_chief_state;
+
+/* CR_MSG_CHIEF_RESTORE: no saved kit, the host map's starting loadout and
+Chief whole (the rest of the state is unused) */
+#define CR_CHIEF_STARTING_LOADOUT 0x0001u
+
+typedef struct cr_msg_chief_state
+{
+	cr_msg_header  header;
+	cr_chief_state state;
+} cr_msg_chief_state;
 
 typedef struct cr_msg_hello
 {
@@ -741,6 +791,9 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
 CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");
+CR_STATIC_ASSERT(sizeof(cr_chief_weapon) == 80, "cr_chief_weapon");
+CR_STATIC_ASSERT(sizeof(cr_chief_state) == 40 + 4 * 80, "cr_chief_state");
+CR_STATIC_ASSERT(sizeof(cr_msg_chief_state) == 8 + 360, "cr_msg_chief_state");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
 #define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");

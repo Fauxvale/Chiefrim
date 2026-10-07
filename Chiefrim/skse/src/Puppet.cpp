@@ -4,6 +4,7 @@
 
 #include "Camera.h"
 #include "Collision.h"
+#include "CoSave.h"
 #include "Combat.h"
 #include "Handoff.h"
 #include "Hud.h"
@@ -461,6 +462,7 @@ namespace chiefrim::Puppet
 			if (!wasConnected) {
 				s.worldSent = false;  // a new Halo: tell it everything again
 				Input::OnLinked();
+				CoSave::OnLinked();
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}
@@ -526,6 +528,7 @@ namespace chiefrim::Puppet
 				return;
 			}
 
+			CoSave::Update();  // after the world: a load's kit comes after Halo makes Chief whole
 			Combat::PerFrame(a_player, a_delta);
 			Lighting::Update(a_player);
 			if (Settings::SkyrimMoves() || handedOff) {

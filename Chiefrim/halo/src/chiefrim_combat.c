@@ -480,6 +480,11 @@ void chiefrim_combat_chief_lost(void)
 	}
 }
 
+boolean chiefrim_combat_chief_dead(void)
+{
+	return combat.chief_dead;
+}
+
 void chiefrim_combat_reset(long chief)
 {
 	long slot;

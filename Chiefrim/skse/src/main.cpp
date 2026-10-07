@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Camera.h"
+#include "CoSave.h"
 #include "Combat.h"
 #include "Handoff.h"
 #include "Hud.h"
@@ -47,5 +48,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	SetupLog();
 	logger::info("Chiefrim {} loading (runtime {})", "0.0.1", a_skse->RuntimeVersion().string());
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
+	chiefrim::CoSave::Install();
 	return true;
 }
