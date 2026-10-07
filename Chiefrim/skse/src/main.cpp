@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Camera.h"
 #include "Combat.h"
+#include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
 #include "Input.h"
@@ -33,6 +34,7 @@ namespace
 			chiefrim::Overlay::Install();
 			chiefrim::Combat::Install();
 			chiefrim::Hud::Install();
+			chiefrim::Handoff::Install();
 			chiefrim::Lighting::Install();
 		}
 	}

@@ -5,6 +5,7 @@
 #include "Camera.h"
 #include "Collision.h"
 #include "Combat.h"
+#include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
 #include "Input.h"
@@ -238,7 +239,7 @@ namespace chiefrim::Puppet
 
 		// Skyrim moves the player: where it is and looks, for Halo's Chief to
 		// follow (aimed along the camera).
-		void PublishPlayer(RE::PlayerCharacter* a_player)
+		void PublishPlayer(RE::PlayerCharacter* a_player, bool a_drives = true)
 		{
 			static std::uint32_t frame = 0;
 			static RE::NiPoint3 lastPosition;
@@ -246,7 +247,7 @@ namespace chiefrim::Puppet
 			cr_skyrim_player player{};
 			const auto position = a_player->GetPosition();
 			player.frame = ++frame;
-			player.flags = CR_SKYRIM_DRIVES;
+			player.flags = a_drives ? CR_SKYRIM_DRIVES : 0u;
 			player.position = { position.x, position.y, position.z };
 			player.yaw = a_player->data.angle.z;
 			player.pitch = a_player->data.angle.x;
@@ -447,6 +448,7 @@ namespace chiefrim::Puppet
 			if (!link.Update()) {
 				s.worldSent = false;
 				if (wasConnected) {
+					Handoff::Reset();
 					Input::OnUnlinked();  // Skyrim's own controls back
 					Hud::Restore();
 					Camera::Release(a_player);
@@ -462,8 +464,20 @@ namespace chiefrim::Puppet
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}
+			// Skyrim's animations, scenes and swimming (docs §11): kept as it
+			// was while paused (a crafting station's menu is open, say).
+			const bool wasHandedOff = Handoff::Active();
+			const bool handedOff = GameplayIsRunning() ? Handoff::Update(a_player) : wasHandedOff;
 			Input::Publish(a_player);
-			Hud::Update();
+			if (handedOff) {
+				Hud::Restore();
+				Camera::Release(a_player);
+			} else {
+				Hud::Update();
+			}
+			if (wasHandedOff && !handedOff && !Settings::SkyrimMoves()) {
+				PublishPlayer(a_player, false);  // Halo moves Chief again, from here
+			}
 			if (!GameplayIsRunning()) {
 				return;
 			}
@@ -514,10 +528,11 @@ namespace chiefrim::Puppet
 
 			Combat::PerFrame(a_player, a_delta);
 			Lighting::Update(a_player);
-			if (Settings::SkyrimMoves()) {
+			if (Settings::SkyrimMoves() || handedOff) {
+				// handed off, Skyrim moves the player whatever the mode, and Chief follows
 				PublishPlayer(a_player);
 				s.lastPuppetPosition = position;  // a jump further than a frame's walk is a teleport
-				if (auto state = link.ReadPlayerState()) {
+				if (auto state = link.ReadPlayerState(); state && !handedOff) {
 					Camera::Drive(a_player, *state, false);  // Halo's field of view (zoom)
 				}
 			} else if (auto state = link.ReadPlayerState()) {

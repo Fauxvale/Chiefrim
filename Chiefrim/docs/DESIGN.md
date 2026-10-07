@@ -364,10 +364,11 @@ definition comes from that map. Chiefrim loads one **host map**.
    - Skyrim's first-person arm and weapon meshes are hidden (only meshes, never nodes), and
      re-checked about once a second for newly equipped ones.
 
-**Deep water — open decision (§13).** Halo has no swimming. Options:
-
-- Chief walks on the bottom of lakes and rivers.
-- Control hands over to Skyrim's swimming while the player's head is underwater.
+**Deep water — decided 2026-10-06 (§13): Skyrim's swimming.** Halo has no swimming. While
+Skyrim's player swims (deep enough that Skyrim swims him: its actor state's swimming flag), the
+player is handed off to Skyrim (§11): Skyrim's own controls, camera and arms swim him, Chief
+follows where he is and gets no input, and Chief's weapon and HUD are put away until he stands
+again.
 
 ## 7. Input
 
@@ -733,7 +734,7 @@ Initial message catalog:
 | S→H | `Input {keys, mouse dx/dy, wheel, buttons}` | Per frame |
 | S→H | `PlayerHurt {...}` | Event |
 | S→H | `Teleport {pos, yaw}` (load doors, fast travel, scripted moves) | Event |
-| S→H | `Freeze {on}` (Skyrim menu or scene owns control) | On change |
+| S→H | `Input.routing = Skyrim` (a Skyrim menu, or a hand-off: Skyrim's animation, scene or swimming owns control, §11) | Every frame |
 | S→H | `BeginFrame {frameId, viewport, camera}` | Per frame |
 | S→H | `SaveRequest / LoadState {blob}` | Event |
 | H→S | `PlayerState {pos, yaw, pitch, pose, onGround, camera, bodyFrac, shieldFrac}` | Per frame |
@@ -756,8 +757,17 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
 - **Load doors, fast travel and teleports:** Skyrim is authoritative for these. The plugin sends
   `Teleport` (and `WorldContext` if the origin changes). Halo moves Chief and clears the
   CollisionField.
-- **Skyrim's own animations:** furniture, crafting stations, beds, levers, horses and scripted
-  scenes hand control to Skyrim (`Freeze`) until they end, as in SkyCraft.
+- **Skyrim's own animations (the hand-off, Phase 4, `skse/src/Handoff.cpp`):** while the player
+  sits (chairs, crafting stations, any furniture: its sit/sleep state), sleeps, rides, swims (§6),
+  is in a kill move, or a script holds him (AI-driven, or his movement controls turned off: the
+  Helgen cart, scenes), Skyrim has the player. Input routes to Skyrim (Chief gets none, as in a
+  menu) and Skyrim's handlers for Chief's actions are on again; the camera, field of view and
+  first-person arms are Skyrim's (furniture cameras and the third person work); its HUD bars are
+  back; the overlay draws the world layer (shots in flight, bullet holes) but not the screen layer
+  (Chief's weapon and HUD). Skyrim moves the player, whatever `bSkyrimMoves`, and Chief follows.
+  It starts at once and ends when nothing has held the player for 300 ms (stepping out of the
+  water, standing up). `[Handoff] bEnabled`. No protocol change: Halo already takes routing to
+  Skyrim as no input.
 - **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
   stamina and the crosshair, because Halo's HUD replaces them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.
@@ -792,7 +802,7 @@ Each phase ends in something you can play.
 | 1 | **Walk Skyrim as Chief** | **Status: done (2026-10-05), verified in game.** Skyrim moves the player and Chief follows (§7, `bSkyrimMoves=1`): Skyrim's own controller walks, jumps, sprints and sneaks on Skyrim's meshes; Chief is placed there each frame and aimed along the camera. Chief's actions are Skyrim's (InputBridge, §7; rebinding carries over): fire, zoom (with the view narrowing), reload, grenade, melee, weapon and grenade switch, flashlight, all verified. The camera is Skyrim's, with Chief's field of view (85, zoom from Halo) and no third-person switch while linked. Halo's collision (§5.2, the runtime BSP builder) is built from Skyrim's Havok shapes for shots and grenades. Unlinking leaves Skyrim fully playable (controls reset as pausing does). The Halo-driven mode (`bSkyrimMoves=0`, CameraDriver §6 and the movement safeguards) stays: it walked, but caught and bounced on Skyrim's meshes. |
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
-| 4 | **Full world** | CollisionField stage C, interiors and load doors, the deep-water decision, furniture and scene hand-off. |
+| 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: in progress (2026-10-06):** HUD and light verified in game; the hand-off (§11, swimming included) built, to verify; load doors and interiors to test (the plugin already sends a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). |
 | 5 | **Persistence and polish** | Co-save state, weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening, third-person view. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
@@ -809,7 +819,8 @@ Proposed. Each one needs the user's call before the phase that depends on it.
    All ini values. (§8)
 2. **Weapon acquisition** (Phase 3): **decided 2026-10-05: the starting loadout (b30's: MA5B, M6D,
    frag grenades) and a debug command** that gives Chief any weapon in the host map. (§8.4)
-3. **Deep water** (Phase 4): walk on the bottom, or hand over to Skyrim's swimming. (§6)
+3. **Deep water** (Phase 4): **decided 2026-10-06: hand over to Skyrim's swimming** while the player
+   swims. (§6, §11)
 4. **Host map:** a campaign level, `b30` for now. Final choice from the tag-listing tool's output.
    (§5.3)
 5. **Decomp management:** settled in Phase 0: pinned upstream commit, patches and our own

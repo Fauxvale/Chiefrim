@@ -13,7 +13,8 @@ namespace chiefrim::Input
 	void Install();
 
 	// Once a frame while linked: Skyrim's handlers for Chief's actions off,
-	// and the actions published to Halo.
+	// and the actions published to Halo; on, and none, while Skyrim has the
+	// player (Handoff).
 	void Publish(RE::PlayerCharacter* a_player);
 
 	// A menu opened: Chief gets no input until Publish runs again in
