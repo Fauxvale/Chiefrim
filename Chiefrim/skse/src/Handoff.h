@@ -5,10 +5,11 @@ namespace chiefrim::Handoff
 {
 	// Skyrim's own animations and scenes (docs §11): while the player sits,
 	// sleeps, works at a crafting station, rides, swims (docs §6, deep
-	// water), is in a kill move, or a script holds him (AI-driven, or his
-	// movement turned off), Skyrim has the player: its controls, camera, arms
-	// and HUD bars, and Chief gets no input and his weapon and HUD aren't
-	// drawn ([Handoff] bEnabled). Halo's world layer stays.
+	// water), is a werewolf or vampire lord, is in a kill move, or a script
+	// holds him (AI-driven, or his movement turned off), Skyrim has the
+	// player: its controls, camera, arms and HUD bars, and Chief gets no input
+	// and his weapon and HUD aren't drawn ([Handoff] bEnabled). Halo's world
+	// layer stays.
 
 	// kDataLoaded: reads Chiefrim.ini.
 	void Install();

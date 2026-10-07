@@ -37,6 +37,10 @@ namespace chiefrim::Handoff
 			if (a_player->IsOnMount()) {
 				return "a mount";
 			}
+			// werewolf and vampire lord forms are races no one can pick
+			if (const auto* race = a_player->GetRace(); race && race->data.flags.none(RE::RACE_DATA::Flag::kPlayable)) {
+				return "a beast form";
+			}
 			if (a_player->IsInKillMove()) {
 				return "a kill move";
 			}
