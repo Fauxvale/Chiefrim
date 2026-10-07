@@ -661,6 +661,15 @@ using the camera Skyrim is about to use. It draws three layers:
   a copy that sees its slot change is torn and dropped. GPU sharing between Skyrim's D3D11 (under
   DXVK on Vulkan) and Halo's native OpenGL is a later optimisation through Vulkan external memory,
   and only if the CPU path is too slow.
+- **Which GPU Halo uses (2026-10-06):** on a two-GPU laptop Halo has drawn on the integrated GPU
+  (Intel UHD 630), Skyrim on the discrete one (GTX 1050) through DXVK. `CHIEFRIM_HALO_GPU=dgpu`
+  (`tools/launch_halo.sh`) puts Halo on NVIDIA's through PRIME render offload: Halo is 32-bit and
+  NVIDIA's 32-bit EGL can't open a Wayland display, so it goes through XWayland's GLX. Offline at
+  1080p against the fake Skyrim, the overlay frames are identical; Halo alone runs ~145 frames/s
+  on the Intel GPU and ~195 on NVIDIA's. In game it shares NVIDIA's GPU with Skyrim and reads its
+  layers back over PCIe instead of from shared memory, so which is better is for the in-game
+  comparison (Skyrim's frame rate, and the overlay log's frames from Halo and for this frame's
+  camera). Both on one GPU is also what the GPU-shared path above would need.
 - **Frame lockstep:** as in SkyCraft. Skyrim signals "begin frame N" with the camera. Halo renders
   frame N. Skyrim waits, with a timeout, for "frame N ready" before compositing, and reuses frame
   N−1 if Halo misses the deadline.
