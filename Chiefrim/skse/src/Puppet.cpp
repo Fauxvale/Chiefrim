@@ -451,7 +451,7 @@ namespace chiefrim::Puppet
 					Handoff::Reset();
 					Input::OnUnlinked();  // Skyrim's own controls back
 					Hud::Restore();
-					Camera::Release(a_player);
+					Camera::Release(a_player, true);
 					Combat::Release(a_player);
 					RestoreController(a_player);
 				}
