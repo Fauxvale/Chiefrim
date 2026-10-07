@@ -272,6 +272,14 @@ wchar_t const *chiefrim_control_key_name(long control)
 	return chiefrim_key_names[action][0] ? chiefrim_key_names[action] : NULL;
 }
 
+boolean chiefrim_world_origin(cr_vec3 *origin)
+{
+	if (!chiefrim.world_valid)
+		return FALSE;
+	*origin = chiefrim.world.origin;
+	return TRUE;
+}
+
 static void chiefrim_pump_events(void)
 {
 	static unsigned long buffer[0x10000 / sizeof(unsigned long)]; /* a full collision message */
@@ -315,6 +323,9 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_COLLISION_RESET:
 		case CR_MSG_COLLISION_TRIS:
 			chiefrim_world_message(type, buffer);
+			break;
+		case CR_MSG_LIGHTING:
+			chiefrim_lighting_message((cr_msg_lighting const *)buffer);
 			break;
 		case CR_MSG_KEY_NAMES:
 			chiefrim_key_names_set((cr_msg_key_names const *)buffer);

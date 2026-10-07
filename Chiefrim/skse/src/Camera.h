@@ -20,6 +20,7 @@ namespace chiefrim::Camera
 	// horizontal for 4:3 as Skyrim measures it; 0 = Halo's own).
 	float FieldOfView();
 
-	// The link closed: Skyrim's own camera, FOV and arms back.
-	void Release(RE::PlayerCharacter* a_player);
+	// Skyrim's own camera, FOV and arms back. a_unlinked: the link closed,
+	// and the third person comes back if Chief found the player in it.
+	void Release(RE::PlayerCharacter* a_player, bool a_unlinked = false);
 }

@@ -34,6 +34,7 @@ namespace chiefrim::Camera
 			float fieldOfView{ 85.0f }; // [Camera] fFieldOfView
 			bool  fovSaved{ false };
 			float savedWorldFov{ 0.0f };
+			bool  foundThirdPerson{ false };  // the view Chief found, for the unlink
 			std::vector<RE::NiPointer<RE::BSGeometry>> hiddenArms;
 		} s;
 
@@ -283,6 +284,9 @@ namespace chiefrim::Camera
 		if (!s.driving || s.viewFromHalo != a_viewFromHalo) {
 			logger::info("{}", a_viewFromHalo ? "Chief's eyes drive the camera" : "Skyrim's camera, with Chief's field of view");
 		}
+		if (!s.driving) {
+			s.foundThirdPerson = !camera->IsInFirstPerson();
+		}
 		s.driving = true;
 		s.viewFromHalo = a_viewFromHalo;
 
@@ -312,17 +316,24 @@ namespace chiefrim::Camera
 		return s.fieldOfView;
 	}
 
-	void Release(RE::PlayerCharacter* a_player)
+	void Release(RE::PlayerCharacter* a_player, bool a_unlinked)
 	{
 		if (!s.driving) {
 			return;
 		}
 		s.driving = false;
-		if (auto* camera = RE::PlayerCamera::GetSingleton(); camera && s.fovSaved) {
+		auto* camera = RE::PlayerCamera::GetSingleton();
+		if (camera && s.fovSaved) {
 			camera->GetRuntimeData2().worldFOV = s.savedWorldFov;
 		}
 		s.fovSaved = false;
 		HideArms(a_player, false);
+		// Back to the third person Chief found: a werewolf or vampire lord
+		// (linked in that form) has no first person, and its scripts turn the
+		// POV switch off, so the player was stuck there.
+		if (a_unlinked && s.foundThirdPerson && camera && camera->IsInFirstPerson()) {
+			camera->ForceThirdPerson();
+		}
 		logger::info("Skyrim's own camera is back");
 	}
 }

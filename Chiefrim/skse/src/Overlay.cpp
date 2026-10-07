@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Overlay.h"
+#include "Handoff.h"
 #include "Input.h"
 #include "Link.h"
 #include "Settings.h"
@@ -500,7 +501,7 @@ float4 PSWorld(VSOut i) : SV_Target
 				context->PSSetShaderResources(0, 3, srvs);
 				context->Draw(3, 0);
 			}
-			{
+			if (!Handoff::Active()) {  // Skyrim has the player: no weapon or HUD of Chief's
 				ID3D11ShaderResourceView* srvs[3]{ s.screen.srv, nullptr, nullptr };
 				context->PSSetShader(s.screenPs, nullptr, 0);
 				context->PSSetShaderResources(0, 3, srvs);

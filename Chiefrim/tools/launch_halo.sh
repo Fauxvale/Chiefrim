@@ -20,6 +20,20 @@
 # build/halo-data/debug.txt, its terminal output build/halo-data/halo.out
 # (the last run's; the one before is halo.out.1). CHIEFRIM_HALO_WRAPPER runs
 # Halo through a command (tests: "gamescope --backend headless --").
+#
+# CHIEFRIM_HALO_GPU picks the GPU Halo renders on, in a laptop with two:
+#   auto (the default): dgpu when NVIDIA's 32-bit GLX is installed, else igpu.
+#   igpu: the integrated one, the system's own choice; Skyrim keeps the
+#       discrete GPU to itself.
+#   dgpu: NVIDIA's discrete GPU (faster in game on a GTX 1050 laptop), through PRIME render offload. Halo is 32-bit
+#       and NVIDIA's 32-bit EGL can't open a Wayland display, so Halo runs
+#       through XWayland's GLX (needs lib32-nvidia-utils). halo.out's
+#       "OpenGL ..." line names the GPU it got.
+#
+# Halo's window is hidden (HALO_HIDDEN_WINDOW), on every start and restart:
+# Skyrim shows Halo's frames, and on the discrete GPU a Halo window opening
+# over a running Skyrim froze it until the window was minimized.
+# CHIEFRIM_HALO_SHOW_WINDOW=1 shows it.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 maps=${HALO_MAPS:-"$root/../HaloProjects/Halo-CE-Universal/maps"}
@@ -43,19 +57,34 @@ esac
 say() { echo "chiefrim: $*" >&2; }
 
 # Halo in the background; its output to halo.out (and this terminal)
+window_env="HALO_HIDDEN_WINDOW=1"
+[ "${CHIEFRIM_HALO_SHOW_WINDOW:-0}" = 1 ] && window_env=""
+
+gpu=${CHIEFRIM_HALO_GPU:-auto}
+if [ "$gpu" = auto ]; then
+	gpu=igpu
+	[ -e /usr/lib32/libGLX_nvidia.so.0 ] && gpu=dgpu
+fi
+gpu_env=""
+case "$gpu" in
+igpu) ;;
+dgpu) gpu_env="SDL_VIDEO_DRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia" ;;
+*) echo "CHIEFRIM_HALO_GPU: auto, igpu or dgpu, not $gpu"; exit 1 ;;
+esac
+
 halo_pid=""
 start_halo() {
 	[ -f "$data/halo.out" ] && mv -f "$data/halo.out" "$data/halo.out.1"
 	env CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 		HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \
 		HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_FULLSCREEN=0 \
-		HALO_TEST_INPUT="$bot" \
+		HALO_TEST_INPUT="$bot" $window_env $gpu_env \
 		${CHIEFRIM_HALO_WRAPPER:-} "$halo" > "$data/halo.out" 2>&1 &
 	halo_pid=$!
 	if [ -z "$steam" ]; then
 		tail -f --pid="$halo_pid" "$data/halo.out" 2>/dev/null &
 	fi
-	say "Halo started (pid $halo_pid); log $data/debug.txt"
+	say "Halo started (pid $halo_pid, $gpu); log $data/debug.txt"
 }
 stop_halo() {
 	[ -n "$halo_pid" ] || return 0

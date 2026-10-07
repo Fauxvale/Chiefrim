@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 12u
+#define CR_PROTOCOL_VERSION 13u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -280,6 +280,7 @@ vehicles); docs §10. */
 #define CR_MSG_PLAYER_DIED  0x08u /* H->S: Chief is dead */
 #define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §8.4) */
 #define CR_MSG_KEY_NAMES    0x0Au /* S->H: the player's keys for Chief's actions, for Halo's prompts (protocol 12) */
+#define CR_MSG_LIGHTING     0x0Bu /* S->H: Skyrim's light where the player is, for Halo's objects (protocol 13) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -366,6 +367,29 @@ typedef struct cr_msg_key_names
 	cr_msg_header header;
 	char names[CR_ACTION_COUNT][CR_KEY_NAME_LENGTH];
 } cr_msg_key_names;
+
+/* Skyrim's light around the player, ~10 times a second (docs §9): Halo lights
+Chief's arms and weapon and its objects with it in place of its map's
+lightmap. Colours are linear, 1 = full; directions are the way the light
+travels (the sun's points down), in Skyrim's (and Halo's) axes. */
+#define CR_LIGHTING_POINTS 4u
+typedef struct cr_light_point
+{
+	cr_vec3 position;   /* Skyrim units */
+	float   radius;     /* Skyrim units: no light past it */
+	cr_vec3 color;      /* at the light, its fade applied */
+} cr_light_point;
+
+typedef struct cr_msg_lighting
+{
+	cr_msg_header header;
+	cr_vec3  ambient;          /* Skyrim's directional ambient, averaged */
+	cr_vec3  ambient_up;       /* its colour on surfaces facing up, minus the average */
+	cr_vec3  key_color;        /* the sun, the moon, or the interior's directional light */
+	cr_vec3  key_direction;    /* unit */
+	uint32_t point_count;      /* the point lights nearest the player (torches, fires, spells) */
+	cr_light_point points[CR_LIGHTING_POINTS];
+} cr_msg_lighting;
 
 typedef struct cr_msg_hello
 {
@@ -716,6 +740,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
+CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
 #define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");

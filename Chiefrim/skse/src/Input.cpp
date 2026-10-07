@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Input.h"
 
+#include "Handoff.h"
 #include "Link.h"
 #include "Settings.h"
 
@@ -653,12 +654,14 @@ namespace chiefrim::Input
 			std::clamp(double(now.QuadPart - s.lastPublish.QuadPart) / double(frequency.QuadPart), 0.0, 0.25) : 0.0;
 		s.lastPublish = now;
 
-		const bool gameplay = InGameplay();
+		// handed off (docs §11), Skyrim's controls are its own, and Chief gets none
+		const bool handedOff = Handoff::Active();
+		const bool gameplay = InGameplay() && !handedOff;
 		if (gameplay != s.gameplay) {
 			ReleaseAll();  // nothing stays held across a menu
 			s.gameplay = gameplay;
 		}
-		SetSkyrimHandlers(true);
+		SetSkyrimHandlers(!handedOff);
 
 		cr_input input{};
 		input.frame = ++s.frame;
