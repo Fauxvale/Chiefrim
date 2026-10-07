@@ -668,8 +668,12 @@ using the camera Skyrim is about to use. It draws three layers:
   1080p against the fake Skyrim, the overlay frames are identical; Halo alone runs ~145 frames/s
   on the Intel GPU and ~195 on NVIDIA's. In game it shares NVIDIA's GPU with Skyrim and reads its
   layers back over PCIe instead of from shared memory, so which is better is for the in-game
-  comparison (Skyrim's frame rate, and the overlay log's frames from Halo and for this frame's
-  camera). Both on one GPU is also what the GPU-shared path above would need.
+  comparison. In game (2026-10-06) the GTX 1050 gave a much higher frame rate, so it is the
+  default (`auto`: when NVIDIA's 32-bit GLX is installed). A Halo window opening over a running
+  Skyrim on the same GPU froze Skyrim until it was minimized, so the launcher always starts Halo's
+  window hidden (`HALO_HIDDEN_WINDOW`; it renders the same, ~190 frames/s offline), restarts
+  included; `CHIEFRIM_HALO_SHOW_WINDOW=1` shows it. Both on one GPU is also what the GPU-shared
+  path above would need.
 - **Frame lockstep:** as in SkyCraft. Skyrim signals "begin frame N" with the camera. Halo renders
   frame N. Skyrim waits, with a timeout, for "frame N ready" before compositing, and reuses frame
   N−1 if Halo misses the deadline.
