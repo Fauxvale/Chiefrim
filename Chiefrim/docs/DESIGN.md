@@ -746,9 +746,29 @@ using the camera Skyrim is about to use. It draws three layers:
   skipped) meets something, back by the beam's width there and reaching a little past it, dimmer
   the further the beam carries. It's left out of the light sent to Halo (Halo lights its objects
   with its own). Offline: on, off and the fades, radius and cone as above. `[Flashlight]
-  bEnabled`, `fBrightness`, `fReach`. A shadowed spot (Skyrim's own kind, a run-time light form
-  flagged "spot shadow" through `TESObjectLIGH::GenDynamic`) was tried and dropped (2026-10-08):
-  Skyrim made it with a cone of ~2° whatever the form said, and setting its frustum didn't widen it.
+  bEnabled`, `fBrightness`, `fReach`. Verified in game (2026-10-08): a pool of light where the
+  player looks.
+  - **Tried and dropped (2026-10-08): a shadowed spot light. Too buggy and unreliable to
+    implement.** A real cone with shadows would look more like Halo's beam, and Skyrim's spot
+    lights are all shadowed ones (light forms flagged "spot shadow", 39 in `Skyrim.esm`, most with
+    a 90° field of view). Four in-game tries, each with a spot whose cone was a dot smaller than
+    Halo's crosshair:
+    1. A light form made at run time (`IFormFactory`), flagged dynamic and "spot shadow", Halo's
+       reach and a 90° field of view, given to `TESObjectLIGH::GenDynamic` on a node of the
+       plugin's at the eye, turned as the camera. Skyrim made a shadowed frustum light
+       (`BSShadowFrustumLight`), pointed the right way, but its semi-width was 0.017 (tan 1°): it
+       didn't take the form's field of view. Possibly from the reference it was made for (the
+       player, with no light data of its own); not confirmed.
+    2. The field of view in other units: a vanilla spot's form (`SolitudeInnSpotlightDefaultShadow`,
+       90 in the file) holds 90 at run time, so degrees were right. No change.
+    3. The frustum light's `semiWidth` and `semiHeight` set to Halo's cone once it was in the scene:
+       no change in game.
+    4. Those, and the frustums of its shadow map cameras (`ShadowmapDescriptor::camera`), set every
+       frame: still a dot.
+    How Skyrim builds a spot's cone, and from what, is unknown without reversing `GenDynamic` and
+    the frustum light's update, and each guess needs an in-game test. A shadowed spot also takes
+    one of Skyrim's few shadowed lights. The code is gone (commit 49414b8); the tries are in
+    commits 421552e, eddad72 and 8a0f393.
 
 ## 10. Protocol / IPC
 
