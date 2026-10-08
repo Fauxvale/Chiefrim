@@ -740,17 +740,15 @@ using the camera Skyrim is about to use. It draws three layers:
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
   works out that light as `lights_preprocess_scene` would (`object_lights.c` hook: its colour with
   the integrated light's power, so it fades in and out as in Halo, and its radius and cone) and
-  sends it when it changes (`CR_MSG_FLASHLIGHT`). Skyrim's renderer has spot lights only with
-  shadows, so by default (`bShadowed=1`) the plugin makes one as Skyrim makes its own: a light
-  form made at run time, flagged dynamic and "spot shadow", Halo's reach and cone (its field of
-  view the whole cone, 90°), given to `TESObjectLIGH::GenDynamic` on a node of the plugin's that
-  is put each frame at the eye (16 units ahead, clear of the player's head) and turned as the
-  camera (NiCamera's axes: forward first). `bShadowed=0` (the first in-game version) moves an
-  unshadowed point light (`ShadowSceneNode::AddLight`) each frame to just short of where a ray along
-  the view (Havok, line-of-sight layer, the player's capsule skipped) meets something, back by the
-  beam's width there and reaching a little past it, dimmer the further the beam carries. Either is
-  left out of the light sent to Halo (Halo lights its objects with its own). Offline: on, off and
-  the fades, radius and cone as above. `[Flashlight] bEnabled`, `bShadowed`, `fBrightness`, `fReach`.
+  sends it when it changes (`CR_MSG_FLASHLIGHT`). Skyrim's renderer has no unshadowed spot light,
+  so the plugin moves a dynamic point light of its own (`ShadowSceneNode::AddLight`) each frame
+  to just short of where a ray along the view (Havok, line-of-sight layer, the player's capsule
+  skipped) meets something, back by the beam's width there and reaching a little past it, dimmer
+  the further the beam carries. It's left out of the light sent to Halo (Halo lights its objects
+  with its own). Offline: on, off and the fades, radius and cone as above. `[Flashlight]
+  bEnabled`, `fBrightness`, `fReach`. A shadowed spot (Skyrim's own kind, a run-time light form
+  flagged "spot shadow" through `TESObjectLIGH::GenDynamic`) was tried and dropped (2026-10-08):
+  Skyrim made it with a cone of ~2° whatever the form said, and setting its frustum didn't widen it.
 
 ## 10. Protocol / IPC
 

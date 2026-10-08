@@ -13,30 +13,20 @@ namespace chiefrim::Lighting
 			float pointScale = 1.0f;  // [Lighting] fPointLights: torches, fires, spells
 			bool  enabled = true;     // [Lighting] bEnabled
 			bool  flashlight = true;  // [Flashlight] bEnabled
-			bool  flashShadowed = true;    // [Flashlight] bShadowed: a shadowed spot light, else a point light where the beam lands
 			float flashBrightness = 1.5f;  // [Flashlight] fBrightness
 			float flashReach = 1.0f;       // [Flashlight] fReach: of Halo's
 		} config;
 
-		// Chief's flashlight. Skyrim's renderer has spot lights only with
-		// shadows: by default one, made as Skyrim makes its own (a light form
-		// flagged "spot shadow", TESObjectLIGH::GenDynamic) on a node of ours
-		// at the eye, turned with the view. Else (bShadowed=0) a point light
-		// moved each frame to just short of where the beam lands along the
-		// view, as wide as the beam's cone is there.
+		// Chief's flashlight: a point light of Skyrim's (its renderer has no
+		// unshadowed spot), moved each frame to just short of where the beam
+		// lands along the view, as wide as the beam's cone is there.
 		struct Flashlight
 		{
-			cr_msg_flashlight         beam{};  // Halo's, as it shines now
-			RE::NiPointer<RE::NiLight> light;  // in the scene while on
-			RE::NiPointer<RE::NiNode>  node;   // the spot's: at the eye, turned with the view
-			RE::TESObjectLIGH*        form = nullptr;  // the spot's form (made at run time, never saved)
-			bool                      added = false;   // in the scene
-			ULONGLONG                 addedAt = 0;
-			int                       readded = 0;
-			bool                      logged = false;
-			bool                      checked = false;  // the shadow light's own numbers logged
-			int                       resets = 0;       // Skyrim put its cone back (logged)
-			float                     fovPerDegree = 0.0f;  // a light form's fov, per degree, as Skyrim holds it
+			cr_msg_flashlight              beam{};  // Halo's, as it shines now
+			RE::NiPointer<RE::NiPointLight> light;
+			bool                           added = false;  // in the scene
+			ULONGLONG                      addedAt = 0;
+			int                            readded = 0;
 		} flash;
 
 		ULONGLONG next = 0;
@@ -90,7 +80,6 @@ namespace chiefrim::Lighting
 		config.scale = Settings::ReadFloat(L"Lighting", L"fBrightness", 1.0f);
 		config.pointScale = Settings::ReadFloat(L"Lighting", L"fPointLights", 1.0f);
 		config.flashlight = Settings::ReadBool(L"Flashlight", L"bEnabled", true);
-		config.flashShadowed = Settings::ReadBool(L"Flashlight", L"bShadowed", true);
 		config.flashBrightness = Settings::ReadFloat(L"Flashlight", L"fBrightness", 1.5f);
 		config.flashReach = Settings::ReadFloat(L"Flashlight", L"fReach", 1.0f);
 	}
@@ -176,11 +165,6 @@ namespace chiefrim::Lighting
 					return true;
 				}
 			}
-			for (auto& light : runtime.activeShadowLights) {
-				if (light && light->light.get() == flash.light.get()) {
-					return true;
-				}
-			}
 			return false;
 		}
 
@@ -208,148 +192,6 @@ namespace chiefrim::Lighting
 			}
 			return pick.rayOutput.HasHit() ? std::clamp(pick.rayOutput.hitFraction, 0.0f, 1.0f) * a_reach : a_reach;
 		}
-
-		void TakeDown()
-		{
-			if (flash.added && flash.light) {
-				if (auto* scene = Scene()) {
-					scene->RemoveLight(flash.light.get());
-				}
-			}
-			if (flash.light && flash.node && flash.light->parent == flash.node.get()) {
-				flash.node->DetachChild(flash.light.get());
-			}
-			flash.light.reset();
-			flash.added = false;
-		}
-
-		float Reach() { return std::max(flash.beam.radius * config.flashReach, 64.0f); }
-
-		// The spot's form: a dynamic light with a shadowed cone, Halo's
-		// reach and cone (the form's field of view is the whole cone, in degrees)
-		RE::TESObjectLIGH* SpotForm()
-		{
-			if (!flash.form) {
-				auto* factory = RE::IFormFactory::GetConcreteFormFactoryByType<RE::TESObjectLIGH>();
-				flash.form = factory ? factory->Create() : nullptr;
-				if (!flash.form) {
-					logger::warn("flashlight: couldn't make a light form; a point light instead");
-					config.flashShadowed = false;
-					return nullptr;
-				}
-			}
-			// Skyrim's light forms hold their field of view as loaded from the
-			// file (degrees there): a vanilla spot (Solitude's inn, 90 in
-			// Skyrim.esm) says in what units, at run time
-			if (flash.fovPerDegree <= 0.0f) {
-				const auto* vanilla = RE::TESForm::LookupByID<RE::TESObjectLIGH>(0x0006C056);
-				const float fov = vanilla ? vanilla->data.fov : 0.0f;
-				flash.fovPerDegree = fov > 0.0f && fov < 6.3f ? RE::NI_PI / 180.0f : 1.0f;
-				logger::info("flashlight: a vanilla spot light's field of view is {:.4f} at run time (90 in the file): {}", fov,
-					flash.fovPerDegree < 1.0f ? "radians" : "degrees");
-			}
-			auto& data = flash.form->data;
-			data.time = -1;
-			data.radius = static_cast<std::uint32_t>(Reach());
-			data.color = RE::Color(255, 255, 255, 0);
-			data.flags.reset(RE::TES_LIGHT_FLAGS::kType);
-			data.flags.set(RE::TES_LIGHT_FLAGS::kDynamic, RE::TES_LIGHT_FLAGS::kSpotShadow);
-			data.fallofExponent = 1.0f;
-			data.fov = std::clamp(2.0f * flash.beam.cutoff_angle * 180.0f / RE::NI_PI, 10.0f, 170.0f) * flash.fovPerDegree;
-			data.nearDistance = 8.0f;
-			flash.form->fade = config.flashBrightness;
-			return flash.form;
-		}
-
-		// the spot: made by Skyrim's own code, on our node
-		bool AddSpot(RE::PlayerCharacter* a_player)
-		{
-			auto* form = SpotForm();
-			if (!form) {
-				return false;
-			}
-			if (!flash.node) {
-				flash.node.reset(RE::NiNode::Create(1));
-				if (!flash.node) {
-					return false;
-				}
-				flash.node->name = "Chiefrim flashlight";
-			}
-			auto* light = form->GenDynamic(a_player, flash.node.get(), 1, 1, 0);
-			if (!light) {
-				logger::warn("flashlight: Skyrim made no spot light; a point light instead");
-				config.flashShadowed = false;
-				return false;
-			}
-			flash.light.reset(light);
-			if (light->parent != flash.node.get()) {
-				flash.node->AttachChild(light, true);
-			}
-			if (!flash.logged) {
-				flash.logged = true;
-				logger::info("flashlight: Skyrim made its light ({}), reach {}, field of view {:.3f}",
-					light->GetRTTI() ? light->GetRTTI()->GetName() : "?", form->data.radius, form->data.fov);
-			}
-			return true;
-		}
-
-		bool AddPoint()
-		{
-			auto* scene = Scene();
-			auto* light = RE::NiPointLight::Create();
-			if (!scene || !light) {
-				return false;
-			}
-			flash.light.reset(light);
-			light->GetLightRuntimeData().ambient = { 0.0f, 0.0f, 0.0f };
-			RE::ShadowSceneNode::LIGHT_CREATE_PARAMS params{};
-			params.dynamic = true;
-			params.affectLand = true;
-			params.affectWater = true;
-			params.neverFades = true;
-			params.fov = RE::NI_PI;
-			params.falloff = 1.0f;
-			params.nearDistance = 5.0f;
-			scene->AddLight(light, params);
-			return true;
-		}
-
-		// shadowed: the spot at the eye (a little ahead, clear of the
-		// player's own head), turned with the view
-		void PlaceSpot(const RE::NiTransform& a_view, const RE::NiPoint3& a_forward)
-		{
-			flash.node->local.rotate = a_view.rotate;
-			flash.node->local.translate = a_view.translate + a_forward * 16.0f;
-			RE::NiUpdateData update{};
-			flash.node->Update(update);
-			auto& data = flash.light->GetLightRuntimeData();
-			data.diffuse = { flash.beam.color.x, flash.beam.color.y, flash.beam.color.z };
-			data.fade = config.flashBrightness;
-		}
-
-		// a point light just short of where the beam lands, as wide as the
-		// beam's cone is there, dimmer the further it carries
-		void PlacePoint(RE::PlayerCharacter* a_player, const RE::NiPoint3& a_eye, const RE::NiPoint3& a_forward)
-		{
-			const float reach = Reach();
-			const float length = BeamLength(a_player, a_eye, a_forward, reach);
-			// the beam's width where it lands: halfway between its full and its edge
-			const float angle = std::clamp(0.5f * (flash.beam.cutoff_angle + flash.beam.falloff_angle), 0.05f, 1.3f);
-			const float spot = std::max(length * std::tan(angle), 24.0f);
-			// back from that surface, in the air the ray crossed, far enough to
-			// light the spot's width; a sphere reaching a little past its edge
-			const float back = std::clamp(spot, 16.0f, std::max(length * 0.85f, 16.0f));
-			const float radius = std::sqrt(back * back + 1.56f * spot * spot);
-			const RE::NiPoint3 at = a_eye + a_forward * std::max(length - back, 8.0f);
-			const float carry = std::sqrt(std::clamp(1.0f - length / reach, 0.05f, 1.0f));
-
-			auto& data = flash.light->GetLightRuntimeData();
-			data.diffuse = { flash.beam.color.x, flash.beam.color.y, flash.beam.color.z };
-			data.radius = { radius, radius, radius };
-			data.fade = config.flashBrightness * carry;
-			flash.light->local.translate = at;
-			flash.light->world.translate = at;
-		}
 	}
 
 	void OnFlashlight(const cr_msg_flashlight& a_message)
@@ -359,6 +201,19 @@ namespace chiefrim::Lighting
 		if (FlashlightOn() != was) {
 			logger::info("flashlight: {} (colour {:.2f} {:.2f} {:.2f}, reach {:.0f}, cone {:.0f} degrees)", FlashlightOn() ? "on" : "off",
 				a_message.color.x, a_message.color.y, a_message.color.z, a_message.radius, a_message.cutoff_angle * 180.0f / RE::NI_PI);
+		}
+	}
+
+	namespace
+	{
+		void TakeDown()
+		{
+			if (flash.added && flash.light) {
+				if (auto* scene = Scene()) {
+					scene->RemoveLight(flash.light.get());
+				}
+			}
+			flash.added = false;
 		}
 	}
 
@@ -376,99 +231,64 @@ namespace chiefrim::Lighting
 			TakeDown();
 			return;
 		}
+		if (!flash.light) {
+			flash.light.reset(RE::NiPointLight::Create());
+			if (!flash.light) {
+				return;
+			}
+			auto& data = flash.light->GetLightRuntimeData();
+			data.ambient = { 0.0f, 0.0f, 0.0f };
+		}
 		const auto now = ::GetTickCount64();
 		if (flash.added && now - flash.addedAt > 1000 && !InScene(scene)) {
-			TakeDown();  // the scene let it go (a door, a load): again
+			flash.added = false;  // the scene let it go (a door, a load): again
 			if (flash.readded++ < 5) {
 				logger::info("flashlight: the scene dropped its light; added again");
 			}
 		}
+		if (!flash.added) {
+			RE::ShadowSceneNode::LIGHT_CREATE_PARAMS params{};
+			params.dynamic = true;
+			params.shadowLight = false;
+			params.portalStrict = false;
+			params.affectLand = true;
+			params.affectWater = true;
+			params.neverFades = true;
+			params.fov = RE::NI_PI;
+			params.falloff = 1.0f;
+			params.nearDistance = 5.0f;
+			scene->AddLight(flash.light.get(), params);
+			flash.added = true;
+			flash.addedAt = now;
+		}
 
 		// the view, as Skyrim last drew it (NiCamera: its first column is forward)
 		const auto& view = camera->world;
+		const RE::NiPoint3 eye = view.translate;
 		RE::NiPoint3 forward{ view.rotate.entry[0][0], view.rotate.entry[1][0], view.rotate.entry[2][0] };
 		if (forward.Length() < 1e-3f) {
 			return;
 		}
 		forward = forward / forward.Length();
 
-		const bool shadowed = config.flashShadowed;
-		if (!flash.added) {
-			if (shadowed) {
-				// placed before it's made, so it starts where it shines
-				if (flash.node) {
-					flash.node->local.rotate = view.rotate;
-					flash.node->local.translate = view.translate + forward * 16.0f;
-				}
-				if (!AddSpot(a_player) && !AddPoint()) {
-					return;
-				}
-			} else if (!AddPoint()) {
-				return;
-			}
-			flash.added = true;
-			flash.addedAt = now;
-			flash.checked = false;  // a new light of Skyrim's: its cone looked at again
-		}
-		// Skyrim's spot: its cone, each frame. Made from a light form, its
-		// semi-width came out 0.017 (a degree) and the beam a dot; set once,
-		// it went back. Halo's cone is 45 degrees each side of its axis: its
-		// tangent (1) and its angle (0.79) are close, whichever the semi-width is
-		RE::BSShadowLight* shadow = nullptr;
-		for (auto& light : scene->GetRuntimeData().activeShadowLights) {
-			if (light && light->light.get() == flash.light.get()) {
-				shadow = light.get();
-			}
-		}
-		const float wanted = std::tan(std::clamp(flash.beam.cutoff_angle, 0.1f, 1.3f));
-		if (shadow && shadow->GetIsFrustumLight()) {
-			auto& frustum = static_cast<RE::BSShadowFrustumLight*>(shadow)->GetShadowFrustumLightRuntimeData();
-			if (flash.checked && (frustum.semiWidth != wanted || frustum.semiHeight != wanted) && flash.resets++ < 3) {
-				logger::info("flashlight: Skyrim set its cone back to {:.3f}; set again", frustum.semiWidth);
-			}
-			if (flash.checked) {
-				frustum.semiWidth = frustum.semiHeight = wanted;
-				// and its shadow map's cameras, which may keep the cone they were made with
-				for (auto& descriptor : shadow->GetRuntimeData().shadowmapDescriptors) {
-					if (auto* view = descriptor.camera.get()) {
-						auto& f = view->GetRuntimeData2().viewFrustum;
-						if (!f.bOrtho) {
-							f.fLeft = f.fBottom = -wanted;
-							f.fRight = f.fTop = wanted;
-						}
-					}
-				}
-			}
-		}
-		if (!flash.checked && now - flash.addedAt > 1000) {
-			// in the scene now: what kind of light Skyrim made of it, and its cone
-			flash.checked = true;
-			if (!shadow) {
-				logger::info("flashlight: its light has no shadow (a plain point light)");
-			} else if (!shadow->GetIsFrustumLight()) {
-				logger::info("flashlight: a shadowed light, not a spot");
-			} else {
-				auto& frustum = static_cast<RE::BSShadowFrustumLight*>(shadow)->GetShadowFrustumLightRuntimeData();
-				logger::info("flashlight: a shadowed spot: semi-width {:.3f}, semi-height {:.3f}, falloff {:.2f}, near {:.1f}, far {:.1f}",
-					frustum.semiWidth, frustum.semiHeight, frustum.falloff, frustum.nearDistance, frustum.farDistance);
-				for (auto& descriptor : shadow->GetRuntimeData().shadowmapDescriptors) {
-					if (auto* view = descriptor.camera.get()) {
-						const auto& f = view->GetRuntimeData2().viewFrustum;
-						logger::info("flashlight: its shadow camera: left {:.3f}, right {:.3f}, top {:.3f}, bottom {:.3f}, near {:.1f}, far {:.1f}{}",
-							f.fLeft, f.fRight, f.fTop, f.fBottom, f.fNear, f.fFar, f.bOrtho ? ", orthographic" : "");
-					}
-				}
-				// Halo's cone is 45 degrees each side of its axis: its tangent (1) and
-				// its angle (0.79) are close, whichever the semi-width is. Much
-				// narrower, and the field of view went in wrong: widened to it
-				frustum.semiWidth = frustum.semiHeight = wanted;
-				logger::info("flashlight: its cone set to Halo's, {:.3f}, from now on each frame", wanted);
-			}
-		}
-		if (shadowed && config.flashShadowed && flash.node) {
-			PlaceSpot(view, forward);
-		} else {
-			PlacePoint(a_player, view.translate, forward);
-		}
+		const float reach = std::max(flash.beam.radius * config.flashReach, 64.0f);
+		const float length = BeamLength(a_player, eye, forward, reach);
+		// the beam's width where it lands: halfway between its full and its edge
+		const float angle = std::clamp(0.5f * (flash.beam.cutoff_angle + flash.beam.falloff_angle), 0.05f, 1.3f);
+		const float spot = std::max(length * std::tan(angle), 24.0f);
+		// back from that surface, in the air the ray crossed, far enough to
+		// light the spot's width; a sphere reaching a little past its edge
+		const float back = std::clamp(spot, 16.0f, std::max(length * 0.85f, 16.0f));
+		const float radius = std::sqrt(back * back + 1.56f * spot * spot);
+		const RE::NiPoint3 at = eye + forward * std::max(length - back, 8.0f);
+		// dimmer the further it carries
+		const float carry = std::sqrt(std::clamp(1.0f - length / reach, 0.05f, 1.0f));
+
+		auto& data = flash.light->GetLightRuntimeData();
+		data.diffuse = { flash.beam.color.x, flash.beam.color.y, flash.beam.color.z };
+		data.radius = { radius, radius, radius };
+		data.fade = config.flashBrightness * carry;
+		flash.light->local.translate = at;
+		flash.light->world.translate = at;
 	}
 }
