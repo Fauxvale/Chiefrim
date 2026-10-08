@@ -348,7 +348,7 @@ index 3e2c7c0c..e4cc47f6 100644
  						item->item.rested_surface_index =
  							(short)collision.surface_index;
 diff --git a/source/items/projectiles.c b/source/items/projectiles.c
-index ceff81fe..09787508 100644
+index ceff81fe..053f6bb2 100644
 --- a/source/items/projectiles.c
 +++ b/source/items/projectiles.c
 @@ -142,6 +142,8 @@ symbols in this file:
@@ -360,14 +360,17 @@ index ceff81fe..09787508 100644
  /* ---------- constants */
  
  enum projectile_datum_flags
-@@ -1577,6 +1579,10 @@ static void projectile_collision(
+@@ -1577,6 +1579,13 @@ static void projectile_collision(
  		if (damage.material_type != NONE)
  			material_type = damage.material_type;
  		material_effect_scale = damage.material_effect_scale;
 +		/* CHIEFRIM: a stand-in for a Skyrim person bleeds as one would (blood,
 +		not its biped's armour's sparks) */
-+		if (chiefrim_object_unseen(collision->object_index))
++		if (chiefrim_object_is_proxy(collision->object_index))
++		{
 +			material_type = _material_human;
++			chiefrim_proxy_struck(collision->object_index, &collision->point, damage.definition_index);
++		}
  	}
  
  	projectile->projectile.hit_material_type = material_type;
@@ -408,7 +411,7 @@ index e35691e1..33935254 100644
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
 diff --git a/source/objects/damage.c b/source/objects/damage.c
-index 5f00c31c..16053cde 100644
+index 5f00c31c..c3f37605 100644
 --- a/source/objects/damage.c
 +++ b/source/objects/damage.c
 @@ -131,6 +131,7 @@ symbols in this file:
@@ -419,7 +422,16 @@ index 5f00c31c..16053cde 100644
  #include "tag_files/tag_files.h"
  #include "text/draw_string.h"
  #include "units/unit_definitions.h"
-@@ -2482,6 +2483,8 @@ static void area_of_effect_cause_damage_to_object(
+@@ -1852,6 +1853,8 @@ void area_of_effect_cause_damage(
+ 	long object_indices[HALO_PORT_MAXIMUM_AREA_OF_EFFECT_OBJECTS];
+ 	short object_count;
+ 
++	if (chiefrim_active()) /* CHIEFRIM: Skyrim's loose objects fly too */
++		chiefrim_note_explosion(&damage->epicenter, definition->cutoff_radius, definition->damage.instantaneous_acceleration);
+ 	object_count = objects_in_sphere(
+ 		0,
+ 		0,
+@@ -2482,6 +2485,8 @@ static void area_of_effect_cause_damage_to_object(
  
  		if (scale > 0.f)
  		{

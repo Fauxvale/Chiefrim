@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 15
+VERSION = 16
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -48,7 +48,7 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
-MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL = 12, 13, 14
+MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION = 12, 13, 14, 15
 KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
@@ -573,9 +573,13 @@ def main():
                 elif msg_type == MSG_HIT_ACTOR:
                     form_id, flags, fraction, _, bx, by, bz = struct.unpack_from("<IIff3f", body)
                     blast = f", explosion at ({bx:.0f} {by:.0f} {bz:.0f})" if flags & 1 else ""
+                    blast += ", headshot" if flags & 2 else ""
                     print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy{blast}", flush=True)
                 elif msg_type == MSG_PLAYER_DIED:
                     print("fake_skyrim: Chief died: Skyrim's player would die now", flush=True)
+                elif msg_type == MSG_EXPLOSION:
+                    cx, cy, cz, radius, acceleration = struct.unpack_from("<3fff", body)
+                    print(f"fake_skyrim: explosion at ({cx:.0f} {cy:.0f} {cz:.0f}), radius {radius:.0f}, acceleration {acceleration:.3f}", flush=True)
                 elif msg_type == MSG_CHIEF_STATE:
                     kit = kit_unpack(body)
                     shown = kit_text(dict(kit, body=round(kit["body"], 1), shield=round(kit["shield"], 1)))
@@ -650,7 +654,7 @@ def main():
             t = time.monotonic() - started
             if options.actor:
                 link.slot_write(OFF_ACTORS, struct.pack("<II", frame, 1) +
-                    struct.pack("<II3ffff", 0x0001A2B3, 0x1, options.x, options.y + options.actor, options.z, math.pi, 128.0, 20.0))
+                    struct.pack("<II3ffff", 0x0001A2B3, 0x1, options.x, options.y + options.actor, options.z, math.pi, 128.0, 118.0))
             if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
                 drive_state["hurts"] = drive_state.get("hurts", 0) + 1
                 link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,

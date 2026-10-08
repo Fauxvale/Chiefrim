@@ -75,6 +75,8 @@ void chiefrim_combat_map_loaded(void);
 void chiefrim_combat_reset(long chief);                /* a new world */
 void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 origin);
 void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while linked */
+boolean chiefrim_object_is_proxy(long object_index);   /* a proxy of one of Skyrim's people */
+void chiefrim_proxy_struck(long object_index, real_point3d const *point, long damage_definition_index); /* projectiles.c: a projectile hit a proxy */
 boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
 void chiefrim_combat_forget(void);                     /* Halo's game state went back */
 void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
@@ -92,6 +94,7 @@ struct render_lighting;
 boolean chiefrim_object_lighting(long object_index, struct render_lighting *lighting); /* object_lights.c: in place of the lightmap */
 boolean chiefrim_world_origin(cr_vec3 *origin);         /* Skyrim's world origin, if one is set */
 void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter); /* damage.c: an explosion reached it */
+void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real acceleration); /* damage.c: an explosion's area damage starts */
 
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
 void chiefrim_world_initialize(void);

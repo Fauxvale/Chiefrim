@@ -21,6 +21,7 @@ namespace chiefrim::Combat
 	// Link::Update, for Halo's messages.
 	void OnHitActor(const cr_msg_hit_actor& a_hit);
 	void OnChiefDied();
+	void OnExplosion(const cr_msg_explosion& a_explosion);  // Skyrim's loose objects fly
 
 	// The link closed or a new world: the player is Skyrim's own again.
 	void Release(RE::PlayerCharacter* a_player);

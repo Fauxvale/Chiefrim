@@ -192,6 +192,9 @@ namespace chiefrim
 			case CR_MSG_PLAYER_DIED:
 				Combat::OnChiefDied();
 				break;
+			case CR_MSG_EXPLOSION:
+				Combat::OnExplosion(*reinterpret_cast<const cr_msg_explosion*>(buffer));
+				break;
 			case CR_MSG_CHIEF_STATE:
 				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));
 				break;

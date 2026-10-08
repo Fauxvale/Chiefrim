@@ -339,10 +339,17 @@ definition comes from that map. Chiefrim loads one **host map**.
   The fuel rod gun and energy sword are in some maps but only the AI's: Halo refuses them to
   Chief. The multiplayer maps add nothing (and can't host). **The flamethrower is left out**
   (`chiefrim_weapon_carried`: debug key, kits, loot): an Xbox leftover, buggy in Chief's hands in
-  game and without a HUD. d20 has no marine, so proxies are Chief's own biped, sized by his
-  standing height before Chief's scaling (with the radius added, as for the marine, they were a
-  third too short), and hits on them bleed: Halo's impact takes the human material (`projectiles.c`
-  hook), not the cyborg's sparks. In Chiefrim mode the level's background loops and acoustics are
+  game and without a HUD. d20 has no marine, so proxies are Chief's own biped. Unarmed it
+  stands bent-kneed, head low and forward, so a proxy is scaled to put **its head marker (measured
+  in that pose) where the actor's head node is** (`cr_actor.head`, protocol 16; 0.92 of the height
+  for creatures without one). A hit counts against a marine's vitality (100, b30's), not Chief's
+  150 (shields and body), which took half again the hits. Chief's biped has no head that headshots
+  kill (he's spared them), so Chiefrim makes them: a bullet that can cause one (pistol, sniper)
+  within 0.07 world units of the head marker kills the proxy, and Skyrim kills the actor
+  whatever its level (`CR_HIT_HEADSHOT`). Hits on proxies bleed: Halo's impact takes the human
+  material (`projectiles.c` hook), not the cyborg's sparks. `CHIEFRIM_SHOW_PROXIES=1` draws them.
+  Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
+  Skyrim's loose dynamic bodies up and away, up to `fPropLaunchSpeed` m/s at the centre. In Chiefrim mode the level's background loops and acoustics are
   off (`scenario.c` hook): Skyrim has its own ambience. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
   work.
 

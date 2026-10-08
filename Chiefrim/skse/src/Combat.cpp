@@ -30,6 +30,8 @@ namespace chiefrim::Combat
 			float         blastForce = 10.0f;         // [Combat] fBlastForce
 			float         burnSeconds = 5.0f;         // [Combat] fBurnSeconds
 			float         burnDamage = 0.15f;         // [Combat] fBurnDamage
+			float         propSpeed = 5.0f;           // [Combat] fPropLaunchSpeed: m/s at an explosion's centre
+			float         propMinRadius = 64.0f;      // [Combat] fPropMinRadius: smaller splashes (a plasma bolt's) push nothing
 		} config;
 
 		// The people an explosion set alight (docs §8.2): burning for a while,
@@ -105,6 +107,91 @@ namespace chiefrim::Combat
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
+
+		// The head's centre above the feet, as the actor stands now (crouching,
+		// sitting, a child, a Khajiit): Halo puts its proxy's head there. 0: no
+		// head node (a creature), and Halo goes by the height.
+		float HeadHeight(RE::Actor* a_actor, const RE::NiPoint3& a_feet)
+		{
+			auto* root = a_actor->Get3D(false);
+			auto* head = root ? root->GetObjectByName("NPC Head [Head]") : nullptr;
+			if (!head) {
+				return 0.0f;
+			}
+			const float height = head->world.translate.z - a_feet.z;
+			return height > 10.0f && height < 2000.0f ? height : 0.0f;
+		}
+
+		// ---- explosions throw Skyrim's loose objects --------------------------
+
+		// Wakes a body and its island (hkpEntity::activate; protected in CommonLib)
+		void Activate(RE::hkpEntity* a_entity)
+		{
+			using func_t = void (*)(RE::hkpEntity*);
+			static REL::Relocation<func_t> func{ RELOCATION_ID(60096, 60849) };
+			func(a_entity);
+		}
+
+		// The dynamic rigid bodies in an explosion's reach (clutter, baskets,
+		// skulls, loose weapons), pushed away from its centre and lifted, by
+		// up to fPropLaunchSpeed (m/s) at its centre, fading to nothing at its
+		// edge: they hop and tumble, they don't fly across the room. People
+		// are thrown by Explode (with their hit).
+		void Launch(const cr_msg_explosion& a_explosion)
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* tes = RE::TES::GetSingleton();
+			auto* cell = player ? player->GetParentCell() : nullptr;
+			auto* world = cell ? cell->GetbhkWorld() : nullptr;
+			// (no push in Halo: its camera shake's wider area, not the blast)
+			if (!tes || !world || config.propSpeed <= 0.0f || a_explosion.acceleration <= 0.0f || a_explosion.radius < config.propMinRadius) {
+				return;
+			}
+			const RE::NiPoint3 center{ a_explosion.center.x, a_explosion.center.y, a_explosion.center.z };
+			const float radius = std::min(a_explosion.radius, 2048.0f);
+			const float scale = RE::bhkWorld::GetWorldScale();  // Skyrim units to Havok's
+			const float reach = center.GetDistance(player->GetPosition()) + radius;
+			int pushed = 0;
+			RE::BSWriteLockGuard guard(world->worldLock);
+			tes->ForEachReferenceInRange(player, reach, [&](RE::TESObjectREFR* a_ref) {
+				if (!a_ref || a_ref->IsDisabled() || a_ref->IsDeleted() || a_ref->As<RE::Actor>() || !a_ref->Get3D()) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				RE::BSVisit::TraverseScenegraphCollision(a_ref->Get3D(), [&](RE::bhkNiCollisionObject* a_collision) {
+					auto* body = a_collision->body ? a_collision->body->AsBhkRigidBody() : nullptr;
+					auto* rigid = body ? static_cast<RE::hkpRigidBody*>(body->referencedObject.get()) : nullptr;
+					using Motion = RE::hkpMotion::MotionType;
+					if (!rigid || !rigid->motion.type.any(Motion::kDynamic, Motion::kSphereInertia, Motion::kBoxInertia, Motion::kThinBoxInertia)) {
+						return RE::BSVisit::BSVisitControl::kContinue;
+					}
+					alignas(16) float at[4];
+					_mm_store_ps(at, rigid->motion.motionState.transform.translation.quad);
+					const RE::NiPoint3 position{ at[0] / scale, at[1] / scale, at[2] / scale };
+					RE::NiPoint3 away = position - center;
+					const float distance = away.Length();
+					if (distance > radius) {
+						return RE::BSVisit::BSVisitControl::kContinue;
+					}
+					away = distance > 1.0f ? away / distance : RE::NiPoint3{ 0.0f, 0.0f, 1.0f };
+					away.z += 0.6f;  // up and away
+					away /= away.Length();
+					// an impulse of mass times this speed: the velocity itself, woken
+					// (CommonLib's ApplyLinearImpulse calls Havok it doesn't link)
+					const float speed = config.propSpeed * (1.0f - distance / radius);
+					Activate(rigid);
+					rigid->motion.linearVelocity.quad = _mm_add_ps(rigid->motion.linearVelocity.quad,
+						_mm_setr_ps(away.x * speed, away.y * speed, away.z * speed, 0.0f));
+					++pushed;
+					return RE::BSVisit::BSVisitControl::kContinue;
+				});
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+			static int logged = 0;
+			if (pushed && logged++ < 5) {
+				logger::info("combat: an explosion (radius {:.0f}) at ({:.0f}, {:.0f}, {:.0f}) threw {} loose objects",
+					radius, center.x, center.y, center.z, pushed);
+			}
+		}
 
 		// ---- the player's healing --------------------------------------------
 
@@ -327,7 +414,7 @@ namespace chiefrim::Combat
 				out.position = { position.x, position.y, position.z };
 				out.heading = actor->GetAngleZ();
 				out.height = std::clamp(actor->GetHeight(), 20.0f, 2000.0f);
-				out.radius = std::clamp(actor->GetBoundRadius(), 5.0f, 500.0f);
+				out.head = HeadHeight(actor, position);
 			}
 			Link::Get().SendActors(actors);
 		}
@@ -517,7 +604,10 @@ namespace chiefrim::Combat
 			const bool explosion = (a_hit.flags & CR_HIT_EXPLOSION) != 0;
 			const float maxHealth = a_actor->GetActorValueMax(RE::ActorValue::kHealth);
 			const float toughness = Toughness(a_actor, a_player);
-			const float damage = a_fraction * maxHealth * config.damageMult / toughness;
+			// a headshot kills, as it kills a marine, whatever the actor's level
+			const bool headshot = (a_hit.flags & CR_HIT_HEADSHOT) != 0;
+			const float damage = headshot ? a_actor->GetActorValue(RE::ActorValue::kHealth) + maxHealth :
+				a_fraction * maxHealth * config.damageMult / toughness;
 			if (!(damage > 0.0f)) {
 				return;
 			}
@@ -578,9 +668,9 @@ namespace chiefrim::Combat
 			++s.hitsOnActors;
 			s.damageTotal += damage;
 			if (s.hitsOnActors <= 5) {
-				logger::info("combat: Chief hit {} ({:08X}, level {}, health {:.0f}) for {:.2f} of a proxy: {:.1f} damage (toughness {:.2f}){}",
+				logger::info("combat: Chief hit {} ({:08X}, level {}, health {:.0f}) for {:.2f} of a proxy: {:.1f} damage (toughness {:.2f}){}{}",
 					a_actor->GetDisplayFullName(), a_actor->GetFormID(), a_actor->GetLevel(), maxHealth, a_fraction, damage, toughness,
-					a_actor->IsDead() ? ", dead" : "");
+					headshot ? ", a headshot" : "", a_actor->IsDead() ? ", dead" : "");
 			}
 		}
 	}
@@ -594,6 +684,8 @@ namespace chiefrim::Combat
 		config.blastForce = Settings::ReadFloat(L"Combat", L"fBlastForce", 10.0f);
 		config.burnSeconds = Settings::ReadFloat(L"Combat", L"fBurnSeconds", 5.0f);
 		config.burnDamage = Settings::ReadFloat(L"Combat", L"fBurnDamage", 0.15f);
+		config.propSpeed = Settings::ReadFloat(L"Combat", L"fPropLaunchSpeed", 5.0f);
+		config.propMinRadius = Settings::ReadFloat(L"Combat", L"fPropMinRadius", 64.0f);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
 		config.toggleKey = ::GetPrivateProfileIntW(L"Controls", L"iToggleChiefrimKey", 0x44, path.c_str());
 		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
@@ -639,6 +731,11 @@ namespace chiefrim::Combat
 			s.damageTotal = s.hurtTotal = 0.0f;
 			s.nextReport = now + 30000;
 		}
+	}
+
+	void OnExplosion(const cr_msg_explosion& a_explosion)
+	{
+		Launch(a_explosion);
 	}
 
 	void OnHitActor(const cr_msg_hit_actor& a_hit)

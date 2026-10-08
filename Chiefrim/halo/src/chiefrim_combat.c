@@ -42,6 +42,7 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #include "units/units.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---------- constants */
@@ -49,6 +50,10 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #define CHIEFRIM_PROXIES          CR_ACTORS_MAX
 #define CHIEFRIM_PROXY_VITALITY   100000.f /* nothing takes it all in a frame */
 #define CHIEFRIM_MAXIMUM_WEAPONS  32
+#define CHIEFRIM_MARINE_VITALITY  100.f /* b30's marine's (its proxies' before d20): what a hit's fraction is of */
+#define CHIEFRIM_HEAD_FRACTION    0.92f /* a Skyrim person's head centre, of its height, when Skyrim doesn't say */
+#define CHIEFRIM_HEAD_RADIUS      0.07f /* world units at scale 1: a head, around its marker (Chief's helmet is ~0.13 tall) */
+#define CHIEFRIM_HEADSHOT_FLAG    0x0002u /* damage.c's _damage_can_cause_headshots_bit (a pistol's, a sniper's bullet) */
 
 /* ---------- globals */
 
@@ -59,14 +64,18 @@ struct chiefrim_proxy
 	boolean seen;
 	boolean blasted;       /* an explosion hurt it this frame */
 	real_point3d blast;    /* its centre */
+	real head;             /* its head marker above its feet at scale 1, in its pose (0: not yet) */
+	boolean headshot;      /* a headshot this frame */
 };
 
 static struct
 {
 	boolean resolved;
 	long proxy_biped;                    /* definition index */
-	real proxy_vitality;                 /* its biped's own (shields and body) */
+	real proxy_vitality;                 /* its biped's own (shields and body); a marine's for Chief's own */
+	boolean proxy_is_chief;              /* the map has no marines: proxies are Chief's own biped */
 	real proxy_height;                   /* its standing height, world units */
+	real proxy_head;                     /* its head marker's height, world units (0: not yet measured) */
 	long hurt_effects[4];                /* CR_HURT_*: damage effects */
 	long weapons[CHIEFRIM_MAXIMUM_WEAPONS];
 	long weapon_count;
@@ -118,6 +127,7 @@ static void chiefrim_combat_resolve(long chief)
 	if (combat.resolved)
 		return;
 	combat.resolved = TRUE;
+	combat.proxy_is_chief = FALSE;
 
 	/* the proxy: a marine, else Chief's own biped (d20, the host map, has no marines) */
 	combat.proxy_biped = chiefrim_find_tag(BIPED_DEFINITION_TAG, "marine", NULL);
@@ -125,6 +135,9 @@ static void chiefrim_combat_resolve(long chief)
 	{
 		combat.proxy_biped = object_get(chief)->definition_index;
 		own = TRUE;
+		combat.proxy_is_chief = TRUE;
+		/* his 150 (shields and body) took half again the hits a marine did */
+		combat.proxy_vitality = CHIEFRIM_MARINE_VITALITY;
 	}
 	if (combat.proxy_biped != NONE)
 	{
@@ -224,11 +237,13 @@ static long chiefrim_proxy_new(cr_actor const *actor, real_point3d const *positi
 
 /* what the proxy lost since last frame, as a fraction of its biped's own
 vitality; refilled */
-static real chiefrim_proxy_take_damage(long object_index)
+static real chiefrim_proxy_take_damage(long object_index, boolean *killed)
 {
 	struct object_datum *object = object_get(object_index);
 	real lost = (1.f - object->object.body_vitality) * object->object.maximum_body_vitality;
 
+	/* nothing takes half its vitality but a headshot, which takes it all */
+	*killed = lost >= CHIEFRIM_PROXY_VITALITY * 0.5f;
 	object->object.body_vitality = 1.f;
 	object->object.current_body_damage = 0.f;
 	object->object.recent_body_damage = 0.f;
@@ -239,7 +254,7 @@ static real chiefrim_proxy_take_damage(long object_index)
 
 /* a proxy's loss this frame to Skyrim, with the explosion's centre if one
 did some of it */
-static void chiefrim_proxy_send_hit(struct chiefrim_proxy *proxy, real fraction, cr_vec3 origin)
+static void chiefrim_proxy_send_hit(struct chiefrim_proxy *proxy, real fraction, boolean killed, cr_vec3 origin)
 {
 	if (fraction > 0.0001f)
 	{
@@ -248,6 +263,8 @@ static void chiefrim_proxy_send_hit(struct chiefrim_proxy *proxy, real fraction,
 		memset(&hit, 0, sizeof(hit));
 		hit.form_id = proxy->form_id;
 		hit.fraction = fraction;
+		if (killed)
+			hit.flags |= CR_HIT_HEADSHOT;
 		if (proxy->blasted)
 		{
 			cr_vec3 blast;
@@ -308,7 +325,10 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 		{
 			/* the proxy died (a headshot kills outright, whatever its vitality):
 			its hit is sent below; a fresh one stands in from next frame */
-			chiefrim_proxy_send_hit(proxy, chiefrim_proxy_take_damage(proxy->object_index), origin);
+			boolean killed;
+			real fraction = chiefrim_proxy_take_damage(proxy->object_index, &killed);
+
+			chiefrim_proxy_send_hit(proxy, fraction, TRUE, origin);
 			chiefrim_proxy_delete(proxy);
 			continue;
 		}
@@ -326,26 +346,62 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 			if (free_proxy->object_index == NONE)
 				continue;
 			free_proxy->form_id = actor->form_id;
+			free_proxy->head = 0.f;
+			free_proxy->headshot = FALSE;
 			proxy = free_proxy;
 		}
 		proxy->seen = TRUE;
 
 		/* what Chief did to it since last frame goes to Skyrim */
 		{
-			chiefrim_proxy_send_hit(proxy, chiefrim_proxy_take_damage(proxy->object_index), origin);
+			boolean killed;
+			real fraction = chiefrim_proxy_take_damage(proxy->object_index, &killed);
+
+			if (proxy->headshot)
+			{
+				fraction = 1.f;
+				killed = TRUE;
+				proxy->headshot = FALSE;
+			}
+			chiefrim_proxy_send_hit(proxy, fraction, killed, origin);
 		}
 
-		/* where the actor stands now, its size */
+		/* where the actor stands now, its size: its head where the actor's is.
+		The biped stands as it does (Chief's own, unarmed: knees bent, head low
+		and forward), so its head marker is measured in that pose, from where it
+		was drawn last, and followed */
 		{
 			struct object_datum *object = object_get(proxy->object_index);
 			real height = actor->height / CR_SKY_UNITS_PER_WU;
+			real head = actor->head > 1.f ? actor->head / CR_SKY_UNITS_PER_WU : height * CHIEFRIM_HEAD_FRACTION;
+			real reference;
+			struct object_marker marker;
+			real_point3d feet;
 			real_vector3d up;
 
+			if (object->object.scale > 0.f && object_get_marker_by_name(proxy->object_index, "head", &marker, 1))
+			{
+				real measured;
+
+				object_get_origin(proxy->object_index, &feet);
+				measured = (marker.matrix.position.z - feet.z) / object->object.scale;
+				if (measured > 0.05f)
+				{
+					proxy->head = proxy->head > 0.f ? proxy->head * 0.8f + measured * 0.2f : measured;
+					if (combat.proxy_head <= 0.f)
+					{
+						combat.proxy_head = measured;
+						error(_error_silent, "chiefrim: a proxy's head is %.3f world units up as it stands (%.3f tall), a hit is of %.0f vitality",
+							combat.proxy_head, combat.proxy_height, combat.proxy_vitality);
+					}
+				}
+			}
+			reference = proxy->head > 0.f ? proxy->head :
+				combat.proxy_head > 0.f ? combat.proxy_head : combat.proxy_height * CHIEFRIM_HEAD_FRACTION;
 			up.i = 0.f;
 			up.j = 0.f;
 			up.k = 1.f;
-			object->object.scale = combat.proxy_height > 0.f && height > 0.05f ?
-				PIN(height / combat.proxy_height, 0.25f, 6.f) : 1.f;
+			object->object.scale = reference > 0.f && head > 0.05f ? PIN(head / reference, 0.25f, 6.f) : 1.f;
 			object_set_position(proxy->object_index, &position, &forward, &up);
 			object->object.translational_velocity.i = 0.f;
 			object->object.translational_velocity.j = 0.f;
@@ -480,7 +536,57 @@ void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter)
 	}
 }
 
-boolean chiefrim_object_unseen(long object_index)
+/* projectiles.c's hook: a projectile hit a proxy. Chief's own biped (d20's
+proxies) has no head that headshots kill (he's spared them in the campaign),
+so a headshot is Chiefrim's: a bullet that can cause one, within a head's
+reach of the head marker, kills it as one kills a marine */
+void chiefrim_proxy_struck(long object_index, real_point3d const *point, long damage_definition_index)
+{
+	struct object_marker marker;
+	struct object_datum *object;
+	long slot;
+	real reach, dx, dy, dz;
+
+	if (!combat.proxy_is_chief || damage_definition_index == NONE ||
+		!(damage_effect_definition_get(damage_definition_index)->damage.flags & CHIEFRIM_HEADSHOT_FLAG) ||
+		!object_try_and_get(object_index) || !object_get_marker_by_name(object_index, "head", &marker, 1))
+	{
+		return;
+	}
+	object = object_get(object_index);
+	reach = CHIEFRIM_HEAD_RADIUS * (object->object.scale > 0.f ? object->object.scale : 1.f);
+	dx = point->x - marker.matrix.position.x;
+	dy = point->y - marker.matrix.position.y;
+	dz = point->z - marker.matrix.position.z;
+	if (dx * dx + dy * dy + dz * dz > reach * reach)
+		return;
+	for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
+	{
+		if (combat.proxies[slot].form_id && combat.proxies[slot].object_index == object_index)
+			combat.proxies[slot].headshot = TRUE;
+	}
+}
+
+/* damage.c's hook: an explosion's area damage starts (a grenade, a rocket,
+a plasma bolt's splash): Skyrim's loose objects in reach fly */
+void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real acceleration)
+{
+	cr_vec3 origin, center;
+	cr_msg_explosion explosion;
+
+	if (!chiefrim_world_origin(&origin) || radius <= 0.f)
+		return;
+	center.x = epicenter->x;
+	center.y = epicenter->y;
+	center.z = epicenter->z;
+	memset(&explosion, 0, sizeof(explosion));
+	explosion.center = cr_halo_to_sky(center, origin);
+	explosion.radius = radius * CR_SKY_UNITS_PER_WU;
+	explosion.acceleration = acceleration;
+	chiefrim_push(CR_MSG_EXPLOSION, &explosion, sizeof(explosion));
+}
+
+boolean chiefrim_object_is_proxy(long object_index)
 {
 	long slot;
 
@@ -490,6 +596,17 @@ boolean chiefrim_object_unseen(long object_index)
 			return TRUE;
 	}
 	return FALSE;
+}
+
+/* proxies aren't drawn, but with CHIEFRIM_SHOW_PROXIES=1 (to see where their
+hitboxes are) */
+boolean chiefrim_object_unseen(long object_index)
+{
+	static int show = -1;
+
+	if (show < 0)
+		show = getenv("CHIEFRIM_SHOW_PROXIES") && atoi(getenv("CHIEFRIM_SHOW_PROXIES")) != 0;
+	return !show && chiefrim_object_is_proxy(object_index);
 }
 
 void chiefrim_combat_map_loaded(void)

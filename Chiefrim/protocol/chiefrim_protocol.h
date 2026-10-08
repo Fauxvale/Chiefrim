@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 15u
+#define CR_PROTOCOL_VERSION 16u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -227,7 +227,8 @@ typedef struct cr_actor
 	cr_vec3  position;      /* feet, Skyrim units */
 	float    heading;       /* Skyrim heading (rotZ) */
 	float    height;        /* Skyrim units */
-	float    radius;        /* Skyrim units */
+	float    head;          /* Skyrim units: the head's centre above the feet, as it stands now
+	                           (protocol 16: the proxy's head is put there); 0: unknown */
 } cr_actor;
 
 #define CR_ACTOR_HOSTILE   0x0001u /* hostile to the player */
@@ -284,6 +285,7 @@ vehicles); docs §10. */
 #define CR_MSG_CHIEF_STATE   0x0Cu /* H->S: Chief's weapons, ammo, grenades and vitality, when they change (protocol 14) */
 #define CR_MSG_CHIEF_RESTORE 0x0Du /* S->H: Chief's, from a Skyrim save, or the starting loadout (protocol 14) */
 #define CR_MSG_CHIEF_HEAL    0x0Eu /* S->H: the player drank or ate something that restores health (protocol 15) */
+#define CR_MSG_EXPLOSION     0x0Fu /* H->S: an explosion in Halo (a grenade, a rocket): Skyrim's loose objects fly (protocol 16) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -327,6 +329,9 @@ typedef struct cr_msg_hit_actor
 damage): Skyrim throws the actor away from its centre and sets it alight
 (docs §8.2). */
 #define CR_HIT_EXPLOSION 0x0001u
+/* The proxy was killed outright: a headshot, which kills a marine whatever
+its vitality. Skyrim kills the actor, whatever its level (protocol 16). */
+#define CR_HIT_HEADSHOT  0x0002u
 
 /* Skyrim's damage to the player, which Skyrim has refunded: Halo applies it
 to Chief, shields first. */
@@ -360,6 +365,17 @@ typedef struct cr_msg_chief_heal
 	float    amount;     /* of Chief's whole vitality (shields and body): Skyrim's health over [Combat] fIncomingReference */
 	uint32_t item;       /* the potion's form id, for the logs */
 } cr_msg_chief_heal;
+
+/* An explosion's area damage started (a grenade, a rocket, a plasma bolt's
+splash): Skyrim pushes its loose physics objects in reach away from the centre. */
+typedef struct cr_msg_explosion
+{
+	cr_msg_header header;
+	cr_vec3  center;       /* Skyrim units */
+	float    radius;       /* Skyrim units: its damage's reach */
+	float    acceleration; /* Halo's push on objects in the middle (world units per tick), as a guide to its power */
+	uint32_t reserved;
+} cr_msg_explosion;
 
 /* index: of the host map's weapons, as Halo lists them in its log at start
 (wraps); -1: the next after the last given. */
@@ -802,6 +818,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
+CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
 CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");
