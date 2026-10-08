@@ -472,6 +472,8 @@ def main():
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
+    parser.add_argument("--actor-dies-at", type=float, default=0.0,
+                        help="with --actor: seconds in, it dies (listed dead for 3 s, then gone): its proxy drops its kit")
     parser.add_argument("--flashlight-at", type=float, default=0.0,
                         help="seconds in: switch Chief's flashlight on, and off again 4 s later")
     options = parser.parse_args()
@@ -670,8 +672,13 @@ def main():
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
             t = time.monotonic() - started
             if options.actor:
-                link.slot_write(OFF_ACTORS, struct.pack("<II", frame, 1) +
-                    struct.pack("<II3ffff", 0x0001A2B3, 0x1, options.x, options.y + options.actor, options.z, math.pi, 128.0, 118.0))
+                dead = options.actor_dies_at and t >= options.actor_dies_at
+                if dead and not drive_state.get("actor dead"):
+                    drive_state["actor dead"] = True
+                    print("fake_skyrim: the actor dies", flush=True)
+                listed = 0 if dead and t >= options.actor_dies_at + 3.0 else 1
+                link.slot_write(OFF_ACTORS, struct.pack("<II", frame, listed) +
+                    struct.pack("<II3ffff", 0x0001A2B3, 0x1 | (0x2 if dead else 0), options.x, options.y + options.actor, options.z, math.pi, 128.0, 118.0))
             if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
                 drive_state["hurts"] = drive_state.get("hurts", 0) + 1
                 link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,

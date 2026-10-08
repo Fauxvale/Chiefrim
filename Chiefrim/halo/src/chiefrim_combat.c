@@ -21,8 +21,8 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
   his body, on the scale of Skyrim's damage to him.
 - WEAPONS: CR_MSG_GIVE_WEAPON gives Chief one of the map's weapons, listed
   in the log at start (debug, docs §8.4). Each proxy carries one of a few
-  sidearms and a type of grenade, at random, which it drops when it dies
-  (a headshot): Chief's loot.
+  sidearms and a type of grenade, at random, which it drops when its actor
+  dies (Skyrim lists the newly dead a moment, CR_ACTOR_DEAD): Chief's loot.
 */
 
 #include "cseries.h"
@@ -88,7 +88,7 @@ static struct
 	long next_weapon;
 	long proxy_weapons[NUMBEROF(proxy_weapon_names)]; /* those of them the map has */
 	long proxy_weapon_count;
-	long proxies_armed;                  /* for the log */
+	long proxies_armed, drops;           /* for the log */
 	struct chiefrim_proxy proxies[CHIEFRIM_PROXIES];
 	boolean chief_dead;                  /* told Skyrim */
 	long hits, hurts;                    /* since the last summary */
@@ -218,6 +218,24 @@ boolean chiefrim_weapon_carried(char const *name)
 			return FALSE;
 	}
 	return TRUE;
+}
+
+/* its actor died: its weapon and grenades fall where it stands, at once. A
+dying unit drops its grenades as it dies but its weapon partway through its
+death animation, and a proxy is gone the next frame (no gun ever fell) */
+static void chiefrim_proxy_drop_kit(struct chiefrim_proxy *proxy)
+{
+	struct unit_datum *unit;
+
+	if (proxy->object_index == NONE || !object_try_and_get(proxy->object_index))
+		return;
+	unit = unit_get(proxy->object_index);
+	unit->unit.weapon_drop_delay_ticks = 0;
+	if (!TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+		unit_died(proxy->object_index, FALSE); /* Skyrim's kill: its grenades and weapons */
+	unit_drop_current_weapon(proxy->object_index, TRUE);
+	if (combat.drops++ < 6)
+		error(_error_silent, "chiefrim: %08X died: its proxy dropped its kit", proxy->form_id);
 }
 
 static void chiefrim_proxy_delete(struct chiefrim_proxy *proxy)
@@ -361,14 +379,22 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 		real_vector3d forward;
 		real yaw = cr_sky_heading_to_halo_yaw(actor->heading);
 
-		if (actor->flags & CR_ACTOR_DEAD)
-			continue;
 		for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
 		{
 			if (combat.proxies[slot].form_id == actor->form_id)
 				proxy = &combat.proxies[slot];
 			else if (!combat.proxies[slot].form_id && !free_proxy)
 				free_proxy = &combat.proxies[slot];
+		}
+		if (actor->flags & CR_ACTOR_DEAD)
+		{
+			/* Skyrim says it just died (whatever killed it): its loot falls */
+			if (proxy)
+			{
+				chiefrim_proxy_drop_kit(proxy);
+				chiefrim_proxy_delete(proxy);
+			}
+			continue;
 		}
 		position.x = halo.x;
 		position.y = halo.y;
@@ -386,6 +412,7 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 			real fraction = chiefrim_proxy_take_damage(proxy->object_index, &killed);
 
 			chiefrim_proxy_send_hit(proxy, fraction, TRUE, origin);
+			chiefrim_proxy_drop_kit(proxy);
 			chiefrim_proxy_delete(proxy);
 			continue;
 		}

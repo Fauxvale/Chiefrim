@@ -380,18 +380,37 @@ namespace chiefrim::Combat
 
 		// ---- the actors, to Halo ---------------------------------------------
 
+		// Halo's proxies: the living, and for a moment the newly dead (listed
+		// alive last frame), flagged so: a proxy drops its weapon and grenades
 		void WriteActors(RE::PlayerCharacter* a_player)
 		{
 			static std::vector<std::pair<float, RE::Actor*>> nearby;
+			static std::unordered_set<RE::FormID>             alive, wasAlive;
+			static std::unordered_map<RE::FormID, ULONGLONG>  diedAt;
 			nearby.clear();
+			std::swap(alive, wasAlive);
+			alive.clear();
+			const auto now = ::GetTickCount64();
+			std::erase_if(diedAt, [now](const auto& a_entry) { return now - a_entry.second > 3000; });
 			auto* lists = RE::ProcessLists::GetSingleton();
 			const auto playerPos = a_player->GetPosition();
 			if (lists) {
 				for (auto& handle : lists->highActorHandles) {
 					auto  actorPtr = handle.get();
 					auto* actor = actorPtr.get();
-					if (!actor || actor == a_player || actor->IsDisabled() || !actor->Is3DLoaded() || actor->IsGhost() || actor->IsDead()) {
+					if (!actor || actor == a_player || actor->IsDisabled() || !actor->Is3DLoaded() || actor->IsGhost()) {
 						continue;
+					}
+					if (actor->IsDead()) {
+						const auto id = actor->GetFormID();
+						if (wasAlive.contains(id)) {
+							diedAt.emplace(id, now);
+						}
+						if (!diedAt.contains(id)) {
+							continue;
+						}
+					} else {
+						alive.insert(actor->GetFormID());
 					}
 					const float distance = actor->GetPosition().GetDistance(playerPos);
 					if (distance <= kActorRange) {
@@ -410,7 +429,8 @@ namespace chiefrim::Combat
 				auto&      out = actors.actors[actors.count++];
 				const auto position = actor->GetPosition();
 				out.form_id = actor->GetFormID();
-				out.flags = (actor->IsHostileToActor(a_player) ? CR_ACTOR_HOSTILE : 0u) | (actor->IsEssential() ? CR_ACTOR_ESSENTIAL : 0u);
+				out.flags = (actor->IsHostileToActor(a_player) ? CR_ACTOR_HOSTILE : 0u) | (actor->IsEssential() ? CR_ACTOR_ESSENTIAL : 0u) |
+				            (actor->IsDead() ? CR_ACTOR_DEAD : 0u);
 				out.position = { position.x, position.y, position.z };
 				out.heading = actor->GetAngleZ();
 				out.height = std::clamp(actor->GetHeight(), 20.0f, 2000.0f);

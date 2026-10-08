@@ -351,8 +351,11 @@ definition comes from that map. Chiefrim loads one **host map**.
   Halo's camera shake and kick (explosions, firing) are off in Chiefrim mode (`main.c` hook): the
   view is Skyrim's camera, and the shaken world layer slid decals and bullet holes over Skyrim's.
   A proxy carries a weapon and grenades at random, each as likely: a pistol, an MA5B, a plasma
-  pistol or a needler, and its biped's grenade count of frags or plasmas; a proxy killed by a
-  headshot drops them. Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
+  pistol or a needler, and its biped's grenade count of frags or plasmas, and drops them when its
+  actor dies, however: Skyrim lists the newly dead for 3 s (`CR_ACTOR_DEAD`), and the proxy dies
+  Halo's way and lets go of its gun at once (a dying unit drops it partway through its death
+  animation, and the proxy was deleted the next frame: the first in-game test saw grenades fall,
+  never a gun). Offline (`fake_skyrim.py --actor-dies-at`): the pistol and grenades on the ground. Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
   Skyrim's loose dynamic bodies up and away, up to `fPropLaunchSpeed` m/s at the centre. In Chiefrim mode the level's background loops and acoustics are
   off (`scenario.c` hook): Skyrim has its own ambience. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
   work.
@@ -737,13 +740,17 @@ using the camera Skyrim is about to use. It draws three layers:
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
   works out that light as `lights_preprocess_scene` would (`object_lights.c` hook: its colour with
   the integrated light's power, so it fades in and out as in Halo, and its radius and cone) and
-  sends it when it changes (`CR_MSG_FLASHLIGHT`). Skyrim's renderer has no unshadowed spot light,
-  so the plugin moves a dynamic point light of its own (`ShadowSceneNode::AddLight`) each frame
-  to just short of where a ray along the view (Havok, line-of-sight layer, the player's capsule
-  skipped) meets something, back by the beam's width there and reaching a little past it, dimmer
-  the further the beam carries. It's left out of the light sent to Halo (Halo lights its objects
-  with its own). Offline: on, off and the fades, radius and cone as above. `[Flashlight]
-  bEnabled`, `fBrightness`, `fReach`.
+  sends it when it changes (`CR_MSG_FLASHLIGHT`). Skyrim's renderer has spot lights only with
+  shadows, so by default (`bShadowed=1`) the plugin makes one as Skyrim makes its own: a light
+  form made at run time, flagged dynamic and "spot shadow", Halo's reach and cone (its field of
+  view the whole cone, 90°), given to `TESObjectLIGH::GenDynamic` on a node of the plugin's that
+  is put each frame at the eye (16 units ahead, clear of the player's head) and turned as the
+  camera (NiCamera's axes: forward first). `bShadowed=0` (the first in-game version) moves an
+  unshadowed point light (`ShadowSceneNode::AddLight`) each frame to just short of where a ray along
+  the view (Havok, line-of-sight layer, the player's capsule skipped) meets something, back by the
+  beam's width there and reaching a little past it, dimmer the further the beam carries. Either is
+  left out of the light sent to Halo (Halo lights its objects with its own). Offline: on, off and
+  the fades, radius and cone as above. `[Flashlight] bEnabled`, `bShadowed`, `fBrightness`, `fReach`.
 
 ## 10. Protocol / IPC
 
