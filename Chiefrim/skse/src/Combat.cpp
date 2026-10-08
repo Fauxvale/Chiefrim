@@ -606,7 +606,7 @@ namespace chiefrim::Combat
 			const float toughness = Toughness(a_actor, a_player);
 			// a headshot kills, as it kills a marine, whatever the actor's level
 			const bool headshot = (a_hit.flags & CR_HIT_HEADSHOT) != 0;
-			const float damage = headshot ? a_actor->GetActorValue(RE::ActorValue::kHealth) + maxHealth :
+			const float damage = headshot ? a_actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth) + maxHealth :
 				a_fraction * maxHealth * config.damageMult / toughness;
 			if (!(damage > 0.0f)) {
 				return;
