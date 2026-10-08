@@ -331,8 +331,15 @@ definition comes from that map. Chiefrim loads one **host map**.
   left is Halo's engine with Chief in it.
 - Chief first spawns at the level's own starting location, on the level's own collision. When
   Skyrim's world context arrives, Chiefrim installs its collision and moves him (§6).
-- A small tool that lists each map's bipeds and weapons is still to come. It will pick the host
-  map for weapon coverage. Merging tags from several maps is later work.
+- `tools/list_map_tags.py` lists each map's tags of a class (`--class weap`, `bipd`, `eqip`;
+  `--matrix` compares maps). Run on the Xbox maps (2026-10-07): **d20** (Keyes) is the only map
+  with every weapon a player can carry: assault rifle, pistol, shotgun, sniper rifle, rocket
+  launcher, flamethrower, plasma pistol, plasma rifle and needler (c40 lacks the flamethrower).
+  The fuel rod gun and energy sword are in some maps but only the AI's: Halo refuses them to
+  Chief. The multiplayer maps add nothing (and can't host). The flamethrower works in Chief's hands
+  in d20 (test stand), without a HUD ammo meter. d20 has no marine, so proxies would be Chief's
+  own biped. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
+  work.
 
 ## 6. The player
 
