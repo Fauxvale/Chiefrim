@@ -20,7 +20,9 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 - HEALING: Skyrim's restore-health potions and food (CR_MSG_CHIEF_HEAL) heal
   his body, on the scale of Skyrim's damage to him.
 - WEAPONS: CR_MSG_GIVE_WEAPON gives Chief one of the map's weapons, listed
-  in the log at start (debug, docs §8.4).
+  in the log at start (debug, docs §8.4). Each proxy carries one of a few
+  sidearms and a type of grenade, at random, which it drops when it dies
+  (a headshot): Chief's loot.
 */
 
 #include "cseries.h"
@@ -54,6 +56,10 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #define CHIEFRIM_HEAD_FRACTION    0.92f /* a Skyrim person's head centre, of its height, when Skyrim doesn't say */
 #define CHIEFRIM_HEAD_RADIUS      0.07f /* world units at scale 1: a head, around its marker (Chief's helmet is ~0.13 tall) */
 #define CHIEFRIM_HEADSHOT_FLAG    0x0002u /* damage.c's _damage_can_cause_headshots_bit (a pistol's, a sniper's bullet) */
+#define CHIEFRIM_PROXY_GRENADES   2       /* when its biped carries none of its own */
+
+/* what a proxy may carry, each as likely: the weapons a proxy drops */
+static char const *const proxy_weapon_names[] = { "pistol", "assault rifle", "plasma pistol", "needler" };
 
 /* ---------- globals */
 
@@ -80,6 +86,9 @@ static struct
 	long weapons[CHIEFRIM_MAXIMUM_WEAPONS];
 	long weapon_count;
 	long next_weapon;
+	long proxy_weapons[NUMBEROF(proxy_weapon_names)]; /* those of them the map has */
+	long proxy_weapon_count;
+	long proxies_armed;                  /* for the log */
 	struct chiefrim_proxy proxies[CHIEFRIM_PROXIES];
 	boolean chief_dead;                  /* told Skyrim */
 	long hits, hurts;                    /* since the last summary */
@@ -177,6 +186,18 @@ static void chiefrim_combat_resolve(long chief)
 	}
 	error(_error_silent, "chiefrim: proxies are %s, %.2f world units tall",
 		combat.proxy_biped != NONE ? tag_get_name(combat.proxy_biped) : "(none: no bipeds)", combat.proxy_height);
+
+	srand((unsigned)system_milliseconds()); /* proxies' kits differ from one run to the next */
+	combat.proxy_weapon_count = 0;
+	for (index = 0; index < (long)NUMBEROF(proxy_weapon_names); index++)
+	{
+		long weapon = chiefrim_weapon_tag(proxy_weapon_names[index]);
+
+		if (weapon != NONE)
+			combat.proxy_weapons[combat.proxy_weapon_count++] = weapon;
+		error(_error_silent, "chiefrim: proxies may carry %s: %s", proxy_weapon_names[index],
+			weapon != NONE ? tag_get_name(weapon) : "(not in this map)");
+	}
 }
 
 /* Chief carries it: not a vehicle's gun, not one only the AI can use (Halo
@@ -207,6 +228,41 @@ static void chiefrim_proxy_delete(struct chiefrim_proxy *proxy)
 	proxy->object_index = NONE;
 }
 
+/* one of the proxy weapons in place of its biped's own, and its grenades
+all of one type, both at random (what it drops when it dies) */
+static void chiefrim_proxy_arm(long object_index)
+{
+	struct unit_datum *unit = unit_get(object_index);
+	short grenades = 0, type;
+
+	for (type = 0; type < NUMBER_OF_UNIT_GRENADE_TYPES; type++)
+	{
+		grenades += MAX(unit->unit.grenade_counts[type], 0);
+		unit->unit.grenade_counts[type] = 0;
+	}
+	unit->unit.grenade_counts[rand() % NUMBER_OF_UNIT_GRENADE_TYPES] = (char)(grenades > 0 ? grenades : CHIEFRIM_PROXY_GRENADES);
+
+	if (combat.proxy_weapon_count > 0)
+	{
+		struct object_placement_data data;
+		long weapon;
+
+		object_placement_data_new(&data, combat.proxy_weapons[rand() % combat.proxy_weapon_count], object_index);
+		object_get_origin(object_index, &data.position);
+		weapon = object_new(&data);
+		/* replacing: its biped's own weapon goes */
+		if (weapon != NONE && !unit_add_weapon_to_inventory(object_index, weapon, _unit_add_weapon_replace))
+		{
+			object_delete(weapon);
+			weapon = NONE;
+		}
+		if (combat.proxies_armed++ < 6)
+			error(_error_silent, "chiefrim: a proxy carries %s and %d %s grenades",
+				weapon != NONE ? tag_get_name(object_get(weapon)->definition_index) : "nothing (its weapon wasn't taken)",
+				unit->unit.grenade_counts[0] + unit->unit.grenade_counts[1], unit->unit.grenade_counts[0] ? "frag" : "plasma");
+	}
+}
+
 static long chiefrim_proxy_new(cr_actor const *actor, real_point3d const *position, real_vector3d const *forward)
 {
 	struct object_placement_data data;
@@ -231,6 +287,7 @@ static long chiefrim_proxy_new(cr_actor const *actor, real_point3d const *positi
 	object->object.maximum_shield_vitality = 0.f;
 	object->object.body_vitality = 1.f;
 	object->object.shield_vitality = 0.f;
+	chiefrim_proxy_arm(object_index);
 	(void)actor;
 	return object_index;
 }

@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 16u
+#define CR_PROTOCOL_VERSION 17u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -286,6 +286,7 @@ vehicles); docs §10. */
 #define CR_MSG_CHIEF_RESTORE 0x0Du /* S->H: Chief's, from a Skyrim save, or the starting loadout (protocol 14) */
 #define CR_MSG_CHIEF_HEAL    0x0Eu /* S->H: the player drank or ate something that restores health (protocol 15) */
 #define CR_MSG_EXPLOSION     0x0Fu /* H->S: an explosion in Halo (a grenade, a rocket): Skyrim's loose objects fly (protocol 16) */
+#define CR_MSG_FLASHLIGHT    0x10u /* H->S: Chief's flashlight as it shines now, when it changes: Skyrim's world is lit (protocol 17) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -376,6 +377,20 @@ typedef struct cr_msg_explosion
 	float    acceleration; /* Halo's push on objects in the middle (world units per tick), as a guide to its power */
 	uint32_t reserved;
 } cr_msg_explosion;
+
+/* Chief's flashlight (protocol 17): his biped's light as Halo would shine
+it now. Halo's light has no world of Halo's to fall on, so Skyrim lights its
+own along the player's view with it. Sent when it changes (switched on or
+off, fading in or out) and on linking. */
+typedef struct cr_msg_flashlight
+{
+	cr_msg_header header;
+	cr_vec3  color;          /* linear, 1 = full, its power applied; all 0: off */
+	float    radius;         /* Skyrim units: its reach */
+	float    cutoff_angle;   /* radians, from the beam's axis to the cone's edge */
+	float    falloff_angle;  /* radians: full light inside this, fading out to the cutoff */
+	uint32_t reserved[2];
+} cr_msg_flashlight;
 
 /* index: of the host map's weapons, as Halo lists them in its log at start
 (wraps); -1: the next after the last given. */
@@ -820,6 +835,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
 CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");
 CR_STATIC_ASSERT(sizeof(cr_chief_weapon) == 80, "cr_chief_weapon");

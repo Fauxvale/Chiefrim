@@ -350,7 +350,9 @@ definition comes from that map. Chiefrim loads one **host map**.
   material (`projectiles.c` hook), not the cyborg's sparks. `CHIEFRIM_SHOW_PROXIES=1` draws them.
   Halo's camera shake and kick (explosions, firing) are off in Chiefrim mode (`main.c` hook): the
   view is Skyrim's camera, and the shaken world layer slid decals and bullet holes over Skyrim's.
-  Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
+  A proxy carries a weapon and grenades at random, each as likely: a pistol, an MA5B, a plasma
+  pistol or a needler, and its biped's grenade count of frags or plasmas; a proxy killed by a
+  headshot drops them. Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
   Skyrim's loose dynamic bodies up and away, up to `fPropLaunchSpeed` m/s at the centre. In Chiefrim mode the level's background loops and acoustics are
   off (`scenario.c` hook): Skyrim has its own ambience. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
   work.
@@ -730,6 +732,18 @@ using the camera Skyrim is about to use. It draws three layers:
   (0.03 a tick): dark to daylight in about a second. Offline, standing still: brightness 11, then
   79 a second after the light changes. Offline: the MA5B in a 0.05 scene against a 1.0 scene, mean weapon brightness 52
   against 79 (its ammo counter glows by itself). `[Lighting] bEnabled`, `fBrightness`, `fPointLights`.
+- **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
+  Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
+  cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
+  works out that light as `lights_preprocess_scene` would (`object_lights.c` hook: its colour with
+  the integrated light's power, so it fades in and out as in Halo, and its radius and cone) and
+  sends it when it changes (`CR_MSG_FLASHLIGHT`). Skyrim's renderer has no unshadowed spot light,
+  so the plugin moves a dynamic point light of its own (`ShadowSceneNode::AddLight`) each frame
+  to just short of where a ray along the view (Havok, line-of-sight layer, the player's capsule
+  skipped) meets something, back by the beam's width there and reaching a little past it, dimmer
+  the further the beam carries. It's left out of the light sent to Halo (Halo lights its objects
+  with its own). Offline: on, off and the fades, radius and cone as above. `[Flashlight]
+  bEnabled`, `fBrightness`, `fReach`.
 
 ## 10. Protocol / IPC
 

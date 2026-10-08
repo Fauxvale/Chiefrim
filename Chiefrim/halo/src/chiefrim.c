@@ -303,6 +303,7 @@ static void chiefrim_pump_events(void)
 			chiefrim.skyrim_pid = hello->pid;
 			error(_error_silent, "chiefrim: linked to Skyrim (pid %u, %s)", hello->pid, hello->build);
 			chiefrim_inventory_linked();
+			chiefrim_flashlight_linked();
 			chiefrim_say_hello();
 			break;
 		}
@@ -1365,6 +1366,8 @@ void chiefrim_frame(void)
 		chiefrim_combat_update(chiefrim_local_unit(), chiefrim.world.origin);
 	if (chiefrim.linked)
 		chiefrim_inventory_update(chiefrim_local_unit(), chiefrim.world_valid, chiefrim_combat_chief_dead());
+	if (chiefrim.linked)
+		chiefrim_flashlight_update(chiefrim_local_unit());
 	if (chiefrim.placement_pending && chiefrim_skyrim_drives())
 		chiefrim.placement_pending = FALSE; /* placed every frame where Skyrim's player is */
 	if (chiefrim.placement_pending)

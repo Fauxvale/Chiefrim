@@ -16,6 +16,7 @@ its ambient. object_lights.c's hook calls this in place of the lightmap. */
 #include "chiefrim/chiefrim.h"
 #include "chiefrim/chiefrim_protocol.h"
 
+#include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
 #include "objects/objects.h"
 #include "render/render.h"
@@ -153,4 +154,68 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	lighting->shadow_color.green = PIN(1.f - lighting->distant_lights[0].color.green * 1.3f + 0.25f, 0.03f, 1.f);
 	lighting->shadow_color.blue = PIN(1.f - lighting->distant_lights[0].color.blue * 1.3f + 0.25f, 0.03f, 1.f);
 	return TRUE;
+}
+
+/* ---------- Chief's flashlight on Skyrim's world */
+
+/* Halo's flashlight is a light on Chief's biped, which lights Halo's own
+world; Chiefrim draws none of that, so it went nowhere. Its light as it
+shines now (on, off, fading in) goes to Skyrim (CR_MSG_FLASHLIGHT), which
+lights its own world along the player's view with it. */
+static struct
+{
+	boolean sent;          /* Skyrim has one */
+	boolean logged;
+	uint32_t sent_ms;
+	cr_msg_flashlight last;
+} chiefrim_flashlight;
+
+void chiefrim_flashlight_linked(void)
+{
+	chiefrim_flashlight.sent = FALSE;
+}
+
+void chiefrim_flashlight_update(long chief)
+{
+	struct cr_shared *shm = chiefrim_shared();
+	cr_msg_flashlight message;
+	real_rgb_color color = { 0 };
+	real radius = 0.f, cutoff = 0.f, falloff = 0.f;
+	uint32_t now = (uint32_t)system_milliseconds();
+	boolean on, was_on, changed;
+
+	if (!shm)
+		return;
+	memset(&message, 0, sizeof(message));
+	if (chief != NONE && chiefrim_object_flashlight(chief, &color, &radius, &cutoff, &falloff))
+	{
+		message.color.x = PIN(color.red, 0.f, 1.f);
+		message.color.y = PIN(color.green, 0.f, 1.f);
+		message.color.z = PIN(color.blue, 0.f, 1.f);
+		message.radius = radius * CR_SKY_UNITS_PER_WU;
+		message.cutoff_angle = cutoff;
+		message.falloff_angle = falloff;
+		if (!chiefrim_flashlight.logged)
+		{
+			chiefrim_flashlight.logged = TRUE;
+			error(_error_silent, "chiefrim: Chief's flashlight: radius %.2f world units, cone %.1f degrees (full to %.1f)",
+				radius, cutoff * 180.f / CR_PI, falloff * 180.f / CR_PI);
+		}
+	}
+	on = message.color.x + message.color.y + message.color.z > 0.001f;
+	was_on = chiefrim_flashlight.last.color.x + chiefrim_flashlight.last.color.y + chiefrim_flashlight.last.color.z > 0.001f;
+	changed = fabsf(message.color.x - chiefrim_flashlight.last.color.x) > 0.01f ||
+		fabsf(message.color.y - chiefrim_flashlight.last.color.y) > 0.01f ||
+		fabsf(message.color.z - chiefrim_flashlight.last.color.z) > 0.01f ||
+		fabsf(message.radius - chiefrim_flashlight.last.radius) > 0.02f * MAX(chiefrim_flashlight.last.radius, 1.f);
+	/* switched on or off at once; fading, ~30 times a second */
+	if (chiefrim_flashlight.sent && (on == was_on) && (!changed || now - chiefrim_flashlight.sent_ms < 33))
+		return;
+	if (!cr_ring_push(&shm->to_skyrim, CR_MSG_FLASHLIGHT, &message, sizeof(message)))
+		return;
+	if (on != was_on)
+		error(_error_silent, "chiefrim: Chief's flashlight %s", on ? "on" : "off");
+	chiefrim_flashlight.last = message;
+	chiefrim_flashlight.sent = TRUE;
+	chiefrim_flashlight.sent_ms = now;
 }

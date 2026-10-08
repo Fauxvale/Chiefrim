@@ -126,7 +126,7 @@ static void chiefrim_inventory_capture(long chief, cr_chief_state *state)
 
 /* The map's weapon by its tag path, or by the path's last part ("shotgun"),
 in any case */
-static long chiefrim_weapon_tag(char const *name)
+long chiefrim_weapon_tag(char const *name)
 {
 	struct tag_iterator iterator;
 	long tag_index, found = NONE;

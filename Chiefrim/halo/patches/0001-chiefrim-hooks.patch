@@ -449,7 +449,7 @@ index 5f00c31c..c3f37605 100644
  				damage,
  				object_index,
 diff --git a/source/objects/object_lights.c b/source/objects/object_lights.c
-index f4ba4d79..8544f711 100644
+index f4ba4d79..ccd74106 100644
 --- a/source/objects/object_lights.c
 +++ b/source/objects/object_lights.c
 @@ -183,6 +183,7 @@ symbols in this file:
@@ -471,6 +471,72 @@ index f4ba4d79..8544f711 100644
  	if (TEST_FLAG(object->object.flags, _object_static_lighting_raycast_sideways_bit))
  	{
  		SET_FLAG(flags, _distant_lighting_raycast_sideways_bit, TRUE);
+@@ -2382,3 +2387,65 @@ void lights_prepare_for_object_static(
+ 
+ 	return;
+ }
++
++/* CHIEFRIM: how an object's flashlight shines now (Chief's, docs §9): the
++light attached to it that is marked as the first-person flashlight (else its
++first light), as lights_preprocess_scene would make it this frame: its colour
++(black when off), radius (world units) and cone (radians). Skyrim lights its
++own world with it, as Halo's light has no world of Halo's to fall on. */
++boolean chiefrim_object_flashlight(
++	long object_index,
++	real_rgb_color *color,
++	real *radius,
++	real *cutoff_angle,
++	real *falloff_angle)
++{
++	struct object_datum *object = object_try_and_get(object_index);
++	struct object_definition *object_definition;
++	struct object_attachment_definition *found = NULL;
++	struct point_light_definition *definition = NULL;
++	short attachment_index;
++	real intensity = 0.0f;
++
++	if (!object)
++		return FALSE;
++	object_definition = object_definition_get(object->definition_index);
++	for (attachment_index = 0; attachment_index < object_definition->object.attachments.count; attachment_index++)
++	{
++		struct object_attachment_definition *attachment = TAG_BLOCK_GET_ELEMENT(
++			&object_definition->object.attachments,
++			attachment_index,
++			struct object_attachment_definition);
++		struct point_light_definition *candidate;
++
++		if (attachment->type.group_tag != LIGHT_DEFINITION_TAG || attachment->type.index == NONE)
++			continue;
++		candidate = light_definition_get(attachment->type.index);
++		if (TEST_FLAG(candidate->flags, _light_definition_is_first_person_flashlight_bit) || !found)
++		{
++			found = attachment;
++			definition = candidate;
++			if (TEST_FLAG(candidate->flags, _light_definition_is_first_person_flashlight_bit))
++				break;
++		}
++	}
++	if (!found)
++		return FALSE;
++
++	object_get_function_value(object_index, found->primary_scale_function_reference - 1, &intensity);
++	rgb_colors_interpolate_and_scale(
++		color,
++		definition->color_interpolation_flags,
++		&definition->color_lower_bound,
++		&definition->color_upper_bound,
++		found->change_color_reference - 1 == NONE
++			? global_real_rgb_white
++			: &object->object.outgoing_change_colors[found->change_color_reference - 1],
++		intensity);
++	*radius = (definition->radius_modifier_lower_bound * (1.0f - intensity)
++		+ definition->radius_modifier_upper_bound * intensity)
++		* definition->radius;
++	*cutoff_angle = definition->cutoff_angle;
++	*falloff_angle = definition->falloff_angle;
++	return TRUE;
++}
 diff --git a/source/render/render.c b/source/render/render.c
 index 68a746c2..24b5171a 100644
 --- a/source/render/render.c

@@ -454,6 +454,7 @@ namespace chiefrim::Puppet
 					Hud::Restore();
 					Camera::Release(a_player, true);
 					Combat::Release(a_player);
+					Lighting::RemoveFlashlight();
 					RestoreController(a_player);
 				}
 				WatchAfterUnlink(a_player);
@@ -531,6 +532,7 @@ namespace chiefrim::Puppet
 			CoSave::Update();  // after the world: a load's kit comes after Halo makes Chief whole
 			Combat::PerFrame(a_player, a_delta);
 			Lighting::Update(a_player);
+			Lighting::UpdateFlashlight(a_player);
 			if (Settings::SkyrimMoves() || handedOff) {
 				// handed off, Skyrim moves the player whatever the mode, and Chief follows
 				PublishPlayer(a_player);

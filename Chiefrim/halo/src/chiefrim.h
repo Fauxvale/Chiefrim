@@ -87,11 +87,16 @@ wchar_t const *chiefrim_control_key_name(long control); /* hud_messaging.c: the 
 void chiefrim_inventory_linked(void);                  /* Skyrim said hello */
 void chiefrim_inventory_message(cr_msg_chief_state const *message); /* CR_MSG_CHIEF_RESTORE */
 void chiefrim_inventory_update(long chief, boolean world_valid, boolean dead); /* each frame while linked, after the world */
+long chiefrim_weapon_tag(char const *name);            /* the map's weapon by tag path or its last part ("needler"), or NONE */
 /* chiefrim_lighting.c (docs §9): Skyrim's light on Halo's objects */
 void chiefrim_lighting_message(cr_msg_lighting const *message);
 void chiefrim_lighting_forget(void);
 struct render_lighting;
 boolean chiefrim_object_lighting(long object_index, struct render_lighting *lighting); /* object_lights.c: in place of the lightmap */
+void chiefrim_flashlight_linked(void);                 /* Skyrim said hello: its flashlight state again */
+void chiefrim_flashlight_update(long chief);           /* each frame while linked: CR_MSG_FLASHLIGHT when it changes */
+/* object_lights.c: an object's flashlight as it shines now (colour black when off; world units, radians) */
+boolean chiefrim_object_flashlight(long object_index, real_rgb_color *color, real *radius, real *cutoff_angle, real *falloff_angle);
 boolean chiefrim_world_origin(cr_vec3 *origin);         /* Skyrim's world origin, if one is set */
 void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter); /* damage.c: an explosion reached it */
 void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real acceleration); /* damage.c: an explosion's area damage starts */

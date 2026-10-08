@@ -2,6 +2,7 @@
 #include "Link.h"
 #include "CoSave.h"
 #include "Combat.h"
+#include "Lighting.h"
 
 namespace chiefrim
 {
@@ -197,6 +198,9 @@ namespace chiefrim
 				break;
 			case CR_MSG_CHIEF_STATE:
 				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));
+				break;
+			case CR_MSG_FLASHLIGHT:
+				Lighting::OnFlashlight(*reinterpret_cast<const cr_msg_flashlight*>(buffer));
 				break;
 			default:
 				break;

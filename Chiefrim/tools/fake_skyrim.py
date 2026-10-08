@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 16
+VERSION = 17
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -48,7 +48,7 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
-MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION = 12, 13, 14, 15
+MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION, MSG_FLASHLIGHT = 12, 13, 14, 15, 16
 KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
@@ -472,6 +472,8 @@ def main():
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
+    parser.add_argument("--flashlight-at", type=float, default=0.0,
+                        help="seconds in: switch Chief's flashlight on, and off again 4 s later")
     options = parser.parse_args()
     if options.dump:
         global DUMP
@@ -580,6 +582,11 @@ def main():
                 elif msg_type == MSG_EXPLOSION:
                     cx, cy, cz, radius, acceleration = struct.unpack_from("<3fff", body)
                     print(f"fake_skyrim: explosion at ({cx:.0f} {cy:.0f} {cz:.0f}), radius {radius:.0f}, acceleration {acceleration:.3f}", flush=True)
+                elif msg_type == MSG_FLASHLIGHT:
+                    r, g, b, radius, cutoff, falloff = struct.unpack_from("<3ffff", body)
+                    state = f"on, colour ({r:.2f} {g:.2f} {b:.2f})" if r + g + b > 0 else "off"
+                    print(f"fake_skyrim: Chief's flashlight {state}, radius {radius:.0f}, cone {math.degrees(cutoff):.0f} "
+                          f"(full to {math.degrees(falloff):.0f}) degrees", flush=True)
                 elif msg_type == MSG_CHIEF_STATE:
                     kit = kit_unpack(body)
                     shown = kit_text(dict(kit, body=round(kit["body"], 1), shield=round(kit["shield"], 1)))
@@ -650,6 +657,16 @@ def main():
                     drive_state["zoomed"] = True
                     print("fake_skyrim: zoom held", flush=True)
                 link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 3) if zooming else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
+            if options.flashlight_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                for at, name in ((options.flashlight_at, "on"), (options.flashlight_at + 4.0, "off")):
+                    if t >= at and not drive_state.get("flashlight " + name):
+                        presses[10] = (presses[10] + 1) & 0xFF  # CR_ACTION_FLASHLIGHT
+                        drive_state["flashlight " + name] = True
+                        print(f"fake_skyrim: flashlight {name}", flush=True)
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, 0, 1,
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
             t = time.monotonic() - started
             if options.actor:
