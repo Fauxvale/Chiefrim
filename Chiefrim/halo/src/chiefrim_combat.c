@@ -429,7 +429,21 @@ static void chiefrim_proxy_drop_kit(struct chiefrim_proxy *proxy)
 static void chiefrim_proxy_delete(struct chiefrim_proxy *proxy)
 {
 	if (proxy->object_index != NONE && object_try_and_get(proxy->object_index))
+	{
+		/* what's stuck in it (a plasma grenade, needles) lets go and goes
+		off as it would: deleting the proxy would delete it too */
+		long child = object_get(proxy->object_index)->object.first_child_object_index;
+
+		while (child != NONE)
+		{
+			long next = object_get(child)->object.next_object_index;
+
+			if (object_get(child)->object.type == _object_type_projectile)
+				object_detach(child);
+			child = next;
+		}
 		object_delete(proxy->object_index);
+	}
 	proxy->form_id = 0;
 	proxy->object_index = NONE;
 	proxy->hitbox_count = 0;
@@ -979,7 +993,10 @@ long chiefrim_proxy_test_vector(long object_index, real_point3d const *point, re
 			collision->material_type = _material_human;
 			collision->object_index = object_index;
 			collision->region_index = NONE;
-			collision->node_index = NONE;
+			/* its biped's root: what sticks (a plasma grenade, a needle) is
+			attached there and goes where the proxy goes (NONE halted Halo:
+			object_has_node) */
+			collision->node_index = 0;
 			collision->bsp_index = NONE;
 			collision->surface_index = NONE;
 			collision->plane_designator = NONE;

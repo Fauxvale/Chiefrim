@@ -557,7 +557,10 @@ and facing every tick.
   `object_test_vector` (`collisions.c` hook: a ray against capsules), the proxy's bounding sphere
   holds them (`objects.c`: rays and explosions look for it there, so a dragon is as big as a
   dragon), and an explosion's distance is to the nearest shape's middle (`damage.c`: a grenade by
-  a dragon's tail hurts it). A wolf is hit where a wolf is: a shot over its back misses, where the
+  a dragon's tail hurts it). What sticks (a plasma grenade, a needle) is attached to the biped's
+  root node, so it goes where the proxy goes (in the first in-game test, 2026-10-08, no node halted
+  Halo: `object_has_node`), and lets go when the proxy is deleted, to go off as it would. Verified
+  in game (2026-10-08): bullets and the hit shapes as expected. A wolf is hit where a wolf is: a shot over its back misses, where the
   old scaled biped stood up into it. Bodies not in the world, or not where the actor stands (a
   ragdoll not driven), give way to **one capsule from its bounds**, stood up or laid along its
   heading, as tall as the actor, and a sphere for a person's head (`CR_HITBOX_BOUNDS`). With no
