@@ -375,7 +375,7 @@ index ceff81fe..053f6bb2 100644
  
  	projectile->projectile.hit_material_type = material_type;
 diff --git a/source/main/main.c b/source/main/main.c
-index e35691e1..33935254 100644
+index e35691e1..86036209 100644
 --- a/source/main/main.c
 +++ b/source/main/main.c
 @@ -388,6 +388,7 @@ symbols in this file:
@@ -386,7 +386,15 @@ index e35691e1..33935254 100644
  
  /* ---------- constants */
  
-@@ -3026,6 +3027,7 @@ static void main_game_render(
+@@ -1130,6 +1131,7 @@ void set_window_camera_values(
+ 				1.0f);
+ 
+ 		if (window->local_player_index != NONE &&
++			!chiefrim_active() && /* CHIEFRIM: no camera shake or kick: Skyrim's camera is the view, and decals slid on its world */
+ 			!console_is_active() &&
+ 			!game_time_get_paused() &&
+ 			director_get_perspective(window->local_player_index) !=
+@@ -3026,6 +3028,7 @@ static void main_game_render(
  			window->local_player_index = last_local_player_index;
  			observer = observer_get_camera(window->local_player_index);
  			observer = render_interpolation_camera(window->local_player_index, observer);
@@ -394,7 +402,7 @@ index e35691e1..33935254 100644
  		}
  		else
  		{
-@@ -3082,6 +3084,7 @@ void main_loop(
+@@ -3082,6 +3085,7 @@ void main_loop(
  	main_globals.switch_to_structure_bsp_index = NONE;
  	main_globals.halt_time_scale = TRUE;
  
@@ -402,7 +410,7 @@ index e35691e1..33935254 100644
  	console_initialize();
  	debug_keys_initialize();
  	game_initialize();
-@@ -3266,6 +3269,7 @@ void main_loop(
+@@ -3266,6 +3270,7 @@ void main_loop(
  					collision_log_continue_period(1);
  					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);

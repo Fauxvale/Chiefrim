@@ -348,6 +348,8 @@ definition comes from that map. Chiefrim loads one **host map**.
   within 0.07 world units of the head marker kills the proxy, and Skyrim kills the actor
   whatever its level (`CR_HIT_HEADSHOT`). Hits on proxies bleed: Halo's impact takes the human
   material (`projectiles.c` hook), not the cyborg's sparks. `CHIEFRIM_SHOW_PROXIES=1` draws them.
+  Halo's camera shake and kick (explosions, firing) are off in Chiefrim mode (`main.c` hook): the
+  view is Skyrim's camera, and the shaken world layer slid decals and bullet holes over Skyrim's.
   Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
   Skyrim's loose dynamic bodies up and away, up to `fPropLaunchSpeed` m/s at the centre. In Chiefrim mode the level's background loops and acoustics are
   off (`scenario.c` hook): Skyrim has its own ambience. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
