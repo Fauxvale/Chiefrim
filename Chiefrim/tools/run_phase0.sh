@@ -29,7 +29,7 @@ halo="$root/halo/.work/build/linux/halo"
 [ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$log"
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
-map=${CHIEFRIM_MAP:-b30}
+map=${CHIEFRIM_MAP:-d20}
 printf 'map_name levels\\%s\\%s\n' "$map" "$map" > "$data/init.txt"
 : > "$data/debug.txt"
 

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "CoSave.h"
 #include "Link.h"
+#include "Settings.h"
 
 namespace chiefrim::CoSave
 {
@@ -23,6 +24,45 @@ namespace chiefrim::CoSave
 		std::uint32_t                 generation = 0;  // the last restore sent
 		std::uint32_t                 expected = 0;    // reports from before it are stale
 
+		// [Loadout]: what Chief starts with, without a kit of his own. Weapons by
+		// tag path or its last part, with their own rounds; none: the host map's.
+		cr_chief_state StartingKit()
+		{
+			cr_chief_state kit{};
+			kit.current_weapon = 0;
+			kit.current_grenade = 0;
+			kit.body = kit.shield = kit.flashlight = 1.0f;
+			wchar_t value[512]{};
+			::GetPrivateProfileStringW(L"Loadout", L"sWeapons", L"assault rifle, pistol", value, 512, Settings::IniPath().c_str());
+			std::size_t count = 0;
+			std::wstringstream list(value);
+			for (std::wstring name; std::getline(list, name, L',') && count < CR_CHIEF_WEAPONS;) {
+				const auto first = name.find_first_not_of(L" \t\"");
+				const auto last = name.find_last_not_of(L" \t\"");
+				if (first == std::wstring::npos) {
+					continue;
+				}
+				auto& weapon = kit.weapons[count++];
+				for (std::size_t i = first; i <= last && i - first < CR_WEAPON_TAG_LENGTH - 1; ++i) {
+					weapon.tag[i - first] = static_cast<char>(name[i] < 128 ? name[i] : '?');
+				}
+				weapon.rounds_total[0] = weapon.rounds_total[1] = -1;  // the weapon's own
+				weapon.rounds_loaded[0] = weapon.rounds_loaded[1] = -1;
+			}
+			if (count == 0) {
+				kit.flags = CR_CHIEF_STARTING_LOADOUT;  // the host map's
+			}
+			const auto grenades = [](const wchar_t* a_key, int a_default) {
+				return static_cast<std::uint8_t>(std::clamp<int>(::GetPrivateProfileIntW(L"Loadout", a_key, a_default, Settings::IniPath().c_str()), 0, 99));
+			};
+			kit.grenades[0] = grenades(L"iFragGrenades", 4);
+			kit.grenades[1] = grenades(L"iPlasmaGrenades", 0);
+			if (!kit.grenades[0] && kit.grenades[1]) {
+				kit.current_grenade = 1;
+			}
+			return kit;
+		}
+
 		void LogKit(const char* a_what, const cr_chief_state& a_kit)
 		{
 			std::string weapons;
@@ -31,7 +71,9 @@ namespace chiefrim::CoSave
 					const std::string_view tag(weapon.tag, ::strnlen(weapon.tag, CR_WEAPON_TAG_LENGTH));
 					weapons += weapons.empty() ? "" : ", ";
 					weapons += tag.substr(tag.find_last_of('\\') + 1);
-					weapons += std::format(" {}/{}", weapon.rounds_loaded[0], weapon.rounds_total[0]);
+					if (weapon.rounds_total[0] >= 0) {
+						weapons += std::format(" {}/{}", weapon.rounds_loaded[0], weapon.rounds_total[0]);
+					}
 				}
 			}
 			logger::info("co-save: {}: {}; grenades {}/{}; body {:.2f}, shields {:.2f}", a_what,
@@ -103,9 +145,7 @@ namespace chiefrim::CoSave
 	{
 		std::scoped_lock guard(lock);
 		expected = 0;  // its own Chief
-		if (latest) {
-			pending = Pending::kKit;
-		}
+		pending = latest ? Pending::kKit : Pending::kStartingLoadout;  // never the host map's own Chief
 	}
 
 	void Update()
@@ -115,20 +155,17 @@ namespace chiefrim::CoSave
 			return;
 		}
 		cr_msg_chief_state message{};
-		if (pending == Pending::kKit && latest) {
-			message.state = *latest;
-		} else {
-			message.state.flags = CR_CHIEF_STARTING_LOADOUT;
-		}
+		const bool starting = pending != Pending::kKit || !latest;
+		message.state = starting ? StartingKit() : *latest;
 		message.state.generation = generation + 1;
 		if (!Link::Get().PushRaw(CR_MSG_CHIEF_RESTORE, &message, sizeof(message))) {
 			return;  // the ring is full: next frame
 		}
 		generation = expected = message.state.generation;
 		if (message.state.flags & CR_CHIEF_STARTING_LOADOUT) {
-			logger::info("co-save: Chief gets the starting loadout (no kit in the save)");
+			logger::info("co-save: no kit: Chief gets the host map's starting loadout ([Loadout] sWeapons is empty)");
 		} else {
-			LogKit("to Halo", message.state);
+			LogKit(starting ? "no kit: the starting loadout ([Loadout]) to Halo" : "to Halo", message.state);
 		}
 		pending = Pending::kNothing;
 	}

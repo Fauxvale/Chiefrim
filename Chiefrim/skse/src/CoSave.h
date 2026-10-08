@@ -8,8 +8,9 @@ namespace chiefrim::CoSave
 	// Chief's kit in the SKSE co-save (docs §11): his weapons, ammo,
 	// grenades, vitality and flashlight. Halo reports it when it changes, and
 	// the latest goes into each save, linked or not. Loading a save sends its
-	// kit back to Halo, or the starting loadout for a save without one (a new
-	// game, an older save); a new Halo (F10, F11, a crash) gets the latest.
+	// kit back to Halo, or the starting loadout ([Loadout]) for a save without
+	// one (a new game, an older save); a new Halo (F10, F11, a crash) gets the
+	// latest, or the starting loadout.
 
 	// SKSEPluginLoad: the serialization callbacks.
 	void Install();

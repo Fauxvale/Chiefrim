@@ -321,7 +321,8 @@ definition comes from that map. Chiefrim loads one **host map**.
 
 - **It must be a campaign level.** Loaded with `map_name`, a multiplayer map starts no game and
   spawns nobody. The port's own profile-training script skips them for the same reason.
-- **Phase 0 uses `b30`** (The Silent Cartographer), the decomp's own default campaign level.
+- **Phases 0 to 4 used `b30`** (The Silent Cartographer), the decomp's own default campaign level;
+  **Phase 5 moved to `d20`** (below).
 - **In Chiefrim mode the level's logic is off:** `game_tick` skips `hs_update` (scripts and
   cutscenes) and `ai_update`, and Chiefrim erases the level's actors and other objects once Chief
   exists. Its BSP-switch trigger volumes are off too (`players.c`): Chief, at Skyrim's
@@ -779,8 +780,9 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   save made while Halo is off (F10) or restarting (F11, a crash) keeps the last kit. Loading a
   save sends its kit to Halo (`CR_MSG_CHIEF_RESTORE`) once the world has gone (after Halo makes
   Chief whole for the new world), and Chief drops what he carries and takes it; a save without one
-  (a new game, a save from before Phase 5) gets the host map's starting loadout. A new Halo gets
-  the latest kit too. Each restore has a generation, and Halo's reports carry the last one
+  (a new game, a save from before Phase 5) gets the starting loadout of `[Loadout]` (weapons named
+  by their tag path's last part, with the rounds a weapon found lying around has; frag and plasma
+  grenades; empty `sWeapons`: the host map's own). A new Halo gets the latest kit, or that loadout. Each restore has a generation, and Halo's reports carry the last one
   applied, so reports from before a restore can't overwrite the loaded kit. Test stand:
   `fake_skyrim.py --restore-at`, `--restore-default-at`.
 - **Load doors, fast travel and teleports:** Skyrim is authoritative for these. The plugin sends
@@ -855,8 +857,10 @@ Proposed. Each one needs the user's call before the phase that depends on it.
    frag grenades) and a debug command** that gives Chief any weapon in the host map. (§8.4)
 3. **Deep water** (Phase 4): **decided 2026-10-06: hand over to Skyrim's swimming** while the player
    swims. (§6, §11)
-4. **Host map:** a campaign level, `b30` for now. Final choice from the tag-listing tool's output.
-   (§5.3)
+4. **Host map:** **decided 2026-10-07: `d20`** (Keyes), the one map with every weapon a player
+   can carry (`tools/list_map_tags.py`). `CHIEFRIM_MAP` overrides it in the launcher and the test
+   stand. Chief's starting loadout is `Chiefrim.ini`'s `[Loadout]` (weapons by name, their own
+   rounds; grenades), not the map's. (§5.3)
 5. **Decomp management:** settled in Phase 0: pinned upstream commit, patches and our own
    sources, no fork. (§14)
 6. **Covenant enemies:** deferred, stretch goal.

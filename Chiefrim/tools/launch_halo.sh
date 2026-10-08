@@ -21,6 +21,10 @@
 # (the last run's; the one before is halo.out.1). CHIEFRIM_HALO_WRAPPER runs
 # Halo through a command (tests: "gamescope --backend headless --").
 #
+# CHIEFRIM_MAP is the host map, the campaign level whose weapons, effects and
+# HUD Halo loads (docs/DESIGN.md §5.3): d20 by default, the one with every
+# weapon a player can carry (tools/list_map_tags.py).
+#
 # CHIEFRIM_HALO_GPU picks the GPU Halo renders on, in a laptop with two:
 #   auto (the default): dgpu when NVIDIA's 32-bit GLX is installed, else igpu.
 #   igpu: the integrated one, the system's own choice; Skyrim keeps the
@@ -45,7 +49,8 @@ control=/dev/shm/chiefrim_control
 [ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$root/build/collision-dumps"
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
-printf 'map_name levels\\b30\\b30\n' > "$data/init.txt"
+map=${CHIEFRIM_MAP:-d20}
+printf 'map_name levels\\%s\\%s\n' "$map" "$map" > "$data/init.txt"
 
 bot=""
 steam=""

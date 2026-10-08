@@ -403,7 +403,9 @@ Halo (a restart) gets the latest too.
 generation: each restore's is new, and Halo's states carry the last one it
 applied (0: none yet, its own Chief), so Skyrim drops states from before
 the restore it is waiting on. Weapons are named by tag path, so a save
-survives the host map's tags moving; one the map doesn't have is skipped. */
+survives the host map's tags moving; one the map doesn't have is skipped.
+Skyrim may name one by its last part ("shotgun"), as Chiefrim.ini's
+[Loadout] does: Halo takes the map's weapon whose path ends with it. */
 #define CR_CHIEF_WEAPONS     4u  /* Halo's MAXIMUM_WEAPONS_PER_UNIT */
 #define CR_CHIEF_GRENADES    4u  /* Halo has 2 types; room to grow */
 #define CR_WEAPON_TAG_LENGTH 64u
@@ -411,8 +413,8 @@ survives the host map's tags moving; one the map doesn't have is skipped. */
 typedef struct cr_chief_weapon
 {
 	char     tag[CR_WEAPON_TAG_LENGTH]; /* the weapon's tag path, NUL-terminated; empty: no weapon */
-	int16_t  rounds_total[2];   /* per magazine: all its rounds, those loaded too */
-	int16_t  rounds_loaded[2];
+	int16_t  rounds_total[2];   /* per magazine: all its rounds, those loaded too; negative (S->H): */
+	int16_t  rounds_loaded[2];  /* the weapon's own, as one found in the map has them */
 	float    age;               /* energy weapons: battery spent, 0..1 */
 	uint32_t reserved;
 } cr_chief_weapon;

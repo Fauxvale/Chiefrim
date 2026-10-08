@@ -442,6 +442,10 @@ def main():
                         help="seconds in: as a save's load, send back Chief's last kit changed "
                              "(weapons in reverse, the last in hand, half their rounds, 3 frags and 2 plasmas, "
                              "body 0.5, shields 0.25) (CR_MSG_CHIEF_RESTORE)")
+    parser.add_argument("--loadout-at", type=float, default=0.0,
+                        help="seconds in: as Chiefrim.ini's [Loadout], --loadout's weapons by name with their own rounds")
+    parser.add_argument("--loadout", default="shotgun, Sniper Rifle",
+                        help="comma-separated weapon names (a tag path's last part)")
     parser.add_argument("--restore-default-at", type=float, default=0.0,
                         help="seconds in: as a save without a kit: the starting loadout")
     parser.add_argument("--light", type=float, default=-1.0,
@@ -671,6 +675,15 @@ def main():
                 link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack(restore))
                 drive_state["restored"] = True
                 print(f"fake_skyrim: restore {kit_text(restore)}", flush=True)
+            if options.loadout_at and t >= options.loadout_at and not drive_state.get("loaded_out"):
+                names = [n.strip() for n in options.loadout.split(",") if n.strip()][:4]
+                weapons = [{"tag": n, "total": [-1, -1], "loaded": [-1, -1], "age": 0.0} for n in names]
+                weapons += [{"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}] * (4 - len(weapons))
+                kit = {"generation": 9, "flags": 0, "current": 0, "grenade": 0, "grenades": [2, 3, 0, 0],
+                       "body": 1.0, "shield": 1.0, "flashlight": 1.0, "weapons": weapons}
+                link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack(kit))
+                drive_state["loaded_out"] = True
+                print(f"fake_skyrim: starting loadout {names}", flush=True)
             if options.restore_default_at and t >= options.restore_default_at and not drive_state.get("defaulted"):
                 link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack({"generation": 8, "flags": 1, "current": -1, "grenade": -1,
                     "grenades": [0, 0, 0, 0], "body": 0.0, "shield": 0.0, "flashlight": 0.0,

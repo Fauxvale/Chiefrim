@@ -9,7 +9,8 @@ Chief's kit in Skyrim's saves (Chiefrim/docs/DESIGN.md §11, save and load):
   his flashlight's battery go to Skyrim (CR_MSG_CHIEF_STATE) when they change,
   four times a second at most. Skyrim keeps the latest for its next save.
 - RESTORE: loading a Skyrim save sends its kit back (CR_MSG_CHIEF_RESTORE),
-  or asks for the host map's starting loadout when the save has none. Chief
+  or Chiefrim.ini's starting loadout when the save has none (weapons named
+  by their last part, with their own rounds), or the host map's. Chief
   gives up what he carries and takes exactly that. It waits for Chief's unit
   and for the world, and comes after the world's reset in the same frame
   (chiefrim_apply_world makes him whole), so the saved vitality stays.
@@ -34,6 +35,7 @@ Skyrim drops states from before the restore it waits on.
 #include "units/units.h"
 
 #include <string.h>
+#include <strings.h>
 
 /* ---------- constants */
 
@@ -122,18 +124,29 @@ static void chiefrim_inventory_capture(long chief, cr_chief_state *state)
 	state->flashlight = unit->unit.integrated_light_battery;
 }
 
+/* The map's weapon by its tag path, or by the path's last part ("shotgun"),
+in any case */
 static long chiefrim_weapon_tag(char const *name)
 {
 	struct tag_iterator iterator;
-	long tag_index;
+	long tag_index, found = NONE;
+	size_t length = strlen(name);
 
 	tag_iterator_new(&iterator, WEAPON_DEFINITION_TAG);
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
-		if (!strcmp(tag_get_name(tag_index), name))
+		char const *path = tag_get_name(tag_index);
+		size_t path_length = strlen(path);
+
+		if (!strcasecmp(path, name))
 			return tag_index;
+		if (found == NONE && path_length > length && path[path_length - length - 1] == '\\' &&
+			!strcasecmp(path + path_length - length, name))
+		{
+			found = tag_index;
+		}
 	}
-	return NONE;
+	return found;
 }
 
 /* Everything he carries, gone; the one in hand first leaves his hands */
@@ -171,7 +184,7 @@ static short chiefrim_inventory_add(long chief, cr_chief_weapon const *saved)
 	tag_index = chiefrim_weapon_tag(saved->tag);
 	if (tag_index == NONE)
 	{
-		error(_error_silent, "chiefrim: the save's %s isn't in the host map; left out", saved->tag);
+		error(_error_silent, "chiefrim: %s isn't in the host map; left out", saved->tag);
 		return NONE;
 	}
 	object_placement_data_new(&data, tag_index, chief);
@@ -182,7 +195,7 @@ static short chiefrim_inventory_add(long chief, cr_chief_weapon const *saved)
 	if (!unit_add_weapon_to_inventory(chief, weapon_index, _unit_add_weapon_normal))
 	{
 		object_delete(weapon_index);
-		error(_error_silent, "chiefrim: couldn't give Chief the save's %s", saved->tag);
+		error(_error_silent, "chiefrim: couldn't give Chief %s (the AI's only?)", saved->tag);
 		return NONE;
 	}
 	for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT && unit->unit.weapon_object_indices[slot] != weapon_index; slot++)
@@ -195,8 +208,11 @@ static short chiefrim_inventory_add(long chief, cr_chief_weapon const *saved)
 			TAG_BLOCK_GET_ELEMENT(&definition->weapon.magazines, magazine, struct weapon_magazine_definition);
 		struct weapon_magazine *rounds = &weapon->weapon.magazines[magazine];
 
-		rounds->rounds_total = (short)PIN(saved->rounds_total[magazine], 0, limits->rounds_total_maximum);
-		rounds->rounds_loaded = (short)PIN(saved->rounds_loaded[magazine], 0, MIN(limits->rounds_loaded_maximum, rounds->rounds_total));
+		/* negative: the weapon's own, as one lying in the map has them */
+		rounds->rounds_total = saved->rounds_total[magazine] < 0 ? limits->rounds_total_initial :
+			(short)PIN(saved->rounds_total[magazine], 0, limits->rounds_total_maximum);
+		rounds->rounds_loaded = saved->rounds_loaded[magazine] < 0 ? MIN(limits->rounds_loaded_maximum, rounds->rounds_total) :
+			(short)PIN(saved->rounds_loaded[magazine], 0, MIN(limits->rounds_loaded_maximum, rounds->rounds_total));
 	}
 	weapon->weapon.age = PIN(saved->age, 0.f, 1.f);
 	return slot < MAXIMUM_WEAPONS_PER_UNIT ? slot : NONE;
@@ -217,7 +233,7 @@ static void chiefrim_inventory_apply(long chief, cr_chief_state const *state)
 		unit->object.body_vitality = 1.f;
 		unit->object.shield_vitality = 1.f;
 		unit->unit.integrated_light_battery = 1.f;
-		error(_error_silent, "chiefrim: no kit in the save: the starting loadout");
+		error(_error_silent, "chiefrim: the host map's starting loadout");
 	}
 	else
 	{
@@ -252,7 +268,7 @@ static void chiefrim_inventory_apply(long chief, cr_chief_state const *state)
 		unit->object.body_vitality = PIN(state->body, 0.05f, 1.f);
 		unit->object.shield_vitality = PIN(state->shield, 0.f, 3.f);
 		unit->unit.integrated_light_battery = PIN(state->flashlight, 0.f, 1.f);
-		error(_error_silent, "chiefrim: the save's kit: %ld weapons, grenades %d/%d, body %.2f, shields %.2f",
+		error(_error_silent, "chiefrim: Chief's kit from Skyrim: %ld weapons, grenades %d/%d, body %.2f, shields %.2f",
 			weapons, state->grenades[0], state->grenades[1], state->body, state->shield);
 	}
 	unit->object.current_body_damage = 0.f;
