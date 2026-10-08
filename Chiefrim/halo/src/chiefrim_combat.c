@@ -116,15 +116,18 @@ static void chiefrim_combat_resolve(long chief)
 		return;
 	combat.resolved = TRUE;
 
-	/* the proxy: a marine, else Chief's own biped */
+	/* the proxy: a marine, else Chief's own biped (d20, the host map, has no marines) */
 	combat.proxy_biped = chiefrim_find_tag(BIPED_DEFINITION_TAG, "marine", NULL);
 	if (combat.proxy_biped == NONE && chief != NONE)
 		combat.proxy_biped = object_get(chief)->definition_index;
 	if (combat.proxy_biped != NONE)
 	{
 		struct biped_definition *biped = biped_definition_get(combat.proxy_biped);
+		real height = biped->biped.collision_height_standing, radius = biped->biped.collision_radius;
 
-		combat.proxy_height = biped->biped.collision_height_standing + biped->biped.collision_radius;
+		/* Chief's own (no marines in the map): its height before Chief's scaling */
+		chiefrim_biped_unscaled(biped, &height, &radius);
+		combat.proxy_height = height + radius;
 		if (combat.proxy_height < 0.1f)
 			combat.proxy_height = 0.6f;
 	}

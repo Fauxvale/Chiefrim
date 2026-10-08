@@ -351,10 +351,20 @@ under. His biped definition's heights scale to the height Skyrim asks for;
 Halo reads them every tick (bipeds.c), so collision, crouching and his eyes,
 and so Skyrim's camera, follow. The definition is the loaded map's tag data:
 its own values are kept, and taken again when a map load replaces them. */
+static struct biped_definition *chiefrim_scaled_biped = NULL;
+static real chiefrim_biped_original[5];  /* standing and crouching collision, then camera, then radius */
+
+boolean chiefrim_biped_unscaled(void const *definition, real *height_standing, real *radius)
+{
+	if (!definition || definition != chiefrim_scaled_biped)
+		return FALSE;
+	*height_standing = chiefrim_biped_original[0];
+	*radius = chiefrim_biped_original[4];
+	return TRUE;
+}
+
 static void chiefrim_apply_chief_height(long unit_index)
 {
-	static struct biped_definition *scaled = NULL;
-	static real original[5];  /* standing and crouching collision, then camera, then radius */
 	static real written = -1.0f;
 	struct biped_definition *definition;
 	real target, scale, radius;
@@ -362,43 +372,43 @@ static void chiefrim_apply_chief_height(long unit_index)
 	if (unit_get(unit_index)->object.type != _object_type_biped)
 		return;
 	definition = biped_definition_get(biped_get(unit_index)->definition_index);
-	if (definition != scaled || definition->biped.collision_height_standing != written)
+	if (definition != chiefrim_scaled_biped || definition->biped.collision_height_standing != written)
 	{
 		/* a definition we haven't touched (or the map reloaded it) */
-		original[0] = definition->biped.collision_height_standing;
-		original[1] = definition->biped.collision_height_crouching;
-		original[2] = definition->biped.standing_camera_height;
-		original[3] = definition->biped.crouching_camera_height;
-		original[4] = definition->biped.collision_radius;
-		scaled = definition;
-		written = original[0];
+		chiefrim_biped_original[0] = definition->biped.collision_height_standing;
+		chiefrim_biped_original[1] = definition->biped.collision_height_crouching;
+		chiefrim_biped_original[2] = definition->biped.standing_camera_height;
+		chiefrim_biped_original[3] = definition->biped.crouching_camera_height;
+		chiefrim_biped_original[4] = definition->biped.collision_radius;
+		chiefrim_scaled_biped = definition;
+		written = chiefrim_biped_original[0];
 	}
-	if (original[0] <= 0.01f)
+	if (chiefrim_biped_original[0] <= 0.01f)
 		return;
 
-	target = chiefrim.world.chief_height > 1.0f ? chiefrim.world.chief_height / CR_SKY_UNITS_PER_WU : original[0];
+	target = chiefrim.world.chief_height > 1.0f ? chiefrim.world.chief_height / CR_SKY_UNITS_PER_WU : chiefrim_biped_original[0];
 	target = PIN(target, 0.2f, 1.0f); /* a hobbit to an ogre, in world units */
-	scale = target / original[0];
-	radius = chiefrim.world.chief_radius > 1.0f ? chiefrim.world.chief_radius / CR_SKY_UNITS_PER_WU : original[4];
+	scale = target / chiefrim_biped_original[0];
+	radius = chiefrim.world.chief_radius > 1.0f ? chiefrim.world.chief_radius / CR_SKY_UNITS_PER_WU : chiefrim_biped_original[4];
 	/* thinner than ~0.12 wu (25 Skyrim units), Halo's biped tunnels
 	through surfaces: at 18 (Skyrim's own) he walked through walls and sank
 	into floors. CHIEFRIM_MINIMUM_RADIUS keeps a margin. */
 	radius = PIN(radius, CHIEFRIM_MINIMUM_RADIUS, MAX(target * 0.45f, CHIEFRIM_MINIMUM_RADIUS));
-	if (fabsf(definition->biped.collision_height_standing - original[0] * scale) < 0.0001f &&
+	if (fabsf(definition->biped.collision_height_standing - chiefrim_biped_original[0] * scale) < 0.0001f &&
 		fabsf(definition->biped.collision_radius - radius) < 0.0001f)
 	{
 		return;
 	}
 	definition->biped.collision_radius = radius;
-	definition->biped.collision_height_standing = original[0] * scale;
-	definition->biped.collision_height_crouching = original[1] * scale;
-	definition->biped.standing_camera_height = original[2] * scale;
-	definition->biped.crouching_camera_height = original[3] * scale;
+	definition->biped.collision_height_standing = chiefrim_biped_original[0] * scale;
+	definition->biped.collision_height_crouching = chiefrim_biped_original[1] * scale;
+	definition->biped.standing_camera_height = chiefrim_biped_original[2] * scale;
+	definition->biped.crouching_camera_height = chiefrim_biped_original[3] * scale;
 	written = definition->biped.collision_height_standing;
 	error(_error_silent, "chiefrim: Chief is %.0f Skyrim units tall (Halo's own: %.0f), eyes at %.0f, radius %.0f (Halo's own: %.0f)",
-		target * CR_SKY_UNITS_PER_WU, original[0] * CR_SKY_UNITS_PER_WU,
+		target * CR_SKY_UNITS_PER_WU, chiefrim_biped_original[0] * CR_SKY_UNITS_PER_WU,
 		definition->biped.standing_camera_height * CR_SKY_UNITS_PER_WU,
-		radius * CR_SKY_UNITS_PER_WU, original[4] * CR_SKY_UNITS_PER_WU);
+		radius * CR_SKY_UNITS_PER_WU, chiefrim_biped_original[4] * CR_SKY_UNITS_PER_WU);
 }
 
 /* A spot where Chief stands well: kept, a few, spaced in time and place. */

@@ -67,6 +67,9 @@ boolean chiefrim_input_look(short gamepad_index, real *yaw, real *pitch);
 boolean chiefrim_input_driving(short gamepad_index);
 boolean chiefrim_input_mark(void); /* the "mark stuck" hotkey, once per press */
 
+/* Chief's biped definition, which Chief's height from Skyrim scales: its own
+heights, for a proxy of the same biped (a host map without marines) */
+boolean chiefrim_biped_unscaled(void const *definition, real *height_standing, real *radius);
 /* chiefrim_combat.c (docs §8): proxies for Skyrim's people, damage both ways */
 void chiefrim_combat_map_loaded(void);
 void chiefrim_combat_reset(long chief);                /* a new world */
