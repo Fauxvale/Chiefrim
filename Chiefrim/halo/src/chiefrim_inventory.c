@@ -138,6 +138,8 @@ static long chiefrim_weapon_tag(char const *name)
 		char const *path = tag_get_name(tag_index);
 		size_t path_length = strlen(path);
 
+		if (!chiefrim_weapon_carried(path))
+			continue;
 		if (!strcasecmp(path, name))
 			return tag_index;
 		if (found == NONE && path_length > length && path[path_length - length - 1] == '\\' &&
@@ -184,7 +186,7 @@ static short chiefrim_inventory_add(long chief, cr_chief_weapon const *saved)
 	tag_index = chiefrim_weapon_tag(saved->tag);
 	if (tag_index == NONE)
 	{
-		error(_error_silent, "chiefrim: %s isn't in the host map; left out", saved->tag);
+		error(_error_silent, "chiefrim: %s isn't a weapon Chief can have in the host map; left out", saved->tag);
 		return NONE;
 	}
 	object_placement_data_new(&data, tag_index, chief);

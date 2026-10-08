@@ -337,9 +337,13 @@ definition comes from that map. Chiefrim loads one **host map**.
   with every weapon a player can carry: assault rifle, pistol, shotgun, sniper rifle, rocket
   launcher, flamethrower, plasma pistol, plasma rifle and needler (c40 lacks the flamethrower).
   The fuel rod gun and energy sword are in some maps but only the AI's: Halo refuses them to
-  Chief. The multiplayer maps add nothing (and can't host). The flamethrower works in Chief's hands
-  in d20 (test stand), without a HUD ammo meter. d20 has no marine, so proxies would be Chief's
-  own biped. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
+  Chief. The multiplayer maps add nothing (and can't host). **The flamethrower is left out**
+  (`chiefrim_weapon_carried`: debug key, kits, loot): an Xbox leftover, buggy in Chief's hands in
+  game and without a HUD. d20 has no marine, so proxies are Chief's own biped, sized by his
+  standing height before Chief's scaling (with the radius added, as for the marine, they were a
+  third too short), and hits on them bleed: Halo's impact takes the human material (`projectiles.c`
+  hook), not the cyborg's sparks. In Chiefrim mode the level's background loops and acoustics are
+  off (`scenario.c` hook): Skyrim has its own ambience. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
   work.
 
 ## 6. The player
@@ -785,6 +789,10 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   grenades; empty `sWeapons`: the host map's own). A new Halo gets the latest kit, or that loadout. Each restore has a generation, and Halo's reports carry the last one
   applied, so reports from before a restore can't overwrite the loaded kit. Test stand:
   `fake_skyrim.py --restore-at`, `--restore-default-at`.
+- **Healing (Phase 5):** a restore-health potion or food Skyrim's player consumes while linked
+  (its restore-health effects, magnitude times duration) heals Chief's body (`CR_MSG_CHIEF_HEAL`,
+  protocol 15), on the scale of Skyrim's damage to him (`fIncomingReference`). His shields
+  recharge as in Halo.
 - **Load doors, fast travel and teleports:** Skyrim is authoritative for these. The plugin sends
   `Teleport` (and `WorldContext` if the origin changes). Halo moves Chief and clears the
   CollisionField.

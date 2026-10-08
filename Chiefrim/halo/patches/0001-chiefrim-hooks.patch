@@ -347,6 +347,30 @@ index 3e2c7c0c..e4cc47f6 100644
  						SET_FLAG(item->item.flags, _item_on_structure_bit, TRUE);
  						item->item.rested_surface_index =
  							(short)collision.surface_index;
+diff --git a/source/items/projectiles.c b/source/items/projectiles.c
+index ceff81fe..09787508 100644
+--- a/source/items/projectiles.c
++++ b/source/items/projectiles.c
+@@ -142,6 +142,8 @@ symbols in this file:
+ #include "units/bipeds.h"
+ #include "units/units.h"
+ 
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
++
+ /* ---------- constants */
+ 
+ enum projectile_datum_flags
+@@ -1577,6 +1579,10 @@ static void projectile_collision(
+ 		if (damage.material_type != NONE)
+ 			material_type = damage.material_type;
+ 		material_effect_scale = damage.material_effect_scale;
++		/* CHIEFRIM: a stand-in for a Skyrim person bleeds as one would (blood,
++		not its biped's armour's sparks) */
++		if (chiefrim_object_unseen(collision->object_index))
++			material_type = _material_human;
+ 	}
+ 
+ 	projectile->projectile.hit_material_type = material_type;
 diff --git a/source/main/main.c b/source/main/main.c
 index e35691e1..33935254 100644
 --- a/source/main/main.c
@@ -611,7 +635,7 @@ index dad616be..f12b20d2 100644
  			interpolate_real_rgb_color(
  				&lighting->ambient_color,
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
-index 265149a3..76b6189b 100644
+index 265149a3..a5b59c1f 100644
 --- a/source/scenario/scenario.c
 +++ b/source/scenario/scenario.c
 @@ -194,6 +194,7 @@ symbols in this file:
@@ -654,6 +678,18 @@ index 265149a3..76b6189b 100644
  
  			if (had_old_structure_bsp)
  			{
+@@ -1246,6 +1265,11 @@ void scenario_get_sound_environment(
+ 		render_debug_string(FALSE, temporary);
+ 	}
+ 
++	if (chiefrim_active()) /* CHIEFRIM: Skyrim's world has its own ambience: none of the level's loops or acoustics */
++	{
++		selected_sound_environment_index = NONE;
++		selected_background_sound_index = NONE;
++	}
+ 	if (selected_sound_environment_index == NONE)
+ 		definition = (struct sound_environment_definition *)&default_sound_environment;
+ 	else
 diff --git a/source/scenario/scenario.h b/source/scenario/scenario.h
 index 73088440..c3e862fb 100644
 --- a/source/scenario/scenario.h

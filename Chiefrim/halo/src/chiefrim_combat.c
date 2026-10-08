@@ -17,6 +17,8 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 - DEATH: Chief is deathless while linked (chiefrim.c); with his body gone
   Skyrim is told once (CR_MSG_PLAYER_DIED) and its player dies. A new world
   (Skyrim's reload) brings him back whole.
+- HEALING: Skyrim's restore-health potions and food (CR_MSG_CHIEF_HEAL) heal
+  his body, on the scale of Skyrim's damage to him.
 - WEAPONS: CR_MSG_GIVE_WEAPON gives Chief one of the map's weapons, listed
   in the log at start (debug, docs §8.4).
 */
@@ -111,6 +113,7 @@ static void chiefrim_combat_resolve(long chief)
 	static char const *const kinds[4] = { "other", "melee", "projectile", "magic" };
 	struct tag_iterator iterator;
 	long tag_index, index;
+	boolean own = FALSE;
 
 	if (combat.resolved)
 		return;
@@ -119,15 +122,20 @@ static void chiefrim_combat_resolve(long chief)
 	/* the proxy: a marine, else Chief's own biped (d20, the host map, has no marines) */
 	combat.proxy_biped = chiefrim_find_tag(BIPED_DEFINITION_TAG, "marine", NULL);
 	if (combat.proxy_biped == NONE && chief != NONE)
+	{
 		combat.proxy_biped = object_get(chief)->definition_index;
+		own = TRUE;
+	}
 	if (combat.proxy_biped != NONE)
 	{
 		struct biped_definition *biped = biped_definition_get(combat.proxy_biped);
 		real height = biped->biped.collision_height_standing, radius = biped->biped.collision_radius;
 
-		/* Chief's own (no marines in the map): its height before Chief's scaling */
-		chiefrim_biped_unscaled(biped, &height, &radius);
-		combat.proxy_height = height + radius;
+		/* Chief's own (no marines in the map): his height is his standing
+		collision's, before Chief's scaling (149 Skyrim units, his eyes at 88% of
+		it); with the radius added his proxies came out a third too short */
+		chiefrim_biped_unscaled(biped, &height, &radius); /* if the scaling came first */
+		combat.proxy_height = own ? height : height + radius;
 		if (combat.proxy_height < 0.1f)
 			combat.proxy_height = 0.6f;
 	}
@@ -149,13 +157,33 @@ static void chiefrim_combat_resolve(long chief)
 	tag_iterator_new(&iterator, WEAPON_DEFINITION_TAG);
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE && combat.weapon_count < CHIEFRIM_MAXIMUM_WEAPONS)
 	{
-		if (!strncmp(tag_get_name(tag_index), "vehicles\\", 9))
-			continue; /* a vehicle's gun: nothing to carry */
+		if (!chiefrim_weapon_carried(tag_get_name(tag_index)))
+			continue;
 		error(_error_silent, "chiefrim: weapon %ld: %s", combat.weapon_count, tag_get_name(tag_index));
 		combat.weapons[combat.weapon_count++] = tag_index;
 	}
 	error(_error_silent, "chiefrim: proxies are %s, %.2f world units tall",
 		combat.proxy_biped != NONE ? tag_get_name(combat.proxy_biped) : "(none: no bipeds)", combat.proxy_height);
+}
+
+/* Chief carries it: not a vehicle's gun, not one only the AI can use (Halo
+refuses them to him), and not the flamethrower (an Xbox leftover: buggy in
+his hands, and no HUD) */
+boolean chiefrim_weapon_carried(char const *name)
+{
+	static char const *const refused[] = { "\\fuel rod", "\\hunter fuel rod", "\\energy sword", "\\flamethrower" };
+	size_t length = strlen(name), index;
+
+	if (!strncmp(name, "vehicles\\", 9) || !strncmp(name, "characters\\", 11))
+		return FALSE;
+	for (index = 0; index < NUMBEROF(refused); index++)
+	{
+		size_t part = strlen(refused[index]);
+
+		if (length >= part && !strcmp(name + length - part, refused[index]))
+			return FALSE;
+	}
+	return TRUE;
 }
 
 static void chiefrim_proxy_delete(struct chiefrim_proxy *proxy)
@@ -387,6 +415,25 @@ static void chiefrim_chief_hurt(long chief, cr_msg_player_hurt const *hurt, cr_v
 	combat.hurts++;
 }
 
+/* Skyrim's healing goes to his body; his shields recharge as ever */
+static void chiefrim_chief_heal(long chief, cr_msg_chief_heal const *heal)
+{
+	struct object_datum *object;
+	real body, vitality, before;
+
+	if (chief == NONE || !object_try_and_get(chief) || heal->amount <= 0.f)
+		return;
+	object = object_get(chief);
+	body = object_get_maximum_body_vitality(chief, FALSE);
+	vitality = body + object_get_maximum_shield_vitality(chief, FALSE);
+	if (body <= 0.f)
+		return;
+	before = object->object.body_vitality;
+	object->object.body_vitality = MIN(1.f, before + heal->amount * vitality / body);
+	error(_error_silent, "chiefrim: Skyrim healed Chief (%08X): body %.2f to %.2f",
+		heal->item, before, object->object.body_vitality);
+}
+
 static void chiefrim_give_weapon(long chief, int32_t requested)
 {
 	struct object_placement_data data;
@@ -516,6 +563,10 @@ void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 
 	case CR_MSG_PLAYER_HURT:
 		if (!combat.chief_dead)
 			chiefrim_chief_hurt(chief, (cr_msg_player_hurt const *)message, origin);
+		break;
+	case CR_MSG_CHIEF_HEAL:
+		if (!combat.chief_dead)
+			chiefrim_chief_heal(chief, (cr_msg_chief_heal const *)message);
 		break;
 	case CR_MSG_GIVE_WEAPON:
 		chiefrim_combat_resolve(chief);

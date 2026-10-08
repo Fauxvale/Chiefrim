@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 14
+VERSION = 15
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
@@ -48,7 +48,7 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
-MSG_CHIEF_STATE, MSG_CHIEF_RESTORE = 12, 13
+MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL = 12, 13, 14
 KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
@@ -442,6 +442,9 @@ def main():
                         help="seconds in: as a save's load, send back Chief's last kit changed "
                              "(weapons in reverse, the last in hand, half their rounds, 3 frags and 2 plasmas, "
                              "body 0.5, shields 0.25) (CR_MSG_CHIEF_RESTORE)")
+    parser.add_argument("--heal-at", type=float, default=0.0,
+                        help="seconds in: a potion heals --heal-amount of Chief's whole vitality (CR_MSG_CHIEF_HEAL)")
+    parser.add_argument("--heal-amount", type=float, default=0.2)
     parser.add_argument("--loadout-at", type=float, default=0.0,
                         help="seconds in: as Chiefrim.ini's [Loadout], --loadout's weapons by name with their own rounds")
     parser.add_argument("--loadout", default="shotgun, Sniper Rifle",
@@ -675,6 +678,10 @@ def main():
                 link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack(restore))
                 drive_state["restored"] = True
                 print(f"fake_skyrim: restore {kit_text(restore)}", flush=True)
+            if options.heal_at and t >= options.heal_at and not drive_state.get("healed"):
+                link.push(RING_TO_HALO, MSG_CHIEF_HEAL, struct.pack("<fI", options.heal_amount, 0x0003EADE))
+                drive_state["healed"] = True
+                print(f"fake_skyrim: heal {options.heal_amount:.2f} of Chief's vitality", flush=True)
             if options.loadout_at and t >= options.loadout_at and not drive_state.get("loaded_out"):
                 names = [n.strip() for n in options.loadout.split(",") if n.strip()][:4]
                 weapons = [{"tag": n, "total": [-1, -1], "loaded": [-1, -1], "age": 0.0} for n in names]

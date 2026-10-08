@@ -9,7 +9,8 @@ namespace chiefrim::Combat
 	// actors near the player go to Halo (which keeps a hittable stand-in for
 	// each), and the player's lost health is refunded and sent to Halo, where
 	// it hurts Chief, shields first. Halo's hits on the stand-ins come back
-	// and go through Skyrim's own hit processing.
+	// and go through Skyrim's own hit processing. Restore-health potions and
+	// food heal Chief.
 
 	// kDataLoaded: hit events, Skyrim's hit pipeline, the debug weapon key.
 	void Install();

@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 14u
+#define CR_PROTOCOL_VERSION 15u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -283,6 +283,7 @@ vehicles); docs §10. */
 #define CR_MSG_LIGHTING     0x0Bu /* S->H: Skyrim's light where the player is, for Halo's objects (protocol 13) */
 #define CR_MSG_CHIEF_STATE   0x0Cu /* H->S: Chief's weapons, ammo, grenades and vitality, when they change (protocol 14) */
 #define CR_MSG_CHIEF_RESTORE 0x0Du /* S->H: Chief's, from a Skyrim save, or the starting loadout (protocol 14) */
+#define CR_MSG_CHIEF_HEAL    0x0Eu /* S->H: the player drank or ate something that restores health (protocol 15) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -349,6 +350,16 @@ typedef struct cr_msg_player_died
 	cr_msg_header header;
 	uint32_t reserved[2];
 } cr_msg_player_died;
+
+/* Skyrim's healing (a potion, food): Halo adds it to Chief's body (his
+shields recharge by themselves, as in Halo), on the scale of
+CR_MSG_PLAYER_HURT, so a potion heals what as much Skyrim damage would hurt. */
+typedef struct cr_msg_chief_heal
+{
+	cr_msg_header header;
+	float    amount;     /* of Chief's whole vitality (shields and body): Skyrim's health over [Combat] fIncomingReference */
+	uint32_t item;       /* the potion's form id, for the logs */
+} cr_msg_chief_heal;
 
 /* index: of the host map's weapons, as Halo lists them in its log at start
 (wraps); -1: the next after the last given. */
@@ -790,6 +801,7 @@ CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 32 * CR_ACTORS_MAX, "cr_slot_act
 CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
+CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
 CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");

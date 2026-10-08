@@ -106,6 +106,57 @@ namespace chiefrim::Combat
 			}
 		};
 
+		// ---- the player's healing --------------------------------------------
+
+		// Health a potion or food restores: its restore-health effects, all of
+		// their duration (food heals over time).
+		float HealthRestored(const RE::AlchemyItem* a_item)
+		{
+			float total = 0.0f;
+			for (const auto* effect : a_item->effects) {
+				const auto* setting = effect ? effect->baseEffect : nullptr;
+				if (!setting || setting->IsDetrimental() || setting->IsHostile() ||
+					setting->GetArchetype() != RE::EffectSetting::Archetype::kValueModifier ||
+					setting->data.primaryAV != RE::ActorValue::kHealth) {
+					continue;
+				}
+				total += effect->effectItem.magnitude * std::max(static_cast<float>(effect->effectItem.duration), 1.0f);
+			}
+			return total;
+		}
+
+		// Drinking a potion or eating is equipping it. Skyrim's player stays at
+		// full health while Chief has him (his lost health is refunded), so the
+		// healing goes to Chief, on the scale of Skyrim's damage to him.
+		class HealSink final : public RE::BSTEventSink<RE::TESEquipEvent>
+		{
+		public:
+			static HealSink* Get()
+			{
+				static HealSink sink;
+				return &sink;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			{
+				auto* player = RE::PlayerCharacter::GetSingleton();
+				if (!a_event || !a_event->equipped || !player || a_event->actor.get() != player || !Link::Get().Connected() || s.chiefDead) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				const auto* item = RE::TESForm::LookupByID<RE::AlchemyItem>(a_event->baseObject);
+				const float health = item ? HealthRestored(item) : 0.0f;
+				if (health <= 0.0f) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				cr_msg_chief_heal heal{};
+				heal.amount = health / std::max(config.incomingReference, 1.0f);
+				heal.item = item->GetFormID();
+				Link::Get().PushRaw(CR_MSG_CHIEF_HEAL, &heal, sizeof(heal));
+				logger::info("combat: {} restores {:.0f} health: Chief heals {:.0f}% of his vitality", item->GetName(), health, heal.amount * 100.0f);
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
 		// Chiefrim's own keys: give Chief the host map's next weapon (debug,
 		// docs §8.4), Chiefrim off and on, Halo restarted (docs §11).
 		class HotkeySink final : public RE::BSTEventSink<RE::InputEvent*>
@@ -548,6 +599,7 @@ namespace chiefrim::Combat
 		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESHitEvent>(HitSink::Get());
+			events->AddEventSink<RE::TESEquipEvent>(HealSink::Get());
 		}
 		if (auto* input = RE::BSInputDeviceManager::GetSingleton()) {
 			input->AddEventSink(HotkeySink::Get());

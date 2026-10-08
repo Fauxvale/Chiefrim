@@ -335,6 +335,7 @@ static void chiefrim_pump_events(void)
 			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
 			break;
 		case CR_MSG_PLAYER_HURT:
+		case CR_MSG_CHIEF_HEAL:
 		case CR_MSG_GIVE_WEAPON:
 			if (chiefrim.world_valid)
 				chiefrim_combat_message(chiefrim_local_unit(), type, buffer, chiefrim.world.origin);
