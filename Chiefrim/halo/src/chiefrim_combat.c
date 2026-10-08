@@ -22,7 +22,8 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 - HEALING: Skyrim's restore-health potions and food (CR_MSG_CHIEF_HEAL) heal
   his body, on the scale of Skyrim's damage to him.
 - WEAPONS: CR_MSG_GIVE_WEAPON gives Chief one of the map's weapons, listed
-  in the log at start (debug, docs §8.4). Each proxy carries one of a few
+  in the log at start (debug, docs §8.4): the next (the debug key), or one
+  by name (the console's "chiefrim give"), answered on Skyrim's console. Each proxy carries one of a few
   sidearms and a type of grenade, at random, which it drops when its actor
   dies (Skyrim lists the newly dead a moment, CR_ACTOR_DEAD): Chief's loot.
 */
@@ -41,12 +42,15 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #include "objects/damage_effect_definitions.h"
 #include "objects/objects.h"
 #include "physics/collisions.h"
+#include "rasterizer/rasterizer.h"
 #include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
 #include "units/biped_definitions.h"
 #include "units/units.h"
 
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -111,7 +115,32 @@ static struct
 	long hits, hurts;                    /* since the last summary */
 } combat;
 
+static uint32_t combat_debug; /* CR_DEBUG_*: kept across maps and worlds */
+
 /* ---------- private code */
+
+/* a line for Skyrim's console (answering a console command) */
+static void chiefrim_console(char const *format, ...)
+{
+	struct cr_shared *shm = chiefrim_shared();
+	cr_msg_log message;
+	va_list arguments;
+
+	memset(&message, 0, sizeof(message));
+	va_start(arguments, format);
+	vsnprintf(message.text, sizeof(message.text), format, arguments);
+	va_end(arguments);
+	if (shm && chiefrim_linked())
+		cr_ring_push(&shm->to_skyrim, CR_MSG_CONSOLE, &message, sizeof(message));
+}
+
+/* a weapon's tag path's last part: what the console takes ("sniper rifle") */
+static char const *chiefrim_weapon_short_name(long tag_index)
+{
+	char const *path = tag_get_name(tag_index), *last = strrchr(path, '\\');
+
+	return last ? last + 1 : path;
+}
 
 static boolean chiefrim_name_has(char const *name, char const *part)
 {
@@ -738,14 +767,65 @@ static void chiefrim_chief_heal(long chief, cr_msg_chief_heal const *heal)
 		heal->item, before, object->object.body_vitality);
 }
 
-static void chiefrim_give_weapon(long chief, int32_t requested)
+/* the console's "chiefrim weapons": a few to a line */
+static void chiefrim_list_weapons(void)
+{
+	char line[120];
+	long index;
+
+	line[0] = 0;
+	chiefrim_console("Chiefrim: Chief may have %ld weapons here (chiefrim give <name>):", combat.weapon_count);
+	for (index = 0; index < combat.weapon_count; index++)
+	{
+		char const *name = chiefrim_weapon_short_name(combat.weapons[index]);
+
+		if (line[0] && strlen(line) + strlen(name) + 3 >= sizeof(line))
+		{
+			chiefrim_console("  %s", line);
+			line[0] = 0;
+		}
+		if (line[0])
+			strcat(line, ", ");
+		strcat(line, name);
+	}
+	if (line[0])
+		chiefrim_console("  %s", line);
+}
+
+static void chiefrim_give_weapon(long chief, cr_msg_give_weapon const *give)
 {
 	struct object_placement_data data;
 	long weapon, index;
+	char name[CR_WEAPON_NAME_LENGTH + 1];
 
-	if (chief == NONE || combat.weapon_count == 0)
+	memcpy(name, give->name, CR_WEAPON_NAME_LENGTH);
+	name[CR_WEAPON_NAME_LENGTH] = 0;
+	if (give->flags & CR_GIVE_LIST)
+	{
+		chiefrim_list_weapons();
 		return;
-	index = requested >= 0 ? requested % combat.weapon_count : combat.next_weapon % combat.weapon_count;
+	}
+	if (chief == NONE || combat.weapon_count == 0)
+	{
+		chiefrim_console("Chiefrim: no weapons to give (%s)", chief == NONE ? "no Chief yet" : "none in this map");
+		return;
+	}
+	if (name[0])
+	{
+		long tag = chiefrim_weapon_tag(name);
+
+		for (index = 0; index < combat.weapon_count && combat.weapons[index] != tag; index++)
+			;
+		if (tag == NONE || index == combat.weapon_count)
+		{
+			chiefrim_console("Chiefrim: no \"%s\" that Chief can carry here; chiefrim weapons lists them", name);
+			return;
+		}
+	}
+	else
+	{
+		index = give->index >= 0 ? give->index % combat.weapon_count : combat.next_weapon % combat.weapon_count;
+	}
 	combat.next_weapon = index + 1;
 	object_placement_data_new(&data, combat.weapons[index], chief);
 	object_get_origin(chief, &data.position);
@@ -758,9 +838,11 @@ static void chiefrim_give_weapon(long chief, int32_t requested)
 	{
 		object_delete(weapon);
 		error(_error_silent, "chiefrim: couldn't give Chief %s", tag_get_name(combat.weapons[index]));
+		chiefrim_console("Chiefrim: couldn't give Chief the %s", chiefrim_weapon_short_name(combat.weapons[index]));
 		return;
 	}
 	error(_error_silent, "chiefrim: gave Chief weapon %ld, %s", index, tag_get_name(combat.weapons[index]));
+	chiefrim_console("Chiefrim: gave Chief the %s", chiefrim_weapon_short_name(combat.weapons[index]));
 }
 
 /* ---------- public code */
@@ -976,6 +1058,125 @@ boolean chiefrim_object_unseen(long object_index)
 	return !show && chiefrim_object_is_proxy(object_index);
 }
 
+/* Skyrim's console turned debug drawing on or off (CR_MSG_DEBUG) */
+void chiefrim_combat_debug(cr_msg_debug const *message)
+{
+	if (((combat_debug ^ message->flags) & CR_DEBUG_HITBOXES))
+		error(_error_silent, "chiefrim: the proxies' hit shapes %s", (message->flags & CR_DEBUG_HITBOXES) ? "drawn" : "hidden");
+	combat_debug = message->flags;
+}
+
+/* a ring of segments around centre, in the plane of u and v (unit, square) */
+static void chiefrim_draw_arc(real_point3d const *centre, real_vector3d const *u, real_vector3d const *v, real radius,
+	real from, real to, real_argb_color const *color)
+{
+	enum { segments = 12 };
+	real_point3d previous, point;
+	long index;
+
+	for (index = 0; index <= segments; index++)
+	{
+		real angle = from + (to - from) * (real)index / (real)segments;
+		real c = cosine(angle) * radius, s = sine(angle) * radius;
+
+		point.x = centre->x + u->i * c + v->i * s;
+		point.y = centre->y + u->j * c + v->j * s;
+		point.z = centre->z + u->k * c + v->k * s;
+		if (index > 0)
+			rasterizer_debug_line(&previous, &point, color);
+		previous = point;
+	}
+}
+
+/* a capsule as a wireframe: rings at its ends, four lines between, its
+caps' arcs; a sphere as three rings */
+static void chiefrim_draw_capsule(real_point3d const *a, real_point3d const *b, real radius, real_argb_color const *color)
+{
+	real_vector3d axis, u, v;
+	real length;
+
+	vector_from_points3d(a, b, &axis);
+	length = normalize3d(&axis);
+	if (length < 0.001f)
+	{
+		axis.i = 0.f;
+		axis.j = 0.f;
+		axis.k = 1.f;
+	}
+	normalize3d(perpendicular3d(&axis, &u));
+	cross_product3d(&axis, &u, &v);
+	chiefrim_draw_arc(a, &u, &v, radius, 0.f, 2.f * (real)M_PI, color);
+	if (length < 0.001f)
+	{
+		chiefrim_draw_arc(a, &u, &axis, radius, 0.f, 2.f * (real)M_PI, color);
+		chiefrim_draw_arc(a, &v, &axis, radius, 0.f, 2.f * (real)M_PI, color);
+		return;
+	}
+	chiefrim_draw_arc(b, &u, &v, radius, 0.f, 2.f * (real)M_PI, color);
+	{
+		real_vector3d sides[4];
+		long index;
+
+		sides[0] = u;
+		sides[1] = v;
+		scale_vector3d(&u, -1.f, &sides[2]);
+		scale_vector3d(&v, -1.f, &sides[3]);
+		for (index = 0; index < 4; index++)
+		{
+			real_point3d from, to;
+
+			point_from_line3d(a, &sides[index], radius, &from);
+			point_from_line3d(b, &sides[index], radius, &to);
+			rasterizer_debug_line(&from, &to, color);
+		}
+	}
+	/* the caps: half rings over each end, outward */
+	chiefrim_draw_arc(b, &u, &axis, radius, 0.f, (real)M_PI, color);
+	chiefrim_draw_arc(b, &v, &axis, radius, 0.f, (real)M_PI, color);
+	chiefrim_draw_arc(a, &u, &axis, radius, (real)M_PI, 2.f * (real)M_PI, color);
+	chiefrim_draw_arc(a, &v, &axis, radius, (real)M_PI, 2.f * (real)M_PI, color);
+}
+
+/* render.c's hook, on the overlay's screen layer: with the console's
+"chiefrim shapes", each proxy's hit shapes over everything (yellow; a
+person's head red; from bounds, cyan), or, without shapes, its biped's
+standing pill (white) */
+void chiefrim_render_hitboxes(void)
+{
+	static real_argb_color const body = { 1.f, 1.f, 0.85f, 0.1f }, head = { 1.f, 1.f, 0.15f, 0.1f },
+		bounds = { 1.f, 0.2f, 0.9f, 1.f }, biped = { 1.f, 0.9f, 0.9f, 0.9f };
+	long slot, index;
+
+	if (!(combat_debug & CR_DEBUG_HITBOXES))
+		return;
+	for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
+	{
+		struct chiefrim_proxy const *proxy = &combat.proxies[slot];
+
+		if (!proxy->form_id || proxy->object_index == NONE || !object_try_and_get(proxy->object_index))
+			continue;
+		for (index = 0; index < proxy->hitbox_count; index++)
+		{
+			struct chiefrim_hitbox const *box = &proxy->hitboxes[index];
+
+			chiefrim_draw_capsule(&box->a, &box->b, box->radius,
+				(box->flags & CR_HITBOX_HEAD) ? &head : (box->flags & CR_HITBOX_BOUNDS) ? &bounds : &body);
+		}
+		if (proxy->hitbox_count == 0)
+		{
+			struct object_datum *object = object_get(proxy->object_index);
+			real scale = object->object.scale > 0.f ? object->object.scale : 1.f, radius = 0.1f * scale;
+			real_point3d feet, top;
+
+			object_get_origin(proxy->object_index, &feet);
+			top = feet;
+			feet.z += radius;
+			top.z += MAX(combat.proxy_height * scale - radius, radius);
+			chiefrim_draw_capsule(&feet, &top, radius, &biped);
+		}
+	}
+}
+
 void chiefrim_combat_map_loaded(void)
 {
 	long slot;
@@ -1055,7 +1256,7 @@ void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 
 		break;
 	case CR_MSG_GIVE_WEAPON:
 		chiefrim_combat_resolve(chief);
-		chiefrim_give_weapon(chief, ((cr_msg_give_weapon const *)message)->index);
+		chiefrim_give_weapon(chief, (cr_msg_give_weapon const *)message);
 		break;
 	default:
 		break;

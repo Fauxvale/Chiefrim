@@ -6,6 +6,7 @@
 #include "Collision.h"
 #include "CoSave.h"
 #include "Combat.h"
+#include "Console.h"
 #include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
@@ -464,6 +465,7 @@ namespace chiefrim::Puppet
 				s.worldSent = false;  // a new Halo: tell it everything again
 				Input::OnLinked();
 				CoSave::OnLinked();
+				Console::OnLinked();
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}

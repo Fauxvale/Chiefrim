@@ -84,6 +84,8 @@ struct collision_result;
 long chiefrim_proxy_test_vector(long object_index, real_point3d const *point, real_vector3d const *vector, struct collision_result *collision);
 void chiefrim_proxy_bounds(long object_index, real_point3d *center, real *radius);
 void chiefrim_proxy_area_distance(long object_index, real_point3d const *epicenter, real *distance);
+void chiefrim_combat_debug(cr_msg_debug const *message); /* CR_MSG_DEBUG, from Skyrim's console */
+void chiefrim_render_hitboxes(void);                    /* render.c, the overlay's screen layer: "chiefrim shapes" */
 boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
 void chiefrim_combat_forget(void);                     /* Halo's game state went back */
 void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */

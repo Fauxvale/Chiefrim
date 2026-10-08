@@ -2,6 +2,7 @@
 #include "Link.h"
 #include "CoSave.h"
 #include "Combat.h"
+#include "Console.h"
 #include "Lighting.h"
 
 namespace chiefrim
@@ -186,6 +187,9 @@ namespace chiefrim
 				}
 			case CR_MSG_LOG:
 				logger::info("halo: {}", reinterpret_cast<const cr_msg_log*>(buffer)->text);
+				break;
+			case CR_MSG_CONSOLE:
+				Console::OnHaloLine(*reinterpret_cast<const cr_msg_log*>(buffer));
 				break;
 			case CR_MSG_HIT_ACTOR:
 				Combat::OnHitActor(*reinterpret_cast<const cr_msg_hit_actor*>(buffer));

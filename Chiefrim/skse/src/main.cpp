@@ -2,6 +2,7 @@
 #include "Camera.h"
 #include "CoSave.h"
 #include "Combat.h"
+#include "Console.h"
 #include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
@@ -34,6 +35,7 @@ namespace
 			chiefrim::Puppet::Install();
 			chiefrim::Overlay::Install();
 			chiefrim::Combat::Install();
+			chiefrim::Console::Install();
 			chiefrim::Hud::Install();
 			chiefrim::Handoff::Install();
 			chiefrim::Lighting::Install();

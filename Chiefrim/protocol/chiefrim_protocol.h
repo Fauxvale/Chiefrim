@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 18u
+#define CR_PROTOCOL_VERSION 19u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -310,6 +310,8 @@ vehicles); docs §10. */
 #define CR_MSG_CHIEF_HEAL    0x0Eu /* S->H: the player drank or ate something that restores health (protocol 15) */
 #define CR_MSG_EXPLOSION     0x0Fu /* H->S: an explosion in Halo (a grenade, a rocket): Skyrim's loose objects fly (protocol 16) */
 #define CR_MSG_FLASHLIGHT    0x10u /* H->S: Chief's flashlight as it shines now, when it changes: Skyrim's world is lit (protocol 17) */
+#define CR_MSG_CONSOLE       0x11u /* H->S: a line for Skyrim's console, answering a console command (cr_msg_log; protocol 19) */
+#define CR_MSG_DEBUG         0x12u /* S->H: debug drawing on or off (protocol 19) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -415,14 +417,29 @@ typedef struct cr_msg_flashlight
 	uint32_t reserved[2];
 } cr_msg_flashlight;
 
-/* index: of the host map's weapons, as Halo lists them in its log at start
-(wraps); -1: the next after the last given. */
+/* name (protocol 19, the console's "chiefrim give"): the weapon's tag path or
+its last part ("sniper rifle"), any case; Halo answers on the console. Empty:
+by index, of the host map's weapons as Halo lists them in its log at start
+(wraps); -1: the next after the last given (the debug key). */
+#define CR_WEAPON_NAME_LENGTH 64u
+#define CR_GIVE_LIST 0x0001u /* give nothing: list the weapons Chief may have, on the console */
 typedef struct cr_msg_give_weapon
 {
 	cr_msg_header header;
 	int32_t  index;
-	uint32_t reserved;
+	uint32_t flags;        /* CR_GIVE_* */
+	char     name[CR_WEAPON_NAME_LENGTH];
 } cr_msg_give_weapon;
+
+/* Debug drawing in Halo's overlay (protocol 19, the console's "chiefrim
+shapes"): sent when it changes and on linking */
+#define CR_DEBUG_HITBOXES 0x0001u /* the proxies' hit shapes, as wireframes over everything */
+typedef struct cr_msg_debug
+{
+	cr_msg_header header;
+	uint32_t flags;        /* CR_DEBUG_* */
+	uint32_t reserved;
+} cr_msg_debug;
 
 /* The names of the keys (or gamepad buttons, as the player last played) that
 do each of Chief's actions in Skyrim, per CR_ACTION_*: Halo's prompts ("Press
@@ -858,7 +875,8 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
-CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
 CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");

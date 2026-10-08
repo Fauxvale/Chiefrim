@@ -335,6 +335,9 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_KEY_NAMES:
 			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
 			break;
+		case CR_MSG_DEBUG:
+			chiefrim_combat_debug((cr_msg_debug const *)buffer);
+			break;
 		case CR_MSG_PLAYER_HURT:
 		case CR_MSG_CHIEF_HEAL:
 		case CR_MSG_GIVE_WEAPON:

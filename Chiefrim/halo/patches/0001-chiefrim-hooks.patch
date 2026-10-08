@@ -597,7 +597,7 @@ index 7c600cd9..6d505c00 100644
  			{
  				struct physics_instance instance;
 diff --git a/source/render/render.c b/source/render/render.c
-index 68a746c2..24b5171a 100644
+index 68a746c2..fdbcabbd 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
 @@ -87,6 +87,8 @@ symbols in this file:
@@ -619,7 +619,7 @@ index 68a746c2..24b5171a 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -323,13 +328,67 @@ static void render_window(
+@@ -323,13 +328,68 @@ static void render_window(
  	parameters.rasterizer_target = rasterizer_target;
  	parameters.has_mirror = has_mirror;
  	parameters.window_index = render.window_index;
@@ -682,13 +682,14 @@ index 68a746c2..24b5171a 100644
 +		halo_screen_ui_offset(TRUE);
 +		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 +		halo_screen_ui_offset(FALSE);
++		chiefrim_render_hitboxes(); /* the console's "chiefrim shapes": over everything */
 +		chiefrim_set_render_layer(CHIEFRIM_LAYER_ALL);
 +	}
 +	else if (!bink_playback_in_progress())
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -528,7 +587,7 @@ static void render_player_frame(
+@@ -528,7 +588,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  

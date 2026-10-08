@@ -568,7 +568,7 @@ and facing every tick.
   (`fake_skyrim.py --actor-shape wolf|person`): a wolf hit on its head, body and legs aiming
   down at it, never aiming level over it (the biped took every round there); a person's head
   shot with the pistol is a headshot; a grenade by the wolf reaches it. `CHIEFRIM_SHOW_PROXIES`
-  still draws the biped, not the shapes. The plugin's log names the first actors' shapes
+  draws the biped; the console's `chiefrim shapes` draws the shapes (§11). The plugin's log names the first actors' shapes
   (`hitbox: <name>: N shapes from M of its bodies`, or `from its bounds`).
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
@@ -612,7 +612,8 @@ Without Covenant enemies there are no weapon drops. Options:
 - **b)** Weapon caches placed at Skyrim locations: ammo crates in forts, weapons on racks.
 - **c)** A loot bridge, where certain Skyrim items in containers become Halo weapons or ammo.
 
-v1 ships (a) with a debug command to spawn any weapon. (b) and (c) are later work.
+v1 ships (a) with a debug command to spawn any weapon (the F7 key, and the console's
+`chiefrim give <name>`, §11). (b) and (c) are later work.
 
 ## 9. Rendering
 
@@ -879,6 +880,23 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   and (2026-10-07) a werewolf and a vampire lord, linked in that form, kept by Skyrim, and Chief back
   when the werewolf form ended. Unlinking puts back the third person if Chief found the player in it
   (a beast form has no first person, and its scripts turn the POV switch off).
+- **The console (Phase 5, protocol 19, `skse/src/Console.cpp`):** a `chiefrim` command in
+  Skyrim's console. SKSE can't add one in SE/AE, so the plugin renames one of the game's developer
+  commands that players don't need (the first of `TestSeenData`, `TestLocalMap`,
+  `ShowRenderPasses`, `DumpNiUpdates` still there; the log says which) and gives it its handler,
+  which reads the typed line whole.
+  - `chiefrim restart`, `on`, `off`, `toggle`: as the F11 and F10 keys.
+  - `chiefrim give [name | number]`: a weapon by its tag path's last part or the whole path, any
+    case (`chiefrim give sniper rifle`); none: the next, as F7. `chiefrim weapons` lists the
+    names. Halo answers on the console (`CR_MSG_CONSOLE`): given, or no such weapon. The name
+    travels in `cr_msg_give_weapon.name`.
+  - `chiefrim shapes [on | off]`: Halo draws each proxy's hit shapes (§8.1) as wireframes on the
+    overlay's screen layer, over everything: yellow, a person's head red, shapes from bounds cyan,
+    a proxy without shapes its biped's standing pill in white (`CR_MSG_DEBUG`, sent again to a new
+    Halo; a `render.c` hook, Halo's own debug lines).
+  Offline (`fake_skyrim.py --list-weapons-at`, `--give-name`, `--shapes`): the list, a shotgun and
+  a needler given by name (any case), an unknown name refused; the wolf's and the person's shapes
+  drawn where they stand. In game: to check.
 - **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
   stamina and the crosshair, because Halo's HUD replaces them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.

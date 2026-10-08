@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 18
+VERSION = 19
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -51,6 +51,8 @@ SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
 MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION, MSG_FLASHLIGHT = 12, 13, 14, 15, 16
+MSG_CONSOLE, MSG_DEBUG = 17, 18
+GIVE_LIST, DEBUG_HITBOXES = 1, 1
 KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
@@ -474,6 +476,10 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--give-name", default="",
+                        help="with --give-at: weapons by name, comma-separated, in turn (the console's chiefrim give); empty: the next")
+    parser.add_argument("--list-weapons-at", type=float, default=0.0, help="seconds in: the console's chiefrim weapons")
+    parser.add_argument("--shapes", action="store_true", help="the console's chiefrim shapes on: Halo draws the proxies' hit shapes")
     parser.add_argument("--restore-at", type=float, default=0.0,
                         help="seconds in: as a save's load, send back Chief's last kit changed "
                              "(weapons in reverse, the last in hand, half their rounds, 3 frags and 2 plasmas, "
@@ -610,6 +616,8 @@ def main():
                     print(f"fake_skyrim: Halo says hello (protocol {version}, pid {pid}, {text(body[8:56])})", flush=True)
                 elif msg_type == MSG_LOG:
                     print(f"halo: {text(body)}", flush=True)
+                elif msg_type == MSG_CONSOLE:
+                    print(f"console: {text(body)}", flush=True)
                 elif msg_type == MSG_HIT_ACTOR:
                     form_id, flags, fraction, _, bx, by, bz = struct.unpack_from("<IIff3f", body)
                     blast = f", explosion at ({bx:.0f} {by:.0f} {bz:.0f})" if flags & 1 else ""
@@ -763,8 +771,18 @@ def main():
                 print("fake_skyrim: restore: the starting loadout", flush=True)
             if options.give_at and t >= options.give_at + drive_state.get("gives", 0) and drive_state.get("gives", 0) < options.give_count:
                 drive_state["gives"] = drive_state.get("gives", 0) + 1
-                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI", -1, 0))
-                print(f"fake_skyrim: give weapon #{drive_state['gives']}", flush=True)
+                names = [n.strip() for n in options.give_name.split(",") if n.strip()]
+                name = names[(drive_state["gives"] - 1) % len(names)] if names else ""
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, 0, name.encode()[:63]))
+                print(f"fake_skyrim: give weapon #{drive_state['gives']} {name!r}", flush=True)
+            if options.list_weapons_at and t >= options.list_weapons_at and not drive_state.get("listed"):
+                drive_state["listed"] = True
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, GIVE_LIST, b""))
+                print("fake_skyrim: chiefrim weapons", flush=True)
+            if options.shapes and not drive_state.get("shapes"):
+                drive_state["shapes"] = True
+                link.push(RING_TO_HALO, MSG_DEBUG, struct.pack("<II", DEBUG_HITBOXES, 0))
+                print("fake_skyrim: chiefrim shapes on", flush=True)
             if display:
                 display[2] += 1
                 link.slot_write(OFF_DISPLAY, struct.pack("<4I", display[0], display[1], 0x1, display[2]))
