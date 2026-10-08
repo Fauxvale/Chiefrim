@@ -236,7 +236,7 @@ static void chiefrim_say_hello(void)
 #ifdef __linux__
 	hello.pid = (uint32_t)getpid();
 #endif
-	csstrncpy(hello.build, "halo-ce-universal + chiefrim phase 0", sizeof(hello.build) - 1);
+	csstrncpy(hello.build, "OpenCE + chiefrim", sizeof(hello.build) - 1);
 	cr_ring_push(&chiefrim.shm->to_skyrim, CR_MSG_HELLO, &hello, sizeof(hello));
 }
 

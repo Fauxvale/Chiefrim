@@ -25,7 +25,7 @@ If we find ourselves re-implementing a Halo mechanic in the SKSE plugin, or a Sk
 the Halo engine, the design has gone wrong.
 
 **What differs from SkyCraft.** On the Halo side we have the engine's **source**: the
-[halo-ce-universal](https://github.com/cybersecurity/halo-ce-universal) decompilation of Xbox
+[OpenCE](https://github.com/OpenCommunityEdition/OpenCE) (formerly halo-ce-universal) decompilation of Xbox
 build 2342. SkyCraft had to reach into Minecraft through Mixins. We change the engine directly,
 in a small and clearly marked set of hooks (§14).
 
@@ -55,7 +55,7 @@ spare message types (§10).
 | Mod manager | Amethyst Mod Manager (Linux) | A heavy mod list (~250 files in `SKSE/Plugins`). No shader or ENB replacer is installed; Community Shaders has been removed. **SSE Display Tweaks** hooks the swap chain (§9, §15) |
 | Display | 1920x1080 borderless, VSync on | Set by SSE Display Tweaks (`FramerateLimit = 300`) |
 | SKSE plugin | C++23, CommonLibSSE-NG (git submodule), CMake | **Cross-compiled on Linux** to a Windows x64 DLL: clang-cl + lld-link against the MSVC CRT and Windows SDK fetched by xwin (`tools/setup_skse.sh`). Proved in Phase 0. CommonLib's dependencies come through CMake FetchContent instead of vcpkg (spdlog, rapidcsv, and DirectXTK's SimpleMath only, which avoids its shader compiler). The project path must not contain `[ ]` (CMake's `file(GLOB)` reads them as a pattern), which is why the folder is `Chiefrim-Project`. |
-| Halo | halo-ce-universal, **Linux 32-bit (i386) build**, OpenGL 4.5, SDL3 | `python configure.py && ninja linux`. 32-bit because the tag and cache data contain 32-bit pointers. |
+| Halo | OpenCE (formerly halo-ce-universal), **Linux 32-bit (i386) build**, OpenGL 4.5, SDL3 | `python configure.py && ninja linux`. 32-bit because the tag and cache data contain 32-bit pointers. |
 | Halo data | `maps/` extracted from the user's Xbox ISO | The game loads one `.map` (cache file) at a time (§5.3) |
 
 ## 3. Components
@@ -982,7 +982,7 @@ At the repo root: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`.
 
 **Halo-side changes (settled in Phase 0):** no fork. `halo/` holds:
 
-- `UPSTREAM`: the pinned halo-ce-universal commit.
+- `UPSTREAM`: the pinned OpenCE commit (halo-ce-universal before its rename, 2026-10).
 - `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (`main.c`,
   `game.c`, `scenario.c`/`.h`, `player_control.c`, `input_abstraction.c`, `render_cameras.c`,
   `render.c`, `render_objects.c`, `collisions.c`, `objects.c`, `damage.c`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
@@ -997,6 +997,24 @@ the patches, copies `src/` and the protocol header into `source/chiefrim/` (the 
 compiles every `.c` file under `source/` by itself), and builds. `tools/save_halo_patch.sh` writes
 hook edits made in `.work` back to `patches/`. Updating upstream means moving the pin and
 refreshing the patches.
+
+**Moved to OpenCE (2026-10-08).** halo-ce-universal was renamed OpenCE and moved to
+OpenCommunityEdition/OpenCE; the pin went from 193cbf59 (2026-10-04) to 73dc01d0 (2026-10-08),
+254 commits: mostly online and split-screen co-op (unused here), and for Chiefrim: Halo's audio
+fixed (Xbox ADPCM decoding, 3D sounds' distance, resampling, a limiter, stereo sounds in the
+world), renderer fixes (vertices thrown to the screen's centre near the camera, texture
+bindings, constant serials wrapping), fewer GL calls, a packed bounding-sphere copy for
+collision, and Custom Edition maps (a future host map). Seven hooks conflicted: five beside
+upstream's new includes; `game.c`'s no-AI line beside co-op's actor driving (Chiefrim drives
+neither); `d3d8_gl.c`'s overlay framebuffer beside the new multisampling (the overlay is never
+multisampled); and the hitbox bounds hook goes before the new bounds copy (`objects.c`), so the
+copy has the proxies' bounds. **Anti-aliasing is forced off in Chiefrim mode**
+(`display.anti_aliasing`: FXAA and SMAA filter the 3D view, SSAA resizes the targets, and the
+overlay is read back as drawn). `display.per_pixel_lighting` (off by default) lights Chief's arms
+and weapon for each pixel by the same lights, Skyrim's included: not tried yet. Offline, against
+the fake Skyrim, the overlay frames match the old build's pixel for pixel, at the same frame rate;
+hits on the hit shapes, the console's commands and the link as before. Two new third-party
+folders, SMAA (MIT) and zlib (Zlib), are in `licenses.toml`.
 
 The decomp repo contains no game data. Its own `.gitignore` already excludes `assets/` and
 extracted maps. The test data root (`build/halo-data`) holds only a link to the user's `maps/`.

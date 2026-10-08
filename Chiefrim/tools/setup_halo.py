@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Builds the Halo side of Chiefrim (docs/DESIGN.md §14).
 
-Chiefrim does not fork halo-ce-universal. It pins an upstream commit, and
+Chiefrim does not fork OpenCE (halo-ce-universal before its rename). It pins an upstream commit, and
 this script makes the work tree halo/.work (git-ignored) from it:
 
 1. clone upstream into halo/.work (first run), or reset it to the pin;
@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HALO = ROOT / "halo"
 WORK = HALO / ".work"
-UPSTREAM_URL = "https://github.com/cybersecurity/halo-ce-universal"
+UPSTREAM_URL = "https://github.com/OpenCommunityEdition/OpenCE"  # halo-ce-universal, renamed
 UPSTREAM_PIN = (HALO / "UPSTREAM").read_text().split()[0]
 
 
@@ -61,6 +61,7 @@ def main():
     if not WORK.exists():
         run("git", "clone", UPSTREAM_URL, WORK, cwd=ROOT)
     if not options.keep:
+        run("git", "remote", "set-url", "origin", UPSTREAM_URL)  # a clone from before the move
         run("git", "fetch", "--quiet", "origin")
         run("git", "checkout", "--quiet", "--force", "--detach", UPSTREAM_PIN)
         run("git", "clean", "-fdq", "-e", "build/", "-e", "assets/")

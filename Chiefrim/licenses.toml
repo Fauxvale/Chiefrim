@@ -73,7 +73,7 @@ note = "fetched by xwin for building only; the plugin uses the copy in the user'
 name = "SKSE64 runtime"
 note = "installed by the user"
 
-# ---- Halo (halo/): the pinned halo-ce-universal plus Chiefrim's files
+# ---- Halo (halo/): the pinned OpenCE (halo-ce-universal before its rename) plus Chiefrim's files
 
 [halo.upstream]
 license = "CC0-1.0"
@@ -134,11 +134,25 @@ markers = ["MIT"]
 notice = "Copyright (c) 2017 Sean Barrett"
 
 [[halo.third_party]]
+dir = "smaa"
+license = "MIT"
+license_file = "LICENSE"
+markers = ["Permission is hereby granted"]
+notice = "Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez"
+
+[[halo.third_party]]
 dir = "tomlc17"
 license = "MIT"
 license_file = "LICENSE"
 markers = ["MIT License"]
 notice = "Copyright (c) 2024-2026, CK Tan"
+
+[[halo.third_party]]
+dir = "zlib"
+license = "Zlib"
+license_file = "LICENSE"
+markers = ["This notice may not be removed or altered"]
+notice = "Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler"
 
 # 4-clause BSD (advertising clause): GPL-incompatible. Its only user,
 # port/linux/src/xiso.c, is replaced by halo/overrides (docs/LICENSING.md).

@@ -10,7 +10,7 @@ A GPL-3.0 build can't include it.
 
 Chiefrim never needs it: tools/launch_halo.sh and tools/run_phase0.sh point
 the game at a maps/ folder that is already extracted (HALO_MAPS), for
-example by the upstream halo-ce-universal release, which keeps this
+example by the upstream OpenCE release, which keeps this
 feature. So this stub only says so.
 */
 
@@ -30,7 +30,7 @@ int xiso_extract_maps(const char *image_path, const char *destination, xiso_prog
 	{
 		snprintf(error, (size_t)error_size,
 			"This build (Chiefrim) can't extract a disc image. Extract maps/ with the upstream "
-			"halo-ce-universal release, then set HALO_MAPS to the folder that holds it.");
+			"OpenCE release, then set HALO_MAPS to the folder that holds it.");
 	}
 	return 0;
 }

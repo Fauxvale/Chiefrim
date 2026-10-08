@@ -30,7 +30,7 @@ and must be GPL-compatible. "Or later" matches CommonLibSSE-NG's own terms.
 - Every `FetchContent_Declare` in `skse/CMakeLists.txt` is listed and allowed, and its fetched
   license file still says what we recorded.
 - CommonLibSSE-NG is still GPL-3.0.
-- With `--halo`: the pinned halo-ce-universal is still CC0; every folder in its
+- With `--halo`: the pinned OpenCE is still CC0; every folder in its
   `port/third_party` is listed and allowed, or excluded; and no compiled file still carries an
   excluded component's code.
 
@@ -51,7 +51,7 @@ Chiefrim/tools/check_licenses.py --halo
 3. Add it to `THIRD-PARTY-NOTICES.md` at the repo root.
 4. Run the checker.
 
-The same applies when moving `halo/UPSTREAM` to a newer halo-ce-universal: a new folder in
+The same applies when moving `halo/UPSTREAM` to a newer OpenCE: a new folder in
 `port/third_party` fails the check until it's listed.
 
 ## Known exclusion: extract-xiso
