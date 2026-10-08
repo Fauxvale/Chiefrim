@@ -875,7 +875,13 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   recharge as in Halo.
 - **Load doors, fast travel and teleports:** Skyrim is authoritative for these. The plugin sends
   `Teleport` (and `WorldContext` if the origin changes). Halo moves Chief and clears the
-  CollisionField.
+  CollisionField. With the origin moved, Halo's (0, 0, 0) is somewhere else in Skyrim, so what
+  lay in Halo's world stays behind (Phase 5, 2026-10-08): weapons dropped, grenades and other
+  loose objects are erased (Chief keeps what he carries), and bullet holes and other decals
+  expire at the next frame, as an old one does (`decals_expire_all`, a `decals.c` hook). In game
+  they had hung where the old collision was. Offline (`fake_skyrim.py --recenter-every`): the two
+  weapons Chief dropped and 44 bullet holes gone at the recenter; firing and a grenade across
+  three recenters, no decal errors.
 - **Skyrim's own animations (the hand-off, Phase 4, `skse/src/Handoff.cpp`):** while the player
   sits (chairs, crafting stations, any furniture: its sit/sleep state), sleeps, rides, swims (§6),
   is in a beast form (werewolf, vampire lord: a race that isn't playable), is in a kill move, or a script holds him (AI-driven, or his movement controls turned off: the
@@ -997,7 +1003,7 @@ At the repo root: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`.
 - `UPSTREAM`: the pinned OpenCE commit (halo-ce-universal before its rename, 2026-10).
 - `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (`main.c`,
   `game.c`, `scenario.c`/`.h`, `player_control.c`, `input_abstraction.c`, `render_cameras.c`,
-  `render.c`, `render_objects.c`, `collisions.c`, `objects.c`, `damage.c`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
+  `render.c`, `render_objects.c`, `collisions.c`, `objects.c`, `damage.c`, `decals.c`/`.h`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
 - `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`, ...); `src/port/` goes to
   `port/linux/src/` instead (`chiefrim_overlay_gl.c`: code on the port's OpenGL device, built with
   the platform layer's flags).

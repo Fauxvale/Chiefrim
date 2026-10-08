@@ -156,6 +156,58 @@ index 211146d1..c2b46a99 100644
  	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
  	return text.buffer;
  }
+diff --git a/source/effects/decals.c b/source/effects/decals.c
+index 18641671..7f5376a2 100644
+--- a/source/effects/decals.c
++++ b/source/effects/decals.c
+@@ -866,6 +866,34 @@ void decals_update(
+ 	return;
+ }
+ 
++/* CHIEFRIM: every decal but the map's ends at the next update, as an old
++one does (Skyrim's world moved: they're on surfaces that aren't there) */
++long decals_expire_all(
++	void)
++{
++	long count = 0;
++
++	if (global_decal_data->valid)
++	{
++		struct data_iterator iterator;
++		struct decal_datum *decal;
++
++		data_iterator_new(&iterator, global_decal_data);
++		while ((decal = data_iterator_next(&iterator)) != NULL)
++		{
++			if (!TEST_FLAG(decal->flags, _decal_permanent_bit))
++			{
++				decal->creation_time = game_time_get() - 1;
++				decal->lifetime = 0.0001f;
++				decal->decay_time = 0.f;
++				count++;
++			}
++		}
++	}
++
++	return count;
++}
++
+ void decals_delete_permanent_from_cluster(
+ 	short cluster_index)
+ {
+diff --git a/source/effects/decals.h b/source/effects/decals.h
+index 4af0f508..770f2556 100644
+--- a/source/effects/decals.h
++++ b/source/effects/decals.h
+@@ -76,6 +76,8 @@ void decals_dispose(
+ 	void);
+ void decals_dispose_from_old_map(
+ 	void);
++long decals_expire_all( /* CHIEFRIM */
++	void);
+ void decals_update(
+ 	void);
+ void decals_delete_permanent_from_cluster(
 diff --git a/source/game/game.c b/source/game/game.c
 index 83742035..9b50472c 100644
 --- a/source/game/game.c

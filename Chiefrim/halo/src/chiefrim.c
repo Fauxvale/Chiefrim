@@ -27,6 +27,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "camera/observer.h"
 #include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
+#include "effects/decals.h"
 #include "game/players.h"
 #include "objects/objects.h"
 #include "physics/collision_features.h"
@@ -190,10 +191,12 @@ static void chiefrim_place_player(void)
 		position.x, position.y, position.z, yaw);
 }
 
+static void chiefrim_clear_level_objects(long chief, char const *why);
+
 static void chiefrim_apply_world(void)
 {
 	cr_world_context world;
-	boolean floor_moved;
+	boolean floor_moved, moved;
 
 	if (!CR_SLOT_READ(&chiefrim.shm->world_context, &world))
 		return;
@@ -202,12 +205,23 @@ static void chiefrim_apply_world(void)
 
 	floor_moved = !chiefrim.world_valid ||
 		world.floor_z - world.origin.z != chiefrim.world.floor_z - chiefrim.world.origin.z;
-	if (floor_moved || world.origin.x != chiefrim.world.origin.x || world.origin.y != chiefrim.world.origin.y)
+	moved = floor_moved || world.origin.x != chiefrim.world.origin.x || world.origin.y != chiefrim.world.origin.y ||
+		world.origin.z != chiefrim.world.origin.z || world.world_id != chiefrim.world.world_id;
+	if (moved)
 		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
 	chiefrim_world_build_radius(world.collision_radius);
 	chiefrim_combat_reset(chiefrim_local_unit()); /* a load, a door: Skyrim's people again, Chief whole */
+	if (moved && chiefrim.level_cleared)
+	{
+		/* Halo's (0, 0, 0) is somewhere else in Skyrim now: what lay in its
+		world (weapons dropped, grenades, bullet holes) would hang where the
+		old collision was. A load or a door leaves them behind, as Skyrim's
+		world would; Chief keeps what he carries */
+		chiefrim_clear_level_objects(chiefrim_local_unit(), "a new world: left behind");
+		error(_error_silent, "chiefrim: %ld decals left behind", decals_expire_all());
+	}
 	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
 	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
@@ -916,7 +930,7 @@ struct observer_result const *chiefrim_render_camera(short local_player_index, s
 /* Everything the host level placed (scenery, vehicles, weapons, machines)
 but Chief and what he carries: in Skyrim it would stand around the
 origin. */
-static void chiefrim_clear_level_objects(long chief)
+static void chiefrim_clear_level_objects(long chief, char const *why)
 {
 	struct object_iterator iterator;
 	static long doomed[2048];
@@ -933,7 +947,7 @@ static void chiefrim_clear_level_objects(long chief)
 		if (object_try_and_get(doomed[index]))
 			object_delete(doomed[index]);
 	}
-	error(_error_silent, "chiefrim: erased the level's %ld other objects", count);
+	error(_error_silent, "chiefrim: erased %ld objects (%s) and kept Chief's", count, why);
 }
 
 struct cr_shared *chiefrim_shared(void)
@@ -1219,7 +1233,7 @@ void chiefrim_frame(void)
 	if (!chiefrim.level_cleared && chiefrim_local_unit() != NONE)
 	{
 		ai_erase(NONE, NONE, NONE, TRUE);
-		chiefrim_clear_level_objects(chiefrim_local_unit());
+		chiefrim_clear_level_objects(chiefrim_local_unit(), "the level's");
 		chiefrim.level_cleared = TRUE;
 		error(_error_silent, "chiefrim: erased the level's actors");
 	}
