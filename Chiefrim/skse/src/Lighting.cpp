@@ -35,6 +35,7 @@ namespace chiefrim::Lighting
 			int                       readded = 0;
 			bool                      logged = false;
 			bool                      checked = false;  // the shadow light's own numbers logged
+			int                       resets = 0;       // Skyrim put its cone back (logged)
 			float                     fovPerDegree = 0.0f;  // a light form's fov, per degree, as Skyrim holds it
 		} flash;
 
@@ -409,15 +410,39 @@ namespace chiefrim::Lighting
 			flash.addedAt = now;
 			flash.checked = false;  // a new light of Skyrim's: its cone looked at again
 		}
+		// Skyrim's spot: its cone, each frame. Made from a light form, its
+		// semi-width came out 0.017 (a degree) and the beam a dot; set once,
+		// it went back. Halo's cone is 45 degrees each side of its axis: its
+		// tangent (1) and its angle (0.79) are close, whichever the semi-width is
+		RE::BSShadowLight* shadow = nullptr;
+		for (auto& light : scene->GetRuntimeData().activeShadowLights) {
+			if (light && light->light.get() == flash.light.get()) {
+				shadow = light.get();
+			}
+		}
+		const float wanted = std::tan(std::clamp(flash.beam.cutoff_angle, 0.1f, 1.3f));
+		if (shadow && shadow->GetIsFrustumLight()) {
+			auto& frustum = static_cast<RE::BSShadowFrustumLight*>(shadow)->GetShadowFrustumLightRuntimeData();
+			if (flash.checked && (frustum.semiWidth != wanted || frustum.semiHeight != wanted) && flash.resets++ < 3) {
+				logger::info("flashlight: Skyrim set its cone back to {:.3f}; set again", frustum.semiWidth);
+			}
+			if (flash.checked) {
+				frustum.semiWidth = frustum.semiHeight = wanted;
+				// and its shadow map's cameras, which may keep the cone they were made with
+				for (auto& descriptor : shadow->GetRuntimeData().shadowmapDescriptors) {
+					if (auto* view = descriptor.camera.get()) {
+						auto& f = view->GetRuntimeData2().viewFrustum;
+						if (!f.bOrtho) {
+							f.fLeft = f.fBottom = -wanted;
+							f.fRight = f.fTop = wanted;
+						}
+					}
+				}
+			}
+		}
 		if (!flash.checked && now - flash.addedAt > 1000) {
 			// in the scene now: what kind of light Skyrim made of it, and its cone
 			flash.checked = true;
-			RE::BSShadowLight* shadow = nullptr;
-			for (auto& light : scene->GetRuntimeData().activeShadowLights) {
-				if (light && light->light.get() == flash.light.get()) {
-					shadow = light.get();
-				}
-			}
 			if (!shadow) {
 				logger::info("flashlight: its light has no shadow (a plain point light)");
 			} else if (!shadow->GetIsFrustumLight()) {
@@ -426,14 +451,18 @@ namespace chiefrim::Lighting
 				auto& frustum = static_cast<RE::BSShadowFrustumLight*>(shadow)->GetShadowFrustumLightRuntimeData();
 				logger::info("flashlight: a shadowed spot: semi-width {:.3f}, semi-height {:.3f}, falloff {:.2f}, near {:.1f}, far {:.1f}",
 					frustum.semiWidth, frustum.semiHeight, frustum.falloff, frustum.nearDistance, frustum.farDistance);
+				for (auto& descriptor : shadow->GetRuntimeData().shadowmapDescriptors) {
+					if (auto* view = descriptor.camera.get()) {
+						const auto& f = view->GetRuntimeData2().viewFrustum;
+						logger::info("flashlight: its shadow camera: left {:.3f}, right {:.3f}, top {:.3f}, bottom {:.3f}, near {:.1f}, far {:.1f}{}",
+							f.fLeft, f.fRight, f.fTop, f.fBottom, f.fNear, f.fFar, f.bOrtho ? ", orthographic" : "");
+					}
+				}
 				// Halo's cone is 45 degrees each side of its axis: its tangent (1) and
 				// its angle (0.79) are close, whichever the semi-width is. Much
 				// narrower, and the field of view went in wrong: widened to it
-				const float wanted = std::tan(std::clamp(flash.beam.cutoff_angle, 0.1f, 1.3f));
-				if (frustum.semiWidth < 0.5f * wanted || frustum.semiHeight < 0.5f * wanted) {
-					frustum.semiWidth = frustum.semiHeight = wanted;
-					logger::info("flashlight: its cone was narrower than Halo's; widened to {:.3f}", wanted);
-				}
+				frustum.semiWidth = frustum.semiHeight = wanted;
+				logger::info("flashlight: its cone set to Halo's, {:.3f}, from now on each frame", wanted);
 			}
 		}
 		if (shadowed && config.flashShadowed && flash.node) {
