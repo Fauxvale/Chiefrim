@@ -34,6 +34,8 @@ namespace chiefrim::Lighting
 			ULONGLONG                 addedAt = 0;
 			int                       readded = 0;
 			bool                      logged = false;
+			bool                      checked = false;  // the shadow light's own numbers logged
+			float                     fovPerDegree = 0.0f;  // a light form's fov, per degree, as Skyrim holds it
 		} flash;
 
 		ULONGLONG next = 0;
@@ -235,6 +237,16 @@ namespace chiefrim::Lighting
 					return nullptr;
 				}
 			}
+			// Skyrim's light forms hold their field of view as loaded from the
+			// file (degrees there): a vanilla spot (Solitude's inn, 90 in
+			// Skyrim.esm) says in what units, at run time
+			if (flash.fovPerDegree <= 0.0f) {
+				const auto* vanilla = RE::TESForm::LookupByID<RE::TESObjectLIGH>(0x0006C056);
+				const float fov = vanilla ? vanilla->data.fov : 0.0f;
+				flash.fovPerDegree = fov > 0.0f && fov < 6.3f ? RE::NI_PI / 180.0f : 1.0f;
+				logger::info("flashlight: a vanilla spot light's field of view is {:.4f} at run time (90 in the file): {}", fov,
+					flash.fovPerDegree < 1.0f ? "radians" : "degrees");
+			}
 			auto& data = flash.form->data;
 			data.time = -1;
 			data.radius = static_cast<std::uint32_t>(Reach());
@@ -242,7 +254,7 @@ namespace chiefrim::Lighting
 			data.flags.reset(RE::TES_LIGHT_FLAGS::kType);
 			data.flags.set(RE::TES_LIGHT_FLAGS::kDynamic, RE::TES_LIGHT_FLAGS::kSpotShadow);
 			data.fallofExponent = 1.0f;
-			data.fov = std::clamp(2.0f * flash.beam.cutoff_angle * 180.0f / RE::NI_PI, 10.0f, 170.0f);
+			data.fov = std::clamp(2.0f * flash.beam.cutoff_angle * 180.0f / RE::NI_PI, 10.0f, 170.0f) * flash.fovPerDegree;
 			data.nearDistance = 8.0f;
 			flash.form->fade = config.flashBrightness;
 			return flash.form;
@@ -274,11 +286,8 @@ namespace chiefrim::Lighting
 			}
 			if (!flash.logged) {
 				flash.logged = true;
-				auto*       scene = Scene();
-				const bool  shadowed = scene && scene->GetShadowLight(light) != nullptr;
-				logger::info("flashlight: a {} light of Skyrim's ({}), reach {}, cone {:.0f} degrees",
-					shadowed ? "shadowed spot" : "(unshadowed)", light->GetRTTI() ? light->GetRTTI()->GetName() : "?",
-					form->data.radius, form->data.fov);
+				logger::info("flashlight: Skyrim made its light ({}), reach {}, field of view {:.3f}",
+					light->GetRTTI() ? light->GetRTTI()->GetName() : "?", form->data.radius, form->data.fov);
 			}
 			return true;
 		}
@@ -398,6 +407,34 @@ namespace chiefrim::Lighting
 			}
 			flash.added = true;
 			flash.addedAt = now;
+			flash.checked = false;  // a new light of Skyrim's: its cone looked at again
+		}
+		if (!flash.checked && now - flash.addedAt > 1000) {
+			// in the scene now: what kind of light Skyrim made of it, and its cone
+			flash.checked = true;
+			RE::BSShadowLight* shadow = nullptr;
+			for (auto& light : scene->GetRuntimeData().activeShadowLights) {
+				if (light && light->light.get() == flash.light.get()) {
+					shadow = light.get();
+				}
+			}
+			if (!shadow) {
+				logger::info("flashlight: its light has no shadow (a plain point light)");
+			} else if (!shadow->GetIsFrustumLight()) {
+				logger::info("flashlight: a shadowed light, not a spot");
+			} else {
+				auto& frustum = static_cast<RE::BSShadowFrustumLight*>(shadow)->GetShadowFrustumLightRuntimeData();
+				logger::info("flashlight: a shadowed spot: semi-width {:.3f}, semi-height {:.3f}, falloff {:.2f}, near {:.1f}, far {:.1f}",
+					frustum.semiWidth, frustum.semiHeight, frustum.falloff, frustum.nearDistance, frustum.farDistance);
+				// Halo's cone is 45 degrees each side of its axis: its tangent (1) and
+				// its angle (0.79) are close, whichever the semi-width is. Much
+				// narrower, and the field of view went in wrong: widened to it
+				const float wanted = std::tan(std::clamp(flash.beam.cutoff_angle, 0.1f, 1.3f));
+				if (frustum.semiWidth < 0.5f * wanted || frustum.semiHeight < 0.5f * wanted) {
+					frustum.semiWidth = frustum.semiHeight = wanted;
+					logger::info("flashlight: its cone was narrower than Halo's; widened to {:.3f}", wanted);
+				}
+			}
 		}
 		if (shadowed && config.flashShadowed && flash.node) {
 			PlaceSpot(view, forward);
