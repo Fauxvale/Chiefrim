@@ -549,9 +549,18 @@ host map, **not rendered**, flagged so the AI never runs on it, and moved to the
 and facing every tick.
 
 - **Hitbox (Phase 5, protocol 18, `skse/src/Hitbox.cpp`):** a proxy is hit on **its actor's own
-  hit shapes**, not on its biped. Skyrim keeps rigid bodies on each actor's skeleton bones (layer
-  BIPED), moved with its animation, for its own arrows and spells to hit; the plugin reads them
-  each frame (capsules and spheres as they are; a box or hull as the capsule along its longest
+  hit shapes**, not on its biped. Skyrim has rigid bodies on each actor's skeleton bones (layer
+  BIPED), but puts them in its physics world only now and then: in furniture and some idles, hit
+  or staggered, ragdolled (`bAddBipedWhenKeyframed`, off in vanilla). The first in-game test
+  (2026-10-08) found most people walking about with all their bodies out of the world (stale), so
+  they fell back to their bounds, and the full shapes only while in an animation. So the plugin
+  places a body **out of the world from its bone**, as the animation has the bone that frame, and
+  the body's own offset from it (a `bhkRigidBodyT`'s rotation and translation); a body in the world
+  is where Havok has it (what Skyrim's own hits meet), and the first of those are logged against
+  where their bones put them (`hitbox: <bone> ..., in the world: N units ... from where its bone
+  puts it`; over 8 units says the bone placement is off). Precision (Nexus 72347) solves the same
+  thing with a scaled clone of the skeleton in Havok, driven from the bones; Chiefrim needs no
+  physics for it, as the shapes only go to Halo. The plugin reads them each frame (capsules and spheres as they are; a box or hull as the capsule along its longest
   side) and sends them with the actor (`cr_actors.hitboxes`, up to 48 an actor, 1024 in all).
   Halo tests them in place of the biped's collision model: shots and melee in
   `object_test_vector` (`collisions.c` hook: a ray against capsules), the proxy's bounding sphere
@@ -561,8 +570,8 @@ and facing every tick.
   root node, so it goes where the proxy goes (in the first in-game test, 2026-10-08, no node halted
   Halo: `object_has_node`), and lets go when the proxy is deleted, to go off as it would. Verified
   in game (2026-10-08): bullets and the hit shapes as expected. A wolf is hit where a wolf is: a shot over its back misses, where the
-  old scaled biped stood up into it. Bodies not in the world, or not where the actor stands (a
-  ragdoll not driven), give way to **one capsule from its bounds**, stood up or laid along its
+  old scaled biped stood up into it. An actor with no bodies, or with them not where it stands,
+  gives way to **one capsule from its bounds**, stood up or laid along its
   heading, as tall as the actor, and a sphere for a person's head (`CR_HITBOX_BOUNDS`). With no
   shapes at all (the pool full) the proxy's biped, scaled (below), is hit as before.
   **Headshots** are a person's: the body on `NPC Head [Head]` (people, draugr, falmer) is

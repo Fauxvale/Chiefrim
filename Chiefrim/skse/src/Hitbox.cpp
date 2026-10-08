@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // An actor's hit shapes for Halo (docs §8.1): the rigid bodies on its
-// skeleton's bones, which Skyrim keeps in the world, moved with the
-// animation, for its own arrows and spells to hit. The Havok shape layouts
-// are those Collision.cpp reads.
+// skeleton's bones. Skyrim puts them in its physics world only now and then
+// (in furniture and some idles, hit, ragdolled: bAddBipedWhenKeyframed is
+// off), so a body out of the world is placed here as Skyrim keys one, from
+// its bone as the animation has it now and the body's own offset from the
+// bone (bhkRigidBodyT); one in the world is where Havok has it. The Havok
+// shape layouts are those Collision.cpp reads.
 #include "Hitbox.h"
 
 #include <vector>
@@ -39,6 +42,8 @@ namespace chiefrim::Hitbox
 			std::unordered_map<RE::FormID, Entry> actors;
 			std::unordered_map<int, bool>         loggedTypes;
 			int                                   loggedActors = 0;
+			int                                   compared = 0;      // bodies in the world checked against their bones
+			float                                 worstOffset = 0.0f;  // Skyrim units, of those
 		} s;
 
 		float SkyrimPerHavok() { return RE::bhkWorld::GetWorldScaleInverse(); }
@@ -224,6 +229,85 @@ namespace chiefrim::Hitbox
 			}
 		}
 
+		// A body's transform from its bone, as the animation has the bone now:
+		// the bone's (Havok units), and a bhkRigidBodyT's own rotation and
+		// translation from it
+		// (CommonLib's bhkRigidBodyT derives privately: netimmerse_cast can't reach it)
+		bool HasOffset(const RE::bhkWorldObject* a_body)
+		{
+			static REL::Relocation<const RE::NiRTTI*> rtti{ RE::bhkRigidBodyT::Ni_RTTI };
+			return a_body && a_body->GetRTTI() == rtti.get();
+		}
+
+		bool BoneTransform(const RE::bhkNiCollisionObject* a_object, RE::bhkWorldObject* a_body, float* a_xf)
+		{
+			const auto* node = a_object->sceneObject;
+			if (!node) {
+				return false;
+			}
+			const float k = SkyrimPerHavok();
+			const auto& bone = node->world;
+			alignas(16) float xf[16];
+			for (int c = 0; c < 3; ++c) {
+				for (int i = 0; i < 3; ++i) {
+					xf[c * 4 + i] = bone.rotate.entry[i][c];
+				}
+				xf[c * 4 + 3] = 0.0f;
+			}
+			xf[12] = bone.translate.x / k;
+			xf[13] = bone.translate.y / k;
+			xf[14] = bone.translate.z / k;
+			xf[15] = 1.0f;
+			if (HasOffset(a_body)) {
+				// bhkRigidBodyT: its rotation (hkQuaternion, 0x40) and translation (0x50) from the bone
+				alignas(16) float q[4], t[4], local[16];
+				std::memcpy(q, Vec(a_body, 0x40), sizeof(q));
+				std::memcpy(t, Vec(a_body, 0x50), sizeof(t));
+				const float x = q[0], y = q[1], z = q[2], w = q[3];
+				const float columns[3][3] = {
+					{ 1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w) },
+					{ 2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w) },
+					{ 2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y) },
+				};
+				for (int c = 0; c < 3; ++c) {
+					for (int i = 0; i < 3; ++i) {
+						local[c * 4 + i] = columns[c][i];
+					}
+					local[c * 4 + 3] = 0.0f;
+				}
+				local[12] = t[0], local[13] = t[1], local[14] = t[2], local[15] = 1.0f;
+				if (!XfLooksValid(local)) {
+					return false;
+				}
+				XfCompose(xf, local, a_xf);
+			} else {
+				std::memcpy(a_xf, xf, sizeof(xf));
+			}
+			return XfLooksValid(a_xf);
+		}
+
+		// The first bodies in the world, where Havok has them against where
+		// their bones put them: the log says whether BoneTransform is right
+		void Compare(const RE::bhkNiCollisionObject* a_object, RE::bhkWorldObject* a_body, const float* a_havok, const float* a_bone)
+		{
+			const float k = SkyrimPerHavok();
+			float       moved = 0.0f, turned = 0.0f;
+			for (int i = 0; i < 3; ++i) {
+				moved += (a_havok[12 + i] - a_bone[12 + i]) * (a_havok[12 + i] - a_bone[12 + i]);
+				for (int c = 0; c < 3; ++c) {
+					turned = std::max(turned, std::fabs(a_havok[c * 4 + i] - a_bone[c * 4 + i]));
+				}
+			}
+			moved = std::sqrt(moved) * k;
+			s.worstOffset = std::max(s.worstOffset, moved);
+			if (++s.compared <= 16 || moved > 8.0f && s.compared <= 200) {
+				const auto* node = a_object->sceneObject;
+				logger::info("hitbox: {} ({}), in the world: {:.1f} units and {:.3f} of a turn from where its bone puts it{}",
+					node ? node->name.c_str() : "?", HasOffset(a_body) ? "offset from its bone" : "at its bone",
+					moved, turned, moved > 8.0f ? " (too far: BoneTransform is off)" : "");
+			}
+		}
+
 		bool BipedLayer(RE::COL_LAYER a_layer)
 		{
 			return a_layer == RE::COL_LAYER::kBiped || a_layer == RE::COL_LAYER::kBipedNoCC || a_layer == RE::COL_LAYER::kDeadBip;
@@ -240,27 +324,42 @@ namespace chiefrim::Hitbox
 			});
 		}
 
-		// Its skeleton's bodies, in the world now; false if none are, or they
-		// aren't where the actor is (not moved with it: a ragdoll not driven)
-		bool FromBodies(const Entry& a_entry, const RE::NiPoint3& a_feet, float a_height, std::vector<Capsule>& a_out, int& a_bodies)
+		// Its skeleton's bodies: where Havok has those in its world, where
+		// their bones put the others; false if there are none, or they aren't
+		// where the actor is
+		bool FromBodies(const Entry& a_entry, const RE::NiPoint3& a_feet, float a_height, std::vector<Capsule>& a_out, int& a_inWorld, int& a_fromBones)
 		{
 			static constexpr CollectFn collect = [](const RE::hkpShape* a_shape, const float* a_xf, Job* a_job) { Collect(a_shape, a_xf, *a_job, 0); };
 			const float k = SkyrimPerHavok();
-			a_bodies = 0;
+			a_inWorld = a_fromBones = 0;
 			for (const auto& body : a_entry.bodies) {
 				auto* world = body.object ? body.object->body.get() : nullptr;
 				auto* object = world ? static_cast<RE::hkpWorldObject*>(world->referencedObject.get()) : nullptr;
-				if (!object || !object->world || !BipedLayer(object->collidable.GetCollisionLayer())) {
+				if (!object || !BipedLayer(object->collidable.GetCollisionLayer())) {
 					continue;
 				}
 				const auto* shape = object->collidable.shape;
-				const auto* xf = static_cast<const float*>(object->collidable.motion);
-				if (!shape || !xf || !XfLooksValid(xf)) {
+				if (!shape) {
+					continue;
+				}
+				alignas(16) float fromBone[16];
+				const bool        boneOk = BoneTransform(body.object.get(), world, fromBone);
+				const auto*       havok = object->world ? static_cast<const float*>(object->collidable.motion) : nullptr;
+				const float*      xf = nullptr;
+				if (havok && XfLooksValid(havok)) {
+					xf = havok;  // what Skyrim's own hits meet
+					++a_inWorld;
+					if (boneOk) {
+						Compare(body.object.get(), world, havok, fromBone);
+					}
+				} else if (boneOk) {
+					xf = fromBone;
+					++a_fromBones;
+				} else {
 					continue;
 				}
 				Job job{ &a_out, body.head ? CR_HITBOX_HEAD : 0u };
 				Guarded(collect, shape, xf, &job);
-				++a_bodies;
 			}
 			// where the actor is: none further from its feet than its height and a margin
 			const float reach = (a_height * 1.5f + 256.0f) / k;
@@ -352,8 +451,8 @@ namespace chiefrim::Hitbox
 		}
 		const auto  feet = a_actor->GetPosition();
 		const float height = std::clamp(a_actor->GetHeight(), 20.0f, 2000.0f);
-		int         bodies = 0;
-		const bool  own = FromBodies(entry, feet, height, caps, bodies);
+		int         inWorld = 0, fromBones = 0;
+		const bool  own = FromBodies(entry, feet, height, caps, inWorld, fromBones);
 		if (!own) {
 			FromBounds(a_actor, feet, height, caps);
 		}
@@ -377,11 +476,12 @@ namespace chiefrim::Hitbox
 			++s.loggedActors;
 			const bool head = std::any_of(caps.begin(), caps.end(), [](const Capsule& a_cap) { return (a_cap.flags & CR_HITBOX_HEAD) != 0; });
 			if (own) {
-				logger::info("hitbox: {} ({:08X}): {} shapes from {} of its {} bodies{}{}", a_actor->GetName(), a_actor->GetFormID(), count, bodies,
-					entry.bodies.size(), head ? ", a person's head" : "", caps.size() > count ? std::format(" ({} left out)", caps.size() - count) : "");
+				logger::info("hitbox: {} ({:08X}): {} shapes from {} of its {} bodies ({} in Skyrim's physics, {} placed from their bones){}{}",
+					a_actor->GetName(), a_actor->GetFormID(), count, inWorld + fromBones, entry.bodies.size(), inWorld, fromBones,
+					head ? ", a person's head" : "", caps.size() > count ? std::format(" ({} left out)", caps.size() - count) : "");
 			} else {
-				logger::info("hitbox: {} ({:08X}): from its bounds ({} bodies found, {} in the world where it is){}", a_actor->GetName(),
-					a_actor->GetFormID(), entry.bodies.size(), bodies, head ? ", and a person's head" : "");
+				logger::info("hitbox: {} ({:08X}): from its bounds ({} bodies found, {} in Skyrim's physics and {} placed from their bones, not where it is){}",
+					a_actor->GetName(), a_actor->GetFormID(), entry.bodies.size(), inWorld, fromBones, head ? ", and a person's head" : "");
 			}
 		}
 		return count;
