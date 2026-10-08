@@ -548,9 +548,28 @@ For every Skyrim actor within ~25 wu (about 75 m), Chiefrim spawns a **proxy**: 
 host map, **not rendered**, flagged so the AI never runs on it, and moved to the actor's position
 and facing every tick.
 
-- **Hitbox:** v1 reuses the proxy biped's collision model, scaled to the actor's height. That is
-  close for humanoids and rough for wolves, dragons and giants. A later version builds a
-  collision model in memory from the actor's bounds (one capsule, plus one sphere for the head).
+- **Hitbox (Phase 5, protocol 18, `skse/src/Hitbox.cpp`):** a proxy is hit on **its actor's own
+  hit shapes**, not on its biped. Skyrim keeps rigid bodies on each actor's skeleton bones (layer
+  BIPED), moved with its animation, for its own arrows and spells to hit; the plugin reads them
+  each frame (capsules and spheres as they are; a box or hull as the capsule along its longest
+  side) and sends them with the actor (`cr_actors.hitboxes`, up to 48 an actor, 1024 in all).
+  Halo tests them in place of the biped's collision model: shots and melee in
+  `object_test_vector` (`collisions.c` hook: a ray against capsules), the proxy's bounding sphere
+  holds them (`objects.c`: rays and explosions look for it there, so a dragon is as big as a
+  dragon), and an explosion's distance is to the nearest shape's middle (`damage.c`: a grenade by
+  a dragon's tail hurts it). A wolf is hit where a wolf is: a shot over its back misses, where the
+  old scaled biped stood up into it. Bodies not in the world, or not where the actor stands (a
+  ragdoll not driven), give way to **one capsule from its bounds**, stood up or laid along its
+  heading, as tall as the actor, and a sphere for a person's head (`CR_HITBOX_BOUNDS`). With no
+  shapes at all (the pool full) the proxy's biped, scaled (below), is hit as before.
+  **Headshots** are a person's: the body on `NPC Head [Head]` (people, draugr, falmer) is
+  `CR_HITBOX_HEAD`, and a bullet that can headshot within 1.25 of its radius kills the actor. A
+  creature's head is an ordinary hit: one pistol round doesn't drop a dragon. Offline
+  (`fake_skyrim.py --actor-shape wolf|person`): a wolf hit on its head, body and legs aiming
+  down at it, never aiming level over it (the biped took every round there); a person's head
+  shot with the pistol is a headshot; a grenade by the wolf reaches it. `CHIEFRIM_SHOW_PROXIES`
+  still draws the biped, not the shapes. The plugin's log names the first actors' shapes
+  (`hitbox: <name>: N shapes from M of its bodies`, or `from its bounds`).
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential and dead flags.
@@ -895,7 +914,7 @@ Each phase ends in something you can play.
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: done (2026-10-06), verified in game:** Skyrim's HUD and light on Halo's objects (§9); the hand-off to Skyrim's furniture, beds, mounts, scenes and swimming (§11; beast forms verified 2026-10-07); load doors, interiors and fast travel (a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). The one crash in testing was MaxsuCombatEscape's (combat pathing run inside a cell change; it crashes the same way without Chiefrim). |
-| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures, launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
+| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures (**built 2026-10-08, checked offline**, §8.1: each actor's own hit shapes, protocol 18; in game to check), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
 ## 13. Decisions
@@ -948,7 +967,7 @@ At the repo root: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`.
 - `UPSTREAM`: the pinned halo-ce-universal commit.
 - `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (`main.c`,
   `game.c`, `scenario.c`/`.h`, `player_control.c`, `input_abstraction.c`, `render_cameras.c`,
-  `render.c`, `render_objects.c`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
+  `render.c`, `render_objects.c`, `collisions.c`, `objects.c`, `damage.c`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
 - `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`, ...); `src/port/` goes to
   `port/linux/src/` instead (`chiefrim_overlay_gl.c`: code on the port's OpenGL device, built with
   the platform layer's flags).
@@ -977,6 +996,6 @@ extracted maps. The test data root (`build/halo-data`) holds only a link to the 
 | CPU readback of three layers costs too much | Only redraw the HUD layer when it changes. Lower resolution for the world layer. GPU interop later |
 | SSE Display Tweaks' swap-chain and frame-limiter hooks interfere with compositing or the lockstep | Test with it from Phase 2. If it conflicts, adjust its settings or hook at a point it doesn't touch. A shader replacer (Community Shaders, ENB) added later is a separate compatibility task |
 | Halo's 30 Hz tick against Skyrim's frame rate | The port already interpolates (`render_interpolation.c`). Skyrim follows the interpolated pose |
-| Proxy hitboxes are wrong for non-humanoid creatures | Scaled biped for v1. Built-in-memory collision model in Phase 5 |
+| Proxy hitboxes are wrong for non-humanoid creatures | Phase 5: Skyrim's own hit shapes for each actor (§8.1); the scaled biped only when there are none |
 | Upstream decomp moves quickly | Pinned commit (`halo/UPSTREAM`). Hooks small and marked |
 | Legal | Fan project. Nothing from either game is distributed, and the user supplies both games. Code licensing is settled (GPL-3.0-or-later, [LICENSING.md](LICENSING.md)). Whether releases may include a built Halo executable, given that the decompilation is of Microsoft's game, is decided before any public release |

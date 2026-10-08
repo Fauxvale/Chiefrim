@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 17u
+#define CR_PROTOCOL_VERSION 18u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -218,7 +218,24 @@ CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
 CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
 /* Skyrim -> Halo. The actors near the player (docs §8.1): Halo keeps an
 unseen, hittable stand-in (a proxy biped) for each. Latest value. */
-#define CR_ACTORS_MAX 48u
+#define CR_ACTORS_MAX   48u
+#define CR_HITBOXES_MAX 1024u /* all the actors' together */
+#define CR_HITBOXES_PER_ACTOR 48u /* a dragon's skeleton has ~30 bodies */
+
+/* One of an actor's hit shapes (protocol 18): Skyrim's own, the capsules and
+spheres of its skeleton's bodies that its arrows hit, as they stand now. A
+sphere is a capsule whose ends meet; a box or a hull comes as the capsule
+along its longest side. Skyrim world units. */
+typedef struct cr_hitbox
+{
+	cr_vec3  a;
+	cr_vec3  b;
+	float    radius;
+	uint32_t flags;         /* CR_HITBOX_* */
+} cr_hitbox;
+
+#define CR_HITBOX_HEAD   0x0001u /* a person's head (NPC Head [Head]): headshots kill */
+#define CR_HITBOX_BOUNDS 0x0002u /* not its skeleton's: made from its bounds (no bodies found) */
 
 typedef struct cr_actor
 {
@@ -229,6 +246,9 @@ typedef struct cr_actor
 	float    height;        /* Skyrim units */
 	float    head;          /* Skyrim units: the head's centre above the feet, as it stands now
 	                           (protocol 16: the proxy's head is put there); 0: unknown */
+	uint16_t hitbox_first;  /* its hit shapes: cr_actors.hitboxes[first, first + count) */
+	uint16_t hitbox_count;  /* 0: none (Halo hits its proxy's own biped, scaled) */
+	uint32_t reserved;
 } cr_actor;
 
 #define CR_ACTOR_HOSTILE   0x0001u /* hostile to the player */
@@ -240,6 +260,9 @@ typedef struct cr_actors
 	uint32_t frame;
 	uint32_t count;
 	cr_actor actors[CR_ACTORS_MAX];
+	uint32_t hitbox_count;
+	uint32_t reserved;
+	cr_hitbox hitboxes[CR_HITBOXES_MAX];
 } cr_actors;
 
 CR_DECLARE_SLOT(cr_slot_display, cr_display);
@@ -614,7 +637,7 @@ typedef struct cr_shared
 	cr_slot_display display;              /* S->H */
 	cr_slot_camera  camera;               /* S->H, protocol 7 */
 	cr_slot_actors  actors;               /* S->H, protocol 8 */
-	uint32_t reserved2[10];               /* the frames start on a 64-byte line */
+	uint32_t reserved2[8];                /* the frames start on a 64-byte line */
 	cr_frames frames;                     /* H->S */
 } cr_shared;
 
@@ -827,8 +850,9 @@ CR_STATIC_ASSERT(sizeof(cr_slot_display) == 24, "cr_slot_display");
 CR_STATIC_ASSERT(sizeof(cr_frame_header) == 48, "cr_frame_header");
 CR_STATIC_ASSERT(sizeof(cr_camera) == 64, "cr_camera");
 CR_STATIC_ASSERT(sizeof(cr_slot_camera) == 72, "cr_slot_camera");
-CR_STATIC_ASSERT(sizeof(cr_actor) == 32, "cr_actor");
-CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 32 * CR_ACTORS_MAX, "cr_slot_actors");
+CR_STATIC_ASSERT(sizeof(cr_hitbox) == 32, "cr_hitbox");
+CR_STATIC_ASSERT(sizeof(cr_actor) == 40, "cr_actor");
+CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 40 * CR_ACTORS_MAX + 8 + 32 * CR_HITBOXES_MAX, "cr_slot_actors");
 CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
@@ -844,9 +868,10 @@ CR_STATIC_ASSERT(sizeof(cr_msg_chief_state) == 8 + 360, "cr_msg_chief_state");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
 #define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + 1552u + 40u, "cr_shared.frames");
+#define CR_SLOT_ACTORS_BYTES (16u + 40u * CR_ACTORS_MAX + 8u + 32u * CR_HITBOXES_MAX)
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + CR_SLOT_ACTORS_BYTES + 32u, "cr_shared.frames");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) % 64u == 0, "cr_shared.frames: on a line");
-CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 1592u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
+CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + CR_SLOT_ACTORS_BYTES + 32u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
 
 #ifdef __cplusplus
 }

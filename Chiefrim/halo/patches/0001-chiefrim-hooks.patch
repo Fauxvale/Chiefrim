@@ -419,7 +419,7 @@ index e35691e1..86036209 100644
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
 diff --git a/source/objects/damage.c b/source/objects/damage.c
-index 5f00c31c..c3f37605 100644
+index 5f00c31c..091e1691 100644
 --- a/source/objects/damage.c
 +++ b/source/objects/damage.c
 @@ -131,6 +131,7 @@ symbols in this file:
@@ -439,7 +439,16 @@ index 5f00c31c..c3f37605 100644
  	object_count = objects_in_sphere(
  		0,
  		0,
-@@ -2482,6 +2485,8 @@ static void area_of_effect_cause_damage_to_object(
+@@ -2458,6 +2461,8 @@ static void area_of_effect_cause_damage_to_object(
+ 			&object->object.bounding_sphere_center,
+ 			&damage->direction);
+ 		distance = normalize3d(&damage->direction);
++		if (chiefrim_active()) /* CHIEFRIM: to a Skyrim actor's nearest shape (a dragon's tail) */
++			chiefrim_proxy_area_distance(object_index, epicenter, &distance);
+ 		radius_delta = damage_effect->cutoff_radius - damage_effect->falloff_radius;
+ 		if (radius_delta > 0.f)
+ 		{
+@@ -2482,6 +2487,8 @@ static void area_of_effect_cause_damage_to_object(
  
  		if (scale > 0.f)
  		{
@@ -537,6 +546,56 @@ index f4ba4d79..ccd74106 100644
 +	*falloff_angle = definition->falloff_angle;
 +	return TRUE;
 +}
+diff --git a/source/objects/objects.c b/source/objects/objects.c
+index 3ffb5ab7..7d961f51 100644
+--- a/source/objects/objects.c
++++ b/source/objects/objects.c
+@@ -52,6 +52,7 @@ OBJECTS.C
+ #include "sound/game_sound.h"
+ #include "structures/structure_bsp_definitions.h"
+ #include "units/units.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -2793,6 +2794,8 @@ void object_compute_node_matrices(
+ 	{
+ 		object->object.bounding_sphere_radius *= object->object.scale;
+ 	}
++	if (chiefrim_active()) /* CHIEFRIM: a Skyrim actor's proxy is as big as its actor's shapes */
++		chiefrim_proxy_bounds(object_index, &object->object.bounding_sphere_center, &object->object.bounding_sphere_radius);
+ 
+ 	return;
+ }
+diff --git a/source/physics/collisions.c b/source/physics/collisions.c
+index 7c600cd9..6d505c00 100644
+--- a/source/physics/collisions.c
++++ b/source/physics/collisions.c
+@@ -112,6 +112,7 @@ symbols in this file:
+ #include "scenario/scenario.h"
+ #include "structures/structure_bsp_definitions.h"
+ #include "units/bipeds.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
+ 
+@@ -1566,7 +1567,15 @@ static boolean object_test_vector(
+ 				&object->object.bounding_sphere_center,
+ 				(object->object.bounding_sphere_radius)))
+ 		{
+-			if (TEST_FLAG(_object_mask_vehicle, object->object.type) &&
++			long chiefrim_hit = chiefrim_active() ? /* CHIEFRIM: a Skyrim actor's proxy is hit on its actor's own shapes */
++				chiefrim_proxy_test_vector(object_index, point, vector, collision) : NONE;
++
++			if (chiefrim_hit != NONE)
++			{
++				if (chiefrim_hit)
++					hit = TRUE;
++			}
++			else if (TEST_FLAG(_object_mask_vehicle, object->object.type) &&
+ 				TEST_FLAG(flags, _collision_test_use_vehicle_physics_bit))
+ 			{
+ 				struct physics_instance instance;
 diff --git a/source/render/render.c b/source/render/render.c
 index 68a746c2..24b5171a 100644
 --- a/source/render/render.c

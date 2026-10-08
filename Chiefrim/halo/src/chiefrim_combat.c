@@ -7,7 +7,9 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 - PROXIES: for each actor Skyrim lists near the player, an unseen biped of
   the host map's (a marine's) where the actor stands, its size, on the
   Covenant's team. Halo's own code hits it: bullets, plasma, splash,
-  melee, headshots. It has a vitality nothing reaches; what it loses in a
+  melee, headshots. Where Skyrim sends the actor's hit shapes (its
+  skeleton's capsules, protocol 18), shots, melee and explosions find it
+  on those, not on its biped: a wolf is hit where a wolf is. It has a vitality nothing reaches; what it loses in a
   frame, over its biped's own vitality, goes to Skyrim (CR_MSG_HIT_ACTOR)
   and is refilled. Render.c's hook keeps it out of the picture.
 - CHIEF HURT: Skyrim's damage to the player (CR_MSG_PLAYER_HURT) goes
@@ -38,6 +40,7 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #include "objects/damage.h"
 #include "objects/damage_effect_definitions.h"
 #include "objects/objects.h"
+#include "physics/collisions.h"
 #include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
 #include "units/biped_definitions.h"
@@ -57,11 +60,21 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #define CHIEFRIM_HEAD_RADIUS      0.07f /* world units at scale 1: a head, around its marker (Chief's helmet is ~0.13 tall) */
 #define CHIEFRIM_HEADSHOT_FLAG    0x0002u /* damage.c's _damage_can_cause_headshots_bit (a pistol's, a sniper's bullet) */
 #define CHIEFRIM_PROXY_GRENADES   2       /* when its biped carries none of its own */
+#define CHIEFRIM_PROXY_HITBOXES   CR_HITBOXES_PER_ACTOR
+#define CHIEFRIM_HEAD_SLACK       1.25f   /* a headshot's reach, of the head shape's radius */
 
 /* what a proxy may carry, each as likely: the weapons a proxy drops */
 static char const *const proxy_weapon_names[] = { "pistol", "assault rifle", "plasma pistol", "needler" };
 
 /* ---------- globals */
+
+/* one of an actor's hit shapes, in Halo's world: a capsule (a sphere's ends meet) */
+struct chiefrim_hitbox
+{
+	real_point3d a, b;
+	real radius;
+	uint32_t flags; /* CR_HITBOX_* */
+};
 
 struct chiefrim_proxy
 {
@@ -72,6 +85,9 @@ struct chiefrim_proxy
 	real_point3d blast;    /* its centre */
 	real head;             /* its head marker above its feet at scale 1, in its pose (0: not yet) */
 	boolean headshot;      /* a headshot this frame */
+	boolean shaped;        /* logged its shapes */
+	long hitbox_count;     /* 0: Halo hits its biped */
+	struct chiefrim_hitbox hitboxes[CHIEFRIM_PROXY_HITBOXES];
 };
 
 static struct
@@ -89,6 +105,7 @@ static struct
 	long proxy_weapons[NUMBEROF(proxy_weapon_names)]; /* those of them the map has */
 	long proxy_weapon_count;
 	long proxies_armed, drops;           /* for the log */
+	long proxies_shaped, shape_hits;     /* for the log */
 	struct chiefrim_proxy proxies[CHIEFRIM_PROXIES];
 	boolean chief_dead;                  /* told Skyrim */
 	long hits, hurts;                    /* since the last summary */
@@ -124,6 +141,148 @@ static void chiefrim_push(uint16_t type, void const *message, uint32_t size)
 
 	if (shm && chiefrim_linked())
 		cr_ring_push(&shm->to_skyrim, type, message, size);
+}
+
+static struct chiefrim_proxy *chiefrim_proxy_of(long object_index)
+{
+	long slot;
+
+	if (object_index == NONE)
+		return NULL;
+	for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
+	{
+		if (combat.proxies[slot].form_id && combat.proxies[slot].object_index == object_index)
+			return &combat.proxies[slot];
+	}
+	return NULL;
+}
+
+/* the point of segment a-b nearest p, as a fraction of the way */
+static real chiefrim_segment_nearest(real_point3d const *p, real_point3d const *a, real_point3d const *b, real_point3d *nearest)
+{
+	real_vector3d ab, ap;
+	real length, fraction = 0.f;
+
+	vector_from_points3d(a, b, &ab);
+	vector_from_points3d(a, p, &ap);
+	length = dot_product3d(&ab, &ab);
+	if (length > 1.0e-8f)
+		fraction = PIN(dot_product3d(&ap, &ab) / length, 0.f, 1.f);
+	nearest->x = a->x + ab.i * fraction;
+	nearest->y = a->y + ab.j * fraction;
+	nearest->z = a->z + ab.k * fraction;
+	return fraction;
+}
+
+/* the ray p + t v (t from 0 to 1) into a sphere: the first t it meets the
+surface going in; FALSE if it doesn't (or starts inside) */
+static boolean chiefrim_ray_sphere(real_point3d const *p, real_vector3d const *v, real_point3d const *centre, real radius, real *t)
+{
+	real_vector3d off;
+	real a = dot_product3d(v, v), b, c, h;
+
+	vector_from_points3d(centre, p, &off);
+	b = dot_product3d(&off, v);
+	c = dot_product3d(&off, &off) - radius * radius;
+	if (a <= 0.f || c <= 0.f || b >= 0.f)
+		return FALSE;
+	h = b * b - a * c;
+	if (h < 0.f)
+		return FALSE;
+	*t = (-b - square_root(h)) / a;
+	return *t >= 0.f && *t <= 1.f;
+}
+
+/* the ray into a capsule: its round side, then its ends' spheres; the
+nearest t, and the surface's outward normal there */
+static boolean chiefrim_ray_capsule(real_point3d const *p, real_vector3d const *v, struct chiefrim_hitbox const *box, real *t, real_vector3d *normal)
+{
+	real_vector3d ba, oa;
+	real baba, best = 2.f, end_t;
+	real_point3d at, axis;
+
+	vector_from_points3d(&box->a, &box->b, &ba);
+	vector_from_points3d(&box->a, p, &oa);
+	baba = dot_product3d(&ba, &ba);
+	if (baba > 1.0e-8f)
+	{
+		real bard = dot_product3d(&ba, v), baoa = dot_product3d(&ba, &oa);
+		real a = baba * dot_product3d(v, v) - bard * bard;
+		real b = baba * dot_product3d(v, &oa) - baoa * bard;
+		real c = baba * dot_product3d(&oa, &oa) - baoa * baoa - box->radius * box->radius * baba;
+		real h = b * b - a * c;
+
+		if (a > 1.0e-10f && c > 0.f && h >= 0.f)
+		{
+			real side = (-b - square_root(h)) / a, y = baoa + side * bard;
+
+			if (side >= 0.f && side <= 1.f && y > 0.f && y < baba)
+				best = side;
+		}
+	}
+	if (chiefrim_ray_sphere(p, v, &box->a, box->radius, &end_t) && end_t < best)
+		best = end_t;
+	if (baba > 1.0e-8f && chiefrim_ray_sphere(p, v, &box->b, box->radius, &end_t) && end_t < best)
+		best = end_t;
+	if (best > 1.f)
+		return FALSE;
+	*t = best;
+	at.x = p->x + v->i * best;
+	at.y = p->y + v->j * best;
+	at.z = p->z + v->k * best;
+	chiefrim_segment_nearest(&at, &box->a, &box->b, &axis);
+	vector_from_points3d(&axis, &at, normal);
+	if (normalize3d(normal) == 0.f)
+	{
+		*normal = *v;
+		normal->i = -normal->i;
+		normal->j = -normal->j;
+		normal->k = -normal->k;
+		normalize3d(normal);
+	}
+	return TRUE;
+}
+
+/* the actor's hit shapes, in Halo's world, for its proxy */
+static void chiefrim_proxy_take_hitboxes(struct chiefrim_proxy *proxy, cr_actors const *actors, cr_actor const *actor, cr_vec3 origin)
+{
+	uint32_t first = actor->hitbox_first, count = actor->hitbox_count, index;
+	uint32_t total = MIN(actors->hitbox_count, CR_HITBOXES_MAX);
+	boolean head = FALSE;
+
+	proxy->hitbox_count = 0;
+	if (first >= total || count == 0)
+		return;
+	count = MIN(MIN(count, total - first), CHIEFRIM_PROXY_HITBOXES);
+	for (index = 0; index < count; index++)
+	{
+		cr_hitbox const *in = &actors->hitboxes[first + index];
+		struct chiefrim_hitbox *out = &proxy->hitboxes[proxy->hitbox_count];
+		cr_vec3 a = cr_sky_to_halo(in->a, origin), b = cr_sky_to_halo(in->b, origin);
+		real radius = in->radius / CR_SKY_UNITS_PER_WU;
+		real sum = a.x + a.y + a.z + b.x + b.y + b.z;
+
+		/* (a NaN fails both) */
+		if (!(radius > 0.f && radius < 20.f) || !(sum > -1.0e6f && sum < 1.0e6f))
+			continue;
+		out->a.x = a.x;
+		out->a.y = a.y;
+		out->a.z = a.z;
+		out->b.x = b.x;
+		out->b.y = b.y;
+		out->b.z = b.z;
+		out->radius = radius;
+		out->flags = in->flags;
+		head |= (in->flags & CR_HITBOX_HEAD) != 0;
+		proxy->hitbox_count++;
+	}
+	if (proxy->hitbox_count && !proxy->shaped)
+	{
+		proxy->shaped = TRUE;
+		if (combat.proxies_shaped++ < 8)
+			error(_error_silent, "chiefrim: %08X is hit on its own shapes: %ld of them%s%s", proxy->form_id, proxy->hitbox_count,
+				head ? ", a person's head among them" : "", (proxy->hitboxes[0].flags & CR_HITBOX_BOUNDS) ? " (from its bounds)" : "");
+	}
 }
 
 static void chiefrim_combat_resolve(long chief)
@@ -244,6 +403,7 @@ static void chiefrim_proxy_delete(struct chiefrim_proxy *proxy)
 		object_delete(proxy->object_index);
 	proxy->form_id = 0;
 	proxy->object_index = NONE;
+	proxy->hitbox_count = 0;
 }
 
 /* one of the proxy weapons in place of its biped's own, and its grenades
@@ -432,9 +592,13 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 			free_proxy->form_id = actor->form_id;
 			free_proxy->head = 0.f;
 			free_proxy->headshot = FALSE;
+			free_proxy->shaped = FALSE;
+			free_proxy->hitbox_count = 0;
 			proxy = free_proxy;
 		}
 		proxy->seen = TRUE;
+		/* where it's hit now, before it's moved (its bounds hold them) */
+		chiefrim_proxy_take_hitboxes(proxy, &actors, actor, origin);
 
 		/* what Chief did to it since last frame goes to Skyrim */
 		{
@@ -622,17 +786,50 @@ void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter)
 
 /* projectiles.c's hook: a projectile hit a proxy. Chief's own biped (d20's
 proxies) has no head that headshots kill (he's spared them in the campaign),
-so a headshot is Chiefrim's: a bullet that can cause one, within a head's
-reach of the head marker, kills it as one kills a marine */
+so a headshot is Chiefrim's: a bullet that can cause one, on a person's head
+shape (or, a proxy without shapes, within a head's reach of its head
+marker), kills it as one kills a marine. A creature's head is no headshot:
+one bullet doesn't drop a dragon */
 void chiefrim_proxy_struck(long object_index, real_point3d const *point, long damage_definition_index)
 {
+	struct chiefrim_proxy *proxy = chiefrim_proxy_of(object_index);
 	struct object_marker marker;
 	struct object_datum *object;
 	long slot;
 	real reach, dx, dy, dz;
+	boolean can_headshot = damage_definition_index != NONE &&
+		(damage_effect_definition_get(damage_definition_index)->damage.flags & CHIEFRIM_HEADSHOT_FLAG);
 
-	if (!combat.proxy_is_chief || damage_definition_index == NONE ||
-		!(damage_effect_definition_get(damage_definition_index)->damage.flags & CHIEFRIM_HEADSHOT_FLAG) ||
+	if (proxy && proxy->hitbox_count > 0)
+	{
+		long index, nearest = 0;
+		real nearest_distance = REAL_MAX;
+
+		for (index = 0; index < proxy->hitbox_count; index++)
+		{
+			struct chiefrim_hitbox const *box = &proxy->hitboxes[index];
+			real_point3d axis;
+			real distance;
+
+			chiefrim_segment_nearest(point, &box->a, &box->b, &axis);
+			distance = distance3d(point, &axis) - box->radius;
+			if (distance < nearest_distance)
+			{
+				nearest_distance = distance;
+				nearest = index;
+			}
+			if (can_headshot && (box->flags & CR_HITBOX_HEAD) &&
+				distance3d(point, &axis) <= box->radius * CHIEFRIM_HEAD_SLACK)
+			{
+				proxy->headshot = TRUE;
+			}
+		}
+		if (combat.shape_hits++ < 12)
+			error(_error_silent, "chiefrim: a shot hit %08X on shape %ld of %ld%s", proxy->form_id, nearest, proxy->hitbox_count,
+				proxy->headshot ? ": a headshot" : (proxy->hitboxes[nearest].flags & CR_HITBOX_HEAD) ? ": its head" : "");
+		return;
+	}
+	if (!combat.proxy_is_chief || !can_headshot ||
 		!object_try_and_get(object_index) || !object_get_marker_by_name(object_index, "head", &marker, 1))
 	{
 		return;
@@ -672,14 +869,100 @@ void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real ac
 
 boolean chiefrim_object_is_proxy(long object_index)
 {
-	long slot;
+	return chiefrim_proxy_of(object_index) != NULL;
+}
 
-	for (slot = 0; slot < CHIEFRIM_PROXIES; slot++)
+/* collisions.c's hook (shots, melee, explosions' line of sight): a proxy
+with its actor's shapes is hit on them, nearer than what the ray has met
+so far. NONE: not such a proxy (its biped's model, as for any object) */
+long chiefrim_proxy_test_vector(long object_index, real_point3d const *point, real_vector3d const *vector, struct collision_result *collision)
+{
+	struct chiefrim_proxy *proxy = chiefrim_proxy_of(object_index);
+	long index;
+	boolean hit = FALSE;
+
+	if (!proxy || proxy->hitbox_count <= 0)
+		return NONE;
+	for (index = 0; index < proxy->hitbox_count; index++)
 	{
-		if (combat.proxies[slot].form_id && combat.proxies[slot].object_index == object_index)
-			return TRUE;
+		real t;
+		real_vector3d normal;
+
+		if (chiefrim_ray_capsule(point, vector, &proxy->hitboxes[index], &t, &normal) && t < collision->t)
+		{
+			collision->type = _collision_result_object;
+			collision->t = t;
+			collision->plane.n = normal;
+			collision->plane.d = normal.i * (point->x + vector->i * t) + normal.j * (point->y + vector->j * t) + normal.k * (point->z + vector->k * t);
+			collision->material_type = _material_human;
+			collision->object_index = object_index;
+			collision->region_index = NONE;
+			collision->node_index = NONE;
+			collision->bsp_index = NONE;
+			collision->surface_index = NONE;
+			collision->plane_designator = NONE;
+			collision->flags = 0;
+			collision->breakable_surface_index = 0;
+			collision->material_index = NONE;
+			hit = TRUE;
+		}
 	}
-	return FALSE;
+	return hit;
+}
+
+/* objects.c's hook, where an object's bounding sphere is set: a proxy's
+holds its actor's shapes (a dragon is bigger than any biped), so rays and
+explosions look for it there */
+void chiefrim_proxy_bounds(long object_index, real_point3d *center, real *radius)
+{
+	struct chiefrim_proxy *proxy = chiefrim_proxy_of(object_index);
+	real_point3d low, high;
+	long index;
+	real reach = 0.f;
+
+	if (!proxy || proxy->hitbox_count <= 0)
+		return;
+	low = high = proxy->hitboxes[0].a;
+	for (index = 0; index < proxy->hitbox_count; index++)
+	{
+		struct chiefrim_hitbox const *box = &proxy->hitboxes[index];
+
+		low.x = MIN(low.x, MIN(box->a.x, box->b.x) - box->radius);
+		low.y = MIN(low.y, MIN(box->a.y, box->b.y) - box->radius);
+		low.z = MIN(low.z, MIN(box->a.z, box->b.z) - box->radius);
+		high.x = MAX(high.x, MAX(box->a.x, box->b.x) + box->radius);
+		high.y = MAX(high.y, MAX(box->a.y, box->b.y) + box->radius);
+		high.z = MAX(high.z, MAX(box->a.z, box->b.z) + box->radius);
+	}
+	center->x = 0.5f * (low.x + high.x);
+	center->y = 0.5f * (low.y + high.y);
+	center->z = 0.5f * (low.z + high.z);
+	for (index = 0; index < proxy->hitbox_count; index++)
+	{
+		struct chiefrim_hitbox const *box = &proxy->hitboxes[index];
+
+		reach = MAX(reach, MAX(distance3d(center, &box->a), distance3d(center, &box->b)) + box->radius);
+	}
+	*radius = reach;
+}
+
+/* damage.c's hook: an explosion's distance to a proxy with shapes is to the
+nearest of their middles (a grenade at a dragon's tail is near it), never
+further than Halo's own, to its centre */
+void chiefrim_proxy_area_distance(long object_index, real_point3d const *epicenter, real *distance)
+{
+	struct chiefrim_proxy *proxy = chiefrim_proxy_of(object_index);
+	long index;
+
+	if (!proxy)
+		return;
+	for (index = 0; index < proxy->hitbox_count; index++)
+	{
+		real_point3d axis;
+
+		chiefrim_segment_nearest(epicenter, &proxy->hitboxes[index].a, &proxy->hitboxes[index].b, &axis);
+		*distance = MIN(*distance, distance3d(epicenter, &axis));
+	}
 }
 
 /* proxies aren't drawn, but with CHIEFRIM_SHOW_PROXIES=1 (to see where their
@@ -713,6 +996,7 @@ void chiefrim_combat_forget(void)
 	{
 		combat.proxies[slot].form_id = 0;
 		combat.proxies[slot].object_index = NONE;
+		combat.proxies[slot].hitbox_count = 0;
 	}
 }
 

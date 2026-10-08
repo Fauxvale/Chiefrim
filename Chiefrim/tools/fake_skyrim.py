@@ -27,10 +27,12 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 17
+VERSION = 18
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
-OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
+ACTORS_MAX, HITBOXES_MAX = 48, 1024
+SLOT_ACTORS_BYTES = 16 + 40 * ACTORS_MAX + 8 + 32 * HITBOXES_MAX
+OFF_FRAMES = OFF_DISPLAY + 96 + SLOT_ACTORS_BYTES + 32
 OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
@@ -57,6 +59,38 @@ TRIS_PER_MESSAGE = 1600
 
 
 ROUGH = False
+
+# --actor-shape: the test actor's hit shapes (cr_hitbox), from its feet, Skyrim
+# units; it faces south, towards Chief. (a, b, radius, flags); flag 1: a person's head
+HITBOX_HEAD = 1
+ACTOR_SHAPES = {
+    "person": (128.0, 118.0, [
+        ((-8, 0, 12), (-8, 0, 78), 9, 0), ((8, 0, 12), (8, 0, 78), 9, 0),  # legs
+        ((0, 0, 82), (0, 0, 104), 17, 0),                                    # body
+        ((0, 0, 118), (0, 0, 118), 11, HITBOX_HEAD),                         # head
+    ]),
+    "wolf": (70.0, 0.0, [
+        ((0, 35, 42), (0, -30, 42), 17, 0),                                  # body, nose south
+        ((0, -55, 50), (0, -62, 50), 11, 0),                                 # head: a creature's, no headshot
+        ((-10, 25, 2), (-10, 25, 32), 5, 0), ((10, 25, 2), (10, 25, 32), 5, 0),
+        ((-10, -22, 2), (-10, -22, 32), 5, 0), ((10, -22, 2), (10, -22, 32), 5, 0),
+    ]),
+}
+
+
+def actors_payload(frame, actor, shape):
+    """cr_actors: one actor (or none), with its hit shapes"""
+    if actor is None:
+        return struct.pack("<II", frame, 0)
+    form_id, flags, x, y, z, heading = actor
+    height, head, boxes = ACTOR_SHAPES.get(shape, (128.0, 118.0, []))
+    out = struct.pack("<II", frame, 1)
+    out += struct.pack("<II3ffffHHI", form_id, flags, x, y, z, heading, height, head, 0, len(boxes), 0)
+    out += bytes(40 * (ACTORS_MAX - 1))
+    out += struct.pack("<II", len(boxes), 0)
+    for (ax, ay, az), (bx, by, bz), radius, box_flags in boxes:
+        out += struct.pack("<3f3ffI", x + ax, y + ay, z + az, x + bx, y + by, z + bz, radius, box_flags)
+    return out
 
 
 def terrain_height(dx, dy):
@@ -431,6 +465,8 @@ def main():
     parser.add_argument("--grab-every", type=float, default=5.0)
     parser.add_argument("--actor", type=float, default=0.0,
                         help="Skyrim units: a hostile actor (128 tall) stands this far north of the start; Halo's hits on it are printed")
+    parser.add_argument("--actor-shape", choices=("biped",) + tuple(ACTOR_SHAPES), default="biped",
+                        help="with --actor: its hit shapes (protocol 18); biped: none, Halo hits its proxy's biped")
     parser.add_argument("--hurt-at", type=float, default=0.0,
                         help="seconds in: the player is hurt, --hurt-count times a second apart (melee, from the north)")
     parser.add_argument("--hurt-amount", type=float, default=0.2, help="each hurt, of Chief's whole vitality")
@@ -676,9 +712,9 @@ def main():
                 if dead and not drive_state.get("actor dead"):
                     drive_state["actor dead"] = True
                     print("fake_skyrim: the actor dies", flush=True)
-                listed = 0 if dead and t >= options.actor_dies_at + 3.0 else 1
-                link.slot_write(OFF_ACTORS, struct.pack("<II", frame, listed) +
-                    struct.pack("<II3ffff", 0x0001A2B3, 0x1 | (0x2 if dead else 0), options.x, options.y + options.actor, options.z, math.pi, 128.0, 118.0))
+                listed = not (dead and t >= options.actor_dies_at + 3.0)
+                link.slot_write(OFF_ACTORS, actors_payload(frame, (0x0001A2B3, 0x1 | (0x2 if dead else 0), options.x,
+                    options.y + options.actor, options.z, math.pi) if listed else None, options.actor_shape))
             if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
                 drive_state["hurts"] = drive_state.get("hurts", 0) + 1
                 link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,

@@ -3,6 +3,7 @@
 // THIRD-PARTY-NOTICES.md): the actor table, hits through Skyrim's own hit
 // processing, the player's damage refunded and sent on, the player killed.
 #include "Combat.h"
+#include "Hitbox.h"
 #include "Input.h"
 #include "Link.h"
 #include "Settings.h"
@@ -381,7 +382,8 @@ namespace chiefrim::Combat
 		// ---- the actors, to Halo ---------------------------------------------
 
 		// Halo's proxies: the living, and for a moment the newly dead (listed
-		// alive last frame), flagged so: a proxy drops its weapon and grenades
+		// alive last frame), flagged so: a proxy drops its weapon and grenades.
+		// With each, where it's hit (Hitbox, protocol 18)
 		void WriteActors(RE::PlayerCharacter* a_player)
 		{
 			static std::vector<std::pair<float, RE::Actor*>> nearby;
@@ -420,7 +422,8 @@ namespace chiefrim::Combat
 			}
 			std::sort(nearby.begin(), nearby.end(), [](const auto& a_a, const auto& a_b) { return a_a.first < a_b.first; });
 
-			cr_actors actors{};
+			static cr_actors actors;  // (34 KB: not on the stack)
+			std::memset(&actors, 0, sizeof(actors));
 			actors.frame = ++s.actorFrame;
 			for (const auto& [distance, actor] : nearby) {
 				if (actors.count >= CR_ACTORS_MAX) {
@@ -435,7 +438,15 @@ namespace chiefrim::Combat
 				out.heading = actor->GetAngleZ();
 				out.height = std::clamp(actor->GetHeight(), 20.0f, 2000.0f);
 				out.head = HeadHeight(actor, position);
+				if (!actor->IsDead()) {
+					const auto count = Hitbox::Collect(actor, actors.hitboxes + actors.hitbox_count,
+						std::min(CR_HITBOXES_PER_ACTOR, CR_HITBOXES_MAX - actors.hitbox_count));
+					out.hitbox_first = static_cast<std::uint16_t>(actors.hitbox_count);
+					out.hitbox_count = static_cast<std::uint16_t>(count);
+					actors.hitbox_count += count;
+				}
 			}
+			Hitbox::EndFrame();
 			Link::Get().SendActors(actors);
 		}
 

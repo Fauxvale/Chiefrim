@@ -77,6 +77,13 @@ void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 
 void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while linked */
 boolean chiefrim_object_is_proxy(long object_index);   /* a proxy of one of Skyrim's people */
 void chiefrim_proxy_struck(long object_index, real_point3d const *point, long damage_definition_index); /* projectiles.c: a projectile hit a proxy */
+/* a proxy with its actor's hit shapes (protocol 18) is hit on those, not on its biped:
+collisions.c's object_test_vector (shots, melee): TRUE, FALSE, or NONE (not such a proxy);
+objects.c: its bounding sphere holds them; damage.c: an explosion's distance is to them */
+struct collision_result;
+long chiefrim_proxy_test_vector(long object_index, real_point3d const *point, real_vector3d const *vector, struct collision_result *collision);
+void chiefrim_proxy_bounds(long object_index, real_point3d *center, real *radius);
+void chiefrim_proxy_area_distance(long object_index, real_point3d const *epicenter, real *distance);
 boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
 void chiefrim_combat_forget(void);                     /* Halo's game state went back */
 void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
