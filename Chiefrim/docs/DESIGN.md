@@ -673,7 +673,11 @@ using the camera Skyrim is about to use. It draws three layers:
   chains with SSE Display Tweaks') sends the screen size each frame, uploads Halo's newest frame
   into a dynamic texture and draws it over the picture, only in gameplay (no menu, loading screen
   or console; the same test as input routing) and only while Halo keeps publishing (hidden after
-  500 ms without a frame). `[Overlay] bEnabled` turns it off. The HLSL is compiled at start
+  500 ms without a frame). `[Overlay] bEnabled` turns it off. **Under Skyrim's HUD (Phase 5,
+  `[Overlay] bUnderSkyrimMenus`):** the layers are drawn as the frame's first Skyrim menu draws
+  (`IMenu::PostDisplay`, vtable slot 6, patched per menu class as each opens; menus draw lowest
+  first), so the HUD's prompts, subtitles, compass and notifications, mods' widgets and any menu
+  are over Halo's weapon and HUD. Present draws them in a frame no menu drew in. In game: to check. The HLSL is compiled at start
   (`d3dcompiler_47`): checked under Proton Experimental with DXVK, where its blend gives the
   expected pixels for opaque, half-covered, additive and empty texels.
 - **Still to come:** the zoom screen effect's tints on Skyrim's picture (night vision); checking

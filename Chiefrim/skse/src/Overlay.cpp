@@ -16,7 +16,15 @@ namespace chiefrim::Overlay
 		constexpr ULONGLONG kStaleMs = 500;
 
 		using PresentFn = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
-		PresentFn originalPresent = nullptr;
+		PresentFn       originalPresent = nullptr;
+		IDXGISwapChain* swapChain = nullptr;
+
+		// Under Skyrim's menus ([Overlay] bUnderSkyrimMenus): Halo's layers
+		// are drawn as the first of Skyrim's menus draws (IMenu::PostDisplay,
+		// lowest first), so the HUD's prompts, subtitles and compass, and
+		// any menu over them, are on top. Present draws them when no menu
+		// drew in a frame.
+		bool composited = false;  // this frame, under the menus
 
 		// One of Halo's pictures, as a texture.
 		struct Layer
@@ -623,10 +631,117 @@ float4 PSWorld(VSOut i) : SV_Target
 		HRESULT WINAPI PresentHook(IDXGISwapChain* a_swapChain, UINT a_sync, UINT a_flags)
 		{
 			try {
-				Composite(a_swapChain);
+				if (!std::exchange(composited, false)) {
+					Composite(a_swapChain);
+				}
 			} catch (...) {
 			}
 			return originalPresent(a_swapChain, a_sync, a_flags);
+		}
+
+		bool UnderMenus()
+		{
+			static const bool value = Settings::ReadBool(L"Overlay", L"bUnderSkyrimMenus", true);
+			return value;
+		}
+
+		// ---- under Skyrim's menus -----------------------------------------
+
+		// IMenu::PostDisplay (vtable slot 6) draws a menu's movie. Each menu
+		// class's slot is patched once, as one of them opens; what was there
+		// (another mod's hook, or Skyrim's own) is called after.
+		using PostDisplayFn = void (*)(RE::IMenu*);
+		constexpr std::size_t kPostDisplaySlot = 6;
+
+		struct MenuClass
+		{
+			void**        vtable = nullptr;
+			PostDisplayFn original = nullptr;
+		};
+		std::mutex             menuClassesLock;
+		std::vector<MenuClass> menuClasses;
+
+		void PostDisplayHook(RE::IMenu* a_menu)
+		{
+			auto**        vtable = *reinterpret_cast<void***>(a_menu);
+			PostDisplayFn original = nullptr;
+			{
+				std::scoped_lock lock(menuClassesLock);
+				for (const auto& entry : menuClasses) {
+					if (entry.vtable == vtable) {
+						original = entry.original;
+						break;
+					}
+				}
+			}
+			if (!composited && swapChain) {
+				composited = true;  // the frame's first menu: Halo's layers under it
+				try {
+					Composite(swapChain);
+				} catch (...) {
+				}
+			}
+			if (original) {
+				original(a_menu);
+			}
+		}
+
+		void HookMenu(RE::IMenu* a_menu, std::string_view a_name)
+		{
+			if (!a_menu) {
+				return;
+			}
+			auto**           vtable = *reinterpret_cast<void***>(a_menu);
+			std::scoped_lock lock(menuClassesLock);
+			for (const auto& entry : menuClasses) {
+				if (entry.vtable == vtable) {
+					return;
+				}
+			}
+			auto* slot = &vtable[kPostDisplaySlot];
+			if (*slot == reinterpret_cast<void*>(&PostDisplayHook)) {
+				return;
+			}
+			menuClasses.push_back({ vtable, reinterpret_cast<PostDisplayFn>(*slot) });
+			DWORD oldProtect = 0;
+			::VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect);
+			*slot = reinterpret_cast<void*>(&PostDisplayHook);
+			::VirtualProtect(slot, sizeof(void*), oldProtect, &oldProtect);
+			logger::info("overlay: Halo's layers go under {} (and any menu of its kind)", a_name);
+		}
+
+		class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		{
+		public:
+			static MenuSink* Get()
+			{
+				static MenuSink sink;
+				return &sink;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+			{
+				if (a_event && a_event->opening) {
+					if (auto* ui = RE::UI::GetSingleton()) {
+						const std::string_view name{ a_event->menuName.c_str() };
+						HookMenu(ui->GetMenu(name).get(), name);
+					}
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		void HookMenus()
+		{
+			auto* ui = RE::UI::GetSingleton();
+			if (!UnderMenus() || !Enabled() || !ui) {
+				logger::info("overlay: Halo's layers over Skyrim's menus (at Present)");
+				return;
+			}
+			for (auto& menu : ui->menuStack) {
+				HookMenu(menu.get(), "an open menu");
+			}
+			ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuSink::Get());
 		}
 
 		// ---- inside Skyrim's frame: the camera out, the depth in ----------
@@ -816,7 +931,7 @@ float4 PSWorld(VSOut i) : SV_Target
 	void Install()
 	{
 		auto* window = RE::BSGraphics::Renderer::GetCurrentRenderWindow();
-		auto* swapChain = window ? reinterpret_cast<IDXGISwapChain*>(window->swapChain) : nullptr;
+		swapChain = window ? reinterpret_cast<IDXGISwapChain*>(window->swapChain) : nullptr;
 		if (!swapChain) {
 			logger::error("overlay: no swap chain yet; Halo's layers won't show");
 			return;
@@ -831,5 +946,6 @@ float4 PSWorld(VSOut i) : SV_Target
 		::VirtualProtect(&vtable[8], sizeof(void*), oldProtect, &oldProtect);
 		logger::info("overlay: Present hooked ({})", Enabled() ? "on" : "off: [Overlay] bEnabled=0");
 		HookRenderWorld();
+		HookMenus();
 	}
 }
