@@ -709,7 +709,12 @@ as in Halo.
   and read back with form IDs resolved (a plugin gone takes its caches). So a cache never moves, a
   site never rolls again, and a taken one stays taken.
 - **Laid down:** the untaken caches within `fSendRadius` (2500, about the collision's reach) go to
-  Halo (`CR_MSG_CACHE_PLACE`: on a chest's lid, before a rack), every 5 s, for the world Halo is in
+  Halo (`CR_MSG_CACHE_PLACE`), every 5 s, on the floor beside the chest (2026-10-09: on its lid it
+  relied on Halo's collision having the lid, and in game a plasma rifle fell inside a chest, found
+  only by its prompt): the plugin tries 8 points around it at its bound's reach, the player's side
+  first, and takes the first with nothing but the chest between it and the chest's middle (Skyrim's
+  physics, cast from outside) and floor under it within 40 units of the chest's foot (a wall rack:
+  any floor below); for the world Halo is in
   (the generation; a new world erases Halo's loose objects, and the next sends lay them down
   again). Halo drops each onto what lies below once its collision has it, keeps one per cache a
   world, and reports it taken (`CR_MSG_CACHE_TAKEN`) when Chief holds it.

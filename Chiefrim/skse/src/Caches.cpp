@@ -284,7 +284,49 @@ namespace chiefrim::Caches
 		}
 
 		// Where the weapon lies: on a chest's lid, before a rack
-		bool Place(RE::TESObjectREFR* a_anchor, cr_vec3& a_position, float& a_yaw)
+		struct Hit
+		{
+			bool                hit = false;
+			float               fraction = 1.0f;
+			RE::TESObjectREFR*  ref = nullptr;
+		};
+
+		// Skyrim's own physics along from -> to (what Chief's shots would meet)
+		Hit Ray(RE::PlayerCharacter* a_player, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
+		{
+			Hit   result;
+			auto* cell = a_player->GetParentCell();
+			auto* world = cell ? cell->GetbhkWorld() : nullptr;
+			if (!world) {
+				return result;
+			}
+			const float scale = RE::bhkWorld::GetWorldScale();
+			RE::bhkPickData pick{};
+			pick.rayInput.from = RE::hkVector4(a_from.x * scale, a_from.y * scale, a_from.z * scale, 0.0f);
+			pick.rayInput.to = RE::hkVector4(a_to.x * scale, a_to.y * scale, a_to.z * scale, 0.0f);
+			RE::CFilter filter{};
+			a_player->GetCollisionFilterInfo(filter);  // its group: the player's own capsule isn't hit
+			filter.SetCollisionLayer(RE::COL_LAYER::kLOS);
+			pick.rayInput.filterInfo = filter;
+			{
+				RE::BSReadLockGuard lock(world->worldLock);
+				world->PickObject(pick);
+			}
+			if (pick.rayOutput.HasHit()) {
+				result.hit = true;
+				result.fraction = std::clamp(pick.rayOutput.hitFraction, 0.0f, 1.0f);
+				result.ref = pick.rayOutput.rootCollidable ? RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable) : nullptr;
+			}
+			return result;
+		}
+
+		// Where the weapon lies: on the floor beside its chest (or before its
+		// rack), where it can be seen. On a chest's lid it relied on Halo's
+		// collision having the lid, and in game one fell inside the chest, seen
+		// only by its prompt. Points around it, the side towards the player
+		// first: one with floor under it near the chest's foot, and nothing
+		// between it and the chest (a wall it stands against).
+		bool Place(RE::PlayerCharacter* a_player, RE::TESObjectREFR* a_anchor, cr_vec3& a_position, float& a_yaw)
 		{
 			auto* model = a_anchor->Get3D();
 			if (!model) {
@@ -292,15 +334,42 @@ namespace chiefrim::Caches
 			}
 			const auto& bound = model->worldBound;
 			const float angle = a_anchor->GetAngleZ();
-			RE::NiPoint3 at = bound.center;
-			if (ModelOf(a_anchor->GetBaseObject()).find("weaponrack") != std::string::npos) {
-				at = a_anchor->GetPosition() + RE::NiPoint3{ std::sin(angle), std::cos(angle), 0.0f } * 30.0f;
-				at.z = bound.center.z;  // falls to the floor before it
-			} else {
-				at.z = bound.center.z + bound.radius * 0.6f;  // falls onto the lid
+			const auto  foot = a_anchor->GetPosition();
+			const bool  rack = ModelOf(a_anchor->GetBaseObject()).find("weaponrack") != std::string::npos;  // on a wall: the floor below it
+			const float reach = std::clamp(bound.radius, 20.0f, 120.0f) + 12.0f;
+			const float height = std::max(bound.center.z - foot.z, 20.0f);  // above the floor, inside the chest's height
+			a_yaw = std::numbers::pi_v<float> / 2.0f - angle;               // Skyrim's angle is clockwise from +y
+
+			RE::NiPoint3 toward = a_player->GetPosition() - foot;
+			toward.z = 0.0f;
+			const float first = toward.Length() > 1.0f ? std::atan2(toward.x, toward.y) : angle;  // Skyrim's angles: from +y
+			for (int i = 0; i < 8; ++i) {
+				// 0, +45, -45, +90, -90 ... degrees from the player's side
+				const float turn = (i + 1) / 2 * (std::numbers::pi_v<float> / 4.0f) * (i % 2 ? 1.0f : -1.0f);
+				const float a = first + turn;
+				const RE::NiPoint3 side{ std::sin(a), std::cos(a), 0.0f };
+				const RE::NiPoint3 at = RE::NiPoint3{ foot.x, foot.y, foot.z + height } + side * reach;
+				// nothing but the chest itself between there and its middle (cast
+				// from outside: a ray from inside the chest sees only the chest)
+				const auto across = Ray(a_player, at, RE::NiPoint3{ foot.x, foot.y, foot.z + height });
+				if (across.hit && across.ref != a_anchor) {
+					continue;
+				}
+				// floor under it, near the chest's foot, and not the chest
+				const RE::NiPoint3 below = at - RE::NiPoint3{ 0.0f, 0.0f, height + (rack ? 250.0f : 60.0f) };
+				const auto down = Ray(a_player, at, below);
+				if (!down.hit || down.ref == a_anchor) {
+					continue;
+				}
+				const float floor = at.z + (below.z - at.z) * down.fraction;
+				if (!rack && std::fabs(floor - foot.z) > 40.0f) {
+					continue;  // a step or a hole: not beside it
+				}
+				a_position = { at.x, at.y, floor + 25.0f };  // Halo drops it onto that floor
+				return true;
 			}
-			a_position = { at.x, at.y, at.z };
-			a_yaw = std::numbers::pi_v<float> / 2.0f - angle;  // Skyrim's angle is clockwise from +y
+			// nowhere beside it: above it, as before
+			a_position = { bound.center.x, bound.center.y, bound.center.z + bound.radius };
 			return true;
 		}
 
@@ -336,7 +405,7 @@ namespace chiefrim::Caches
 					continue;
 				}
 				cr_msg_cache_place message{};
-				if (!Place(anchor, message.position, message.yaw)) {
+				if (!Place(a_player, anchor, message.position, message.yaw)) {
 					continue;
 				}
 				message.id = id;
