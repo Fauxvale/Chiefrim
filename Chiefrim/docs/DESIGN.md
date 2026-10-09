@@ -581,7 +581,8 @@ and facing every tick.
   down at it, never aiming level over it (the biped took every round there); a person's head
   shot with the pistol is a headshot; a grenade by the wolf reaches it. `CHIEFRIM_SHOW_PROXIES`
   draws the biped; the console's `chiefrim shapes` draws the shapes (§11). The plugin's log names the first actors' shapes
-  (`hitbox: <name>: N shapes from M of its bodies`, or `from its bounds`).
+  (`hitbox: <name>: N shapes from M of its bodies`, or `from its bounds`). Verified in game
+  (2026-10-08): people, a giant, a horse, a mammoth and a dragon.
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.
@@ -938,7 +939,7 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
     Halo; a `render.c` hook, Halo's own debug lines).
   Offline (`fake_skyrim.py --list-weapons-at`, `--give-name`, `--shapes`): the list, a shotgun and
   a needler given by name (any case), an unknown name refused; the wolf's and the person's shapes
-  drawn where they stand. In game: to check.
+  drawn where they stand. Verified in game (2026-10-08).
 - **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
   stamina and the crosshair, because Halo's HUD replaces them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.
@@ -974,7 +975,7 @@ Each phase ends in something you can play.
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: done (2026-10-06), verified in game:** Skyrim's HUD and light on Halo's objects (§9); the hand-off to Skyrim's furniture, beds, mounts, scenes and swimming (§11; beast forms verified 2026-10-07); load doors, interiors and fast travel (a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). The one crash in testing was MaxsuCombatEscape's (combat pathing run inside a cell change; it crashes the same way without Chiefrim). |
-| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures (**built 2026-10-08, checked offline**, §8.1: each actor's own hit shapes, protocol 18; in game to check), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
+| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
 ## 13. Decisions
