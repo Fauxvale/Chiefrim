@@ -808,6 +808,16 @@ using the camera Skyrim is about to use. It draws three layers:
   a torch), its largest part 1; its strength stays the alpha's. From the logged light: afternoon
   (1.0 0.93 0.80), a blue dusk (0.50 0.86 1.0), a grey day near white. Offline (`fake_skyrim.py
   --sun-color`): the MA5B's barrel white under a white sun, copper under an orange one.
+- **Shade dims the shine; a roof dims the sky (Phase 5, 2026-10-08, protocol 22).** In game the
+  pistol's slide shone as bright under a building as in the sun, though the log had the sun 0%
+  seen: the reflection's strength counted the ambient in full, and Skyrim's daylight sky alone
+  (~0.5) made it the most it goes. Its strength is now the light shining on it straight (the
+  key, a torch) and a third of the ambient's, as Halo's follows its lightmap's direct light; in
+  the open sun it is still the most. And under a roof the sky's light is blocked too: the plugin
+  casts five rays up from the eye (straight up and four 45 degrees off it, 3000 units) and sends
+  how many are open (`cr_msg_lighting.sky_visible`); Chief's ambient and sky fill go down to 0.4
+  of themselves with none open. Halo's other objects cast one ray up through the collision BSP.
+  Offline (`fake_skyrim.py --sky-visible`), the M6D: 30 in the sun, 12 in shade, 7 under a roof.
 - **Matched to Skyrim's weather (Phase 5, 2026-10-08, protocol 21).** The first in-game look found
   Chief's weapon the wrong colour (none of dusk's warmth or night's blue) and too bright at night
   and in shade. Skyrim's light was there; two things weren't:

@@ -18,6 +18,7 @@ namespace chiefrim::Lighting
 			bool  shadows = true;          // [Lighting] bShadows: the sun's, on Halo's objects
 			float shadowReach = 16384.0f;  // how far towards the sun a shadow's caster is looked for
 			float shadowSpread = 12.0f;    // the rays around the eye, apart
+			float skyReach = 3000.0f;      // how far up a roof over the eye is looked for
 		} config;
 
 		// Chief's flashlight: a point light of Skyrim's (its renderer has no
@@ -35,6 +36,7 @@ namespace chiefrim::Lighting
 		ULONGLONG next = 0;
 		float     reportedLevel = -1.0f;  // the brightness last logged
 		bool      reportedShade = false;  // and whether Chief was in shade
+		bool      reportedRoof = false;   // and under a roof
 		std::uint32_t reportedPoints = 0; // and how many point lights reached him
 		ULONGLONG nextReport = 0;
 
@@ -85,6 +87,20 @@ namespace chiefrim::Lighting
 				lit += RayFraction(a_player, from, from + towards * config.shadowReach) >= 1.0f;
 			}
 			return static_cast<float>(lit) / static_cast<float>(offsets.size());
+		}
+
+		// How much of the sky is open over the eye: rays straight up and four
+		// 45 degrees from it, around (a roof, an overhang, a cliff's lip)
+		float SkyVisible(RE::PlayerCharacter* a_player, const RE::NiPoint3& a_eye)
+		{
+			constexpr float slant = 0.7071f;
+			const std::array ways{ RE::NiPoint3{ 0.0f, 0.0f, 1.0f }, RE::NiPoint3{ slant, 0.0f, slant }, RE::NiPoint3{ -slant, 0.0f, slant },
+				RE::NiPoint3{ 0.0f, slant, slant }, RE::NiPoint3{ 0.0f, -slant, slant } };
+			int open = 0;
+			for (const auto& way : ways) {
+				open += RayFraction(a_player, a_eye, a_eye + way * config.skyReach) >= 1.0f;
+			}
+			return static_cast<float>(open) / static_cast<float>(ways.size());
 		}
 		cr_vec3 Color(const RE::NiColor& a_color, float a_scale) { return { a_color.red * a_scale, a_color.green * a_scale, a_color.blue * a_scale }; }
 
@@ -194,6 +210,12 @@ namespace chiefrim::Lighting
 		// The key light: the sun or moon outside, the cell's directional light inside.
 		message.key_direction = { 0.0f, 0.0f, -1.0f };
 		message.sun_visible = 1.0f;
+		message.sky_visible = 1.0f;
+		if (auto* cell = a_player->GetParentCell(); config.shadows && cell && !cell->IsInteriorCell()) {
+			if (auto* camera = RE::Main::WorldRootCamera()) {
+				message.sky_visible = SkyVisible(a_player, camera->world.translate);
+			}
+		}
 		if (auto* sun = runtime.sunLight; sun && sun->light) {
 			const auto& data = sun->light->GetLightRuntimeData();
 			message.key_color = Color(data.diffuse, data.fade * config.scale);
@@ -223,17 +245,19 @@ namespace chiefrim::Lighting
 		}
 		// logged at first and when it changes a lot (a door, nightfall, a torch), every 5 s at most
 		const bool  shade = message.key_shadowed && message.sun_visible < 0.5f;
+		const bool  roofed = message.key_shadowed && message.sky_visible < 0.5f;
 		const float level = (message.ambient.x + message.ambient.y + message.ambient.z + message.key_color.x + message.key_color.y + message.key_color.z) / 3.0f;
-		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f) || shade != reportedShade ||
+		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f) || shade != reportedShade || roofed != reportedRoof ||
 							   message.point_count != reportedPoints)) {
 			reportedLevel = level;
 			reportedPoints = message.point_count;
 			reportedShade = shade;
+			reportedRoof = roofed;
 			nextReport = now + 5000;
 			logger::info("lighting: Halo's objects lit by Skyrim's: ambient ({:.2f} {:.2f} {:.2f}), key ({:.2f} {:.2f} {:.2f}) towards ({:.2f} {:.2f} {:.2f}), {} point lights near (of {} on){}, {}",
 				message.ambient.x, message.ambient.y, message.ambient.z, message.key_color.x, message.key_color.y, message.key_color.z,
 				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count, activeCount, Describe(message, a_player->GetPosition()),
-				!message.key_shadowed ? "no shadows (inside)" : std::format("the sun {:.0f}% seen", message.sun_visible * 100.0f));
+				!message.key_shadowed ? "no shadows (inside)" : std::format("the sun {:.0f}% seen, the sky {:.0f}% open", message.sun_visible * 100.0f, message.sky_visible * 100.0f));
 		}
 	}
 }

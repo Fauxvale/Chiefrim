@@ -59,25 +59,55 @@ void chiefrim_lighting_forget(void)
 the collision BSP's reach (iRadius 2 rings of 1024 units, ~12 world units) */
 #define CHIEFRIM_SHADOW_REACH 40.f
 
-/* How much of the key light reaches the object: 1 inside (an interior's
-directional light casts no shadows) */
-static real chiefrim_key_visible(long object_index, struct object_datum const *object, real_vector3d const *key)
+/* under a roof (no sky over it), the share of the sky's light an object
+still gets: what comes in sideways, and off the ground */
+#define CHIEFRIM_ROOFED_AMBIENT 0.4f
+/* how high a roof over an object is looked for (~2100 Skyrim units) */
+#define CHIEFRIM_ROOF_REACH 10.f
+
+/* Chief, or what he holds (his arms and weapon take his lighting): Skyrim
+tested his eye's way to the sun and the sky */
+static boolean chiefrim_is_chiefs(long object_index, struct object_datum const *object)
 {
-	cr_msg_lighting const *light = &chiefrim_lighting.light;
-	struct collision_result collision;
-	real_point3d from;
-	real_vector3d towards;
 	long root = object_index, chief = chiefrim_local_unit();
 	struct object_datum const *parent = object;
 
-	if (!light->key_shadowed)
-		return 1.f;
 	while (parent->object.parent_object_index != NONE)
 	{
 		root = parent->object.parent_object_index;
 		parent = object_get(root);
 	}
-	if (root == chief && chief != NONE)
+	return root == chief && chief != NONE;
+}
+
+/* How much of the sky is open over the object (1 inside: the cell's
+ambient). Others than Chief's: one ray straight up through the collision BSP */
+static real chiefrim_sky_visible(long object_index, struct object_datum const *object, boolean chiefs)
+{
+	cr_msg_lighting const *light = &chiefrim_lighting.light;
+	struct collision_result collision;
+	real_vector3d up = { 0.f, 0.f, CHIEFRIM_ROOF_REACH };
+
+	if (!light->key_shadowed)
+		return 1.f;
+	if (chiefs)
+		return PIN(light->sky_visible, 0.f, 1.f);
+	return collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_back_facing_surfaces_bit), &object->object.bounding_sphere_center, &up, object_index, &collision) ? 0.f : 1.f;
+}
+
+/* How much of the key light reaches the object: 1 inside (an interior's
+directional light casts no shadows) */
+static real chiefrim_key_visible(long object_index, struct object_datum const *object, real_vector3d const *key, boolean chiefs)
+{
+	cr_msg_lighting const *light = &chiefrim_lighting.light;
+	struct collision_result collision;
+	real_point3d from;
+	real_vector3d towards;
+
+	if (!light->key_shadowed)
+		return 1.f;
+	if (chiefs)
 		return PIN(light->sun_visible, 0.f, 1.f);
 	/* from its centre, a little towards the sun: past its own surface */
 	from = object->object.bounding_sphere_center;
@@ -112,6 +142,8 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	long point, best_point = NONE;
 	real_vector3d key;
 	real_rgb_color torch;
+	real sky;
+	boolean chiefs;
 
 	if (!chiefrim_active() || !chiefrim_lighting.valid || !chiefrim_world_origin(&origin))
 		return FALSE;
@@ -124,7 +156,10 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 
 	memset(lighting, 0, sizeof(*lighting));
 	lighting->distant_light_count = 2;
-	chiefrim_rgb(&lighting->ambient_color, light->ambient, 1.f);
+	chiefs = chiefrim_is_chiefs(object_index, object);
+	/* the sky's light, less under a roof */
+	sky = CHIEFRIM_ROOFED_AMBIENT + (1.f - CHIEFRIM_ROOFED_AMBIENT) * chiefrim_sky_visible(object_index, object, chiefs);
+	chiefrim_rgb(&lighting->ambient_color, light->ambient, sky);
 
 	key.i = light->key_direction.x;
 	key.j = light->key_direction.y;
@@ -135,11 +170,11 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		key.j = 0.f;
 		key.k = -1.f;
 	}
-	chiefrim_rgb(&lighting->distant_lights[0].color, light->key_color, chiefrim_key_visible(object_index, object, &key));
+	chiefrim_rgb(&lighting->distant_lights[0].color, light->key_color, chiefrim_key_visible(object_index, object, &key, chiefs));
 	lighting->distant_lights[0].direction = key;
 
 	/* the fill: the sky's light from above, unless a point light is stronger */
-	chiefrim_rgb(&lighting->distant_lights[1].color, light->ambient_up, 1.f);
+	chiefrim_rgb(&lighting->distant_lights[1].color, light->ambient_up, sky);
 	lighting->distant_lights[1].direction.i = 0.f;
 	lighting->distant_lights[1].direction.j = 0.f;
 	lighting->distant_lights[1].direction.k = -1.f;
@@ -191,8 +226,13 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	memset(&torch, 0, sizeof(torch));
 	if (best_point != NONE)
 		torch = lighting->distant_lights[1].color;
-	brightness = chiefrim_luminance(&lighting->ambient_color) +
-		0.5f * (chiefrim_luminance(&lighting->distant_lights[0].color) + chiefrim_luminance(&torch));
+	/* its strength by the light shining on it straight, the sun's and a
+	torch's, as Halo's by its lightmap's: with the ambient's in full,
+	Skyrim's daylight sky alone (~0.5) made it the most it goes, and the
+	pistol's slide shone as bright in a building's shade as in the sun (the
+	first in-game look) */
+	brightness = chiefrim_luminance(&lighting->distant_lights[0].color) + chiefrim_luminance(&torch) +
+		0.35f * chiefrim_luminance(&lighting->ambient_color);
 	lighting->reflection_tint_color.alpha = PIN(brightness * 1.5f + 0.25f, 0.f, 1.f);
 	/* tinted by the colour of the light that reaches it, the sun's or moon's
 	(past what shades it), the sky's and a torch's: their hue, its largest

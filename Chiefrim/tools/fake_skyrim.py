@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 21
+VERSION = 22
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -526,6 +526,8 @@ def main():
                         help="with --light: a point light 'dx,dy,dz,reach,r,g,b' from the start (Skyrim units), as a torch on a wall")
     parser.add_argument("--sun-visible", type=float, default=-1.0,
                         help="with --light: shadows on (protocol 21), and this much of the sun reaches Chief's eye (0..1)")
+    parser.add_argument("--sky-visible", type=float, default=1.0,
+                        help="with --sun-visible: how much of the sky is open over Chief's eye (0: under a roof)")
     parser.add_argument("--sun-visible-to", type=float, default=-1.0, help="with --sun-visible: this from --sun-visible-at seconds in")
     parser.add_argument("--sun-visible-at", type=float, default=10.0)
     parser.add_argument("--roof", type=float, default=0.0,
@@ -784,7 +786,7 @@ def main():
                                                                   0.3, 0.4, -0.866, 1 if options.torch else 0)
                           + (struct.pack("<3ff3f", options.x + torch[0], options.y + torch[1], options.z + torch[2], *torch[3:7])
                              if options.torch else b"") + bytes(4 * 28 - (28 if options.torch else 0))
-                          + struct.pack("<If", 1 if seen >= 0.0 else 0, max(seen, 0.0)))
+                          + struct.pack("<Iff", 1 if seen >= 0.0 else 0, max(seen, 0.0), options.sky_visible if seen >= 0.0 else 1.0))
             if options.key_names and not drive_state.get("named"):
                 # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
                 names = options.key_names.split(",") + [""] * 12
