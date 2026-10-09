@@ -355,7 +355,15 @@ definition comes from that map. Chiefrim loads one **host map**.
   actor dies, however: Skyrim lists the newly dead for 3 s (`CR_ACTOR_DEAD`), and the proxy dies
   Halo's way and lets go of its gun at once (a dying unit drops it partway through its death
   animation, and the proxy was deleted the next frame: the first in-game test saw grenades fall,
-  never a gun). Offline (`fake_skyrim.py --actor-dies-at`): the pistol and grenades on the ground. Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
+  never a gun). Offline (`fake_skyrim.py --actor-dies-at`): the pistol and grenades on the ground.
+  **Only people carry guns (Phase 5, 2026-10-09, protocol 26):** every wolf, rabbit and draugr
+  dropping a loaded gun was too generous. Skyrim flags an actor whose race has `ActorTypeNPC`
+  (00013794: the playable races, their vampires and children, dremora; `CR_ACTOR_PERSON`), and
+  only its proxy is armed as above. Any other's (in `Skyrim.esm`: animals, draugr, falmer,
+  skeletons, trolls, spriggans, giants, dragons, atronachs, Dwemer automatons) carries no gun and
+  1 or 2 grenades of a type at random (`CHIEFRIM_CREATURE_GRENADES`). Offline (`--actor-shape
+  wolf --actor-dies-at`): a creature's proxy with no gun and 1 frag grenade; a person's with a
+  plasma pistol and 4 plasma grenades. Explosions (`CR_MSG_EXPLOSION`, a `damage.c` hook; only those that push objects in Halo) throw
   Skyrim's loose dynamic bodies up and away, up to `fPropLaunchSpeed` m/s at the centre. In Chiefrim mode the level's background loops and acoustics are
   off (`scenario.c` hook): Skyrim has its own ambience. `tools/run_phase0.sh` takes `CHIEFRIM_MAP`. Merging tags from several maps is later
   work.
@@ -943,6 +951,15 @@ using the camera Skyrim is about to use. It draws three layers:
     arms and MA5B, none of the HUD; the shader compiles with Proton's `D3DCompile`.
     `[Grade] bEnabled`, `fStrength`, `fContrast`, `bFog`. In game (2026-10-08): the shadows
     follow the shade; the grade's contrast was too much (now 0.25 of it); the rest to check.
+  - **Chief's arms and weapon toned down (2026-10-09).** In game they were still too bright for
+    Skyrim's world: Halo's colours are saturated, and its chrome shines near white, where Skyrim's
+    tone map keeps its own highlights soft. Before the grade, on the weapon's pixels alone (the
+    mask above: not the HUD), the compositor takes the saturation to `fWeaponSaturation` (0.85),
+    rolls the highlights off above `fWeaponHighlights` (0.55, by luminance, keeping the hue:
+    Halo's white comes out at 0.83, an exponential shoulder), then scales by `fWeaponBrightness`
+    (0.8): Halo's whitest shine ends at about 0.67, a mid grey (0.5) at 0.4. All three at 1 is
+    Halo's own. The shader compiles with Proton's `D3DCompile` (vkd3d-shader); the look to check
+    in game.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo

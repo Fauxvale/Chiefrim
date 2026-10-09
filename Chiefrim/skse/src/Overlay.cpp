@@ -46,6 +46,7 @@ namespace chiefrim::Overlay
 			float fogNear[4];     // Skyrim's fog: the near colour, power
 			float fogFar[4];      // the far colour, the most it covers
 			float fogPlanes[4];   // where it starts and is full (Skyrim units), 1 if on
+			float look[4];        // Chief's arms and weapon: brightness, saturation, highlights' knee, 1 if on
 		};
 
 		// A camera Skyrim published, for mapping Halo's frame onto the camera
@@ -112,6 +113,7 @@ cbuffer Params : register(b0)
 {
 	float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4];
 	float4 grade; float4 tint; float4 fade; float4 fogNear; float4 fogFar; float4 fogPlanes;
+	float4 look;
 };
 Texture2D picture : register(t0);
 Texture2D<float> haloDepth : register(t1);
@@ -144,9 +146,29 @@ float4 Grade(float4 c, float a_share)
 	g = lerp(g, fade.rgb, fade.a);
 	return float4(lerp(c.rgb, saturate(g) * c.a, w), c.a);
 }
+// Chief's arms and weapon toned to Skyrim's world before its grade: Halo's
+// are bright, saturated and shine near white (its chrome), where Skyrim's
+// tone map keeps its own highlights soft. The saturation, then the
+// highlights rolled off above the knee (by luminance, keeping the hue), then
+// the brightness; by the amount a_share of the pixel that is the weapon.
+float4 Look(float4 c, float a_share)
+{
+	if (look.w <= 0 || a_share <= 0 || c.a <= 0.002)
+		return c;
+	float3 u = c.rgb / c.a;
+	float  luminance = dot(u, float3(0.2125, 0.7154, 0.0721));
+	float3 g = max(lerp(luminance.xxx, u, look.y), 0);
+	float  l = dot(g, float3(0.2125, 0.7154, 0.0721));
+	float  k = look.z, room = max(1 - k, 1e-3);
+	if (l > k)
+		g *= (k + room * (1 - exp(-(l - k) / room))) / l;
+	g *= look.x;
+	return float4(lerp(c.rgb, saturate(g) * c.a, a_share), c.a);
+}
 float4 PSScreen(VSOut i) : SV_Target
 {
-	return Grade(picture.Sample(linear_clamp, i.uv), weaponShare.Sample(linear_clamp, i.uv));
+	float share = weaponShare.Sample(linear_clamp, i.uv);
+	return Grade(Look(picture.Sample(linear_clamp, i.uv), share), share);
 }
 // Skyrim's view distance (along the view, Skyrim units) from its depth buffer.
 float SkyrimViewDepth(float d)
@@ -450,13 +472,20 @@ float4 PSWorld(VSOut i) : SV_Target
 			float strength = 1.0f;  // [Grade] fStrength
 			bool  fog = true;       // [Grade] bFog
 			float contrast = 0.25f; // [Grade] fContrast: how much of Skyrim's contrast
+			// Chief's arms and weapon, before the grade (the HUD isn't touched)
+			float weaponBrightness = 0.8f;   // [Grade] fWeaponBrightness
+			float weaponSaturation = 0.85f;  // [Grade] fWeaponSaturation
+			float weaponHighlights = 0.55f;  // [Grade] fWeaponHighlights: the knee highlights roll off above (1: none)
 		};
 
 		const GradeConfig& Grading()
 		{
 			static const GradeConfig config{ Settings::ReadBool(L"Grade", L"bEnabled", true),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fStrength", 1.0f), 0.0f, 1.0f), Settings::ReadBool(L"Grade", L"bFog", true),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fContrast", 0.25f), 0.0f, 1.0f) };
+				std::clamp(Settings::ReadFloat(L"Grade", L"fContrast", 0.25f), 0.0f, 1.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponBrightness", 0.8f), 0.0f, 2.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponSaturation", 0.85f), 0.0f, 2.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponHighlights", 0.55f), 0.0f, 1.0f) };
 			return config;
 		}
 
@@ -503,6 +532,10 @@ float4 PSWorld(VSOut i) : SV_Target
 			const auto& config = Grading();
 			a_params.grade[0] = a_params.grade[1] = a_params.grade[2] = 1.0f;
 			a_params.grade[3] = 0.0f;
+			a_params.look[0] = config.weaponBrightness;
+			a_params.look[1] = config.weaponSaturation;
+			a_params.look[2] = config.weaponHighlights;
+			a_params.look[3] = config.weaponBrightness != 1.0f || config.weaponSaturation != 1.0f || config.weaponHighlights < 1.0f ? 1.0f : 0.0f;
 			if (!config.enabled) {
 				return;
 			}
