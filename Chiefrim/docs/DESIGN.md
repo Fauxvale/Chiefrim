@@ -609,8 +609,14 @@ and facing every tick.
   VM's attached scripts: not every wall a bullet strikes), gets the player's hit as Skyrim raises
   its own (`TESHitEvent` through `ScriptEventSourceHolder`), with the torch as its weapon
   (`bShotsIgnite`): oil and gas catch fire from a bullet, plasma or a grenade. People aren't: they
-  are hit through their proxies. `[Combat] bShotsHitObjects`, `bShotsIgnite`. In game: to check
-  (the log names the first scripted objects hit).
+  are hit through their proxies. `[Combat] bShotsHitObjects`, `bShotsIgnite`. In game
+  (2026-10-08): lamps fell and tripwires went off; oil pools shot directly didn't light. An oil
+  pool lights by its own `damageObject(5.0)` (in `gasExplode`) taking it to its burning stage; the
+  plugin's own damage before the hit (as on a web) didn't register on it (health 100 -> 100: its
+  first stage caps damage). Now a scripted destructible gets no damage from the plugin (it destroys
+  itself), and with `bShotsIgnite` scripted objects also get a fire effect applied
+  (`TESMagicEffectApplyEvent`: Papyrus's `OnMagicEffectApply`, with Firebolt's `FireDamageFFAimed`,
+  00012F03, in `TrapGasOnMagicEffectApply` and with `MagicDamageFire`), as Flames lights one.
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.

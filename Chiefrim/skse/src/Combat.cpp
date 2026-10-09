@@ -43,6 +43,10 @@ namespace chiefrim::Combat
 		// Skyrim's torch: the traps that burn (TrapExplosiveGas, and TrapOilPool
 		// after it) take a hit with it as a flame's (akWeapon == torch01)
 		constexpr RE::FormID kTorch = 0x0001D4EC;
+		// Firebolt's effect (FireDamageFFAimed: MagicDamageFire, and in
+		// TrapGasOnMagicEffectApply): an oil pool's script (TrapOilPool) lights
+		// from a fire effect applied to it, as from Flames
+		constexpr RE::FormID kFireEffect = 0x00012F03;
 
 		// The object has a script of its own: something may listen for its hits
 		bool Scripted(RE::TESObjectREFR* a_ref)
@@ -73,11 +77,20 @@ namespace chiefrim::Combat
 			}
 			RE::TESHitEvent hit{ a_ref, player, config.ignite ? kTorch : 0u, 0u, RE::TESHitEvent::Flag::kNone };
 			events->SendEvent(&hit);
+			if (config.ignite) {
+				// and a fire effect on it: oil pools light from that (the hit by the
+				// torch alone didn't light one in game)
+				RE::TESMagicEffectApplyEvent burn{};
+				burn.target.reset(a_ref);
+				burn.caster.reset(player);
+				burn.magicEffect = kFireEffect;
+				events->SendEvent(&burn);
+			}
 			static int logged = 0;
 			if (logged++ < 20) {
 				auto* base = a_ref->GetBaseObject();
 				logger::info("combat: Chief's hit on scripted {:08X} (base {:08X}){}", a_ref->GetFormID(), base ? base->GetFormID() : 0u,
-					config.ignite ? ", as a flame's" : "");
+					config.ignite ? ", as a flame's, and a fire effect" : "");
 			}
 		}
 
@@ -890,7 +903,7 @@ namespace chiefrim::Combat
 		});
 		// (out of the loop: a hit's scripts and a destruction may change the cell's references)
 		for (const auto& [ref, closeness] : hurt) {
-			if (ShootThrough(ref)) {
+			if (ShootThrough(ref) && !Scripted(ref)) {  // a scripted one destroys itself (an oil pool as it lights)
 				DamageObject(ref, config.blastObjectDamage * closeness);
 			}
 			HitObject(ref);  // a lamp falls, oil and gas burn
@@ -923,7 +936,7 @@ namespace chiefrim::Combat
 		if (!ref || ref->As<RE::Actor>()) {
 			return;  // people are hit through their proxies
 		}
-		if (ShootThrough(ref)) {
+		if (ShootThrough(ref) && !Scripted(ref)) {  // a scripted one destroys itself (an oil pool as it lights)
 			DamageObject(ref, config.objectDamage);
 		}
 		HitObject(ref);  // a lamp falls, oil and gas burn, a tripwire goes off
