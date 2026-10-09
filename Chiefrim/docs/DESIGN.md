@@ -693,7 +693,8 @@ as in Halo.
   fort's other chests stop one short of the limit to leave it a place. **Dungeons** (2026-10-09:
   heavy weapons in forts alone were too rare): a location with `LocTypeDungeon` (Nordic and Dwemer
   ruins, caves; a camp or fort in one is that) always counts, but only its boss chest, and only for a
-  heavy weapon, by `fDungeonHeavyChance` (0.15).
+  heavy weapon, by `fRuinHeavyChance` (0.2) in a Nordic or Dwemer ruin (`LocTypeDraugrCrypt`,
+  `LocTypeDwarvenAutomatons`) and `fDungeonHeavyChance` (0.15) in any other.
 - **Scarce ammunition (protocol 25):** a cache's weapon comes with its magazine loaded and a share of
   the spare rounds one in the map has (`cr_msg_cache_place.spare`, by its tier: `fLightSpare` 0.5,
   `fMediumSpare` 0.25, `fHeavySpare` 0); an energy weapon's battery is spent by 0.6 of what it falls

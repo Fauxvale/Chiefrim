@@ -19,6 +19,8 @@ namespace chiefrim::Caches
 		constexpr RE::FormID kMilitaryCamp = 0x000130E8;
 		constexpr RE::FormID kMilitaryFort = 0x000130E7;
 		constexpr RE::FormID kDungeon = 0x000130DB;  // Nordic and Dwemer ruins, caves, mines
+		constexpr RE::FormID kNordicRuin = 0x000130E2;  // LocTypeDraugrCrypt
+		constexpr RE::FormID kDwemerRuin = 0x000130E3;  // LocTypeDwarvenAutomatons
 		constexpr RE::FormID kBossContainer = 0x000130F8;
 
 		enum class Kind
@@ -44,6 +46,7 @@ namespace chiefrim::Caches
 			float                    mediumChance = 0.3f; // fMediumChance: a fort's cache is a medium weapon
 			float                    heavyChance = 0.6f;  // fHeavyChance: a fort's boss chest has a heavy one
 			float                    dungeonHeavyChance = 0.15f;  // fDungeonHeavyChance: a dungeon's boss chest has a heavy one
+			float                    ruinHeavyChance = 0.2f;      // fRuinHeavyChance: a Nordic or Dwemer ruin's
 			float                    spare[3] = { 0.5f, 0.25f, 0.0f };  // fLightSpare, fMediumSpare, fHeavySpare: spare rounds
 			int                      maxPerSite = 3;      // iMaxPerSite
 			float                    sendRadius = 2500.0f; // fSendRadius: Skyrim units; Halo's collision reaches ~2500
@@ -121,6 +124,17 @@ namespace chiefrim::Caches
 			// a camp or fort in a cave or ruin is that, not a dungeon
 			a_site = dungeon;
 			return dungeon ? Kind::kDungeon : Kind::kNone;
+		}
+
+		// a Nordic or Dwemer ruin (the location, or one it's in)
+		bool IsRuin(RE::BGSLocation* a_location)
+		{
+			for (auto* location = a_location; location; location = location->parentLoc) {
+				if (Has(location, kNordicRuin) || Has(location, kDwemerRuin)) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		const char* KindName(Kind a_kind)
@@ -216,7 +230,10 @@ namespace chiefrim::Caches
 				const bool boss = IsBossChest(anchor);
 				Tier       tier = Tier::kLight;
 				if (boss && (a_kind == Kind::kFort || a_kind == Kind::kDungeon)) {
-					if (Roll(rng) >= (a_kind == Kind::kFort ? config.heavyChance : config.dungeonHeavyChance)) {
+					const float chance = a_kind == Kind::kFort ? config.heavyChance :
+					                     IsRuin(a_site)        ? config.ruinHeavyChance :
+					                                             config.dungeonHeavyChance;
+					if (Roll(rng) >= chance) {
 						continue;
 					}
 					tier = Tier::kHeavy;
@@ -317,6 +334,7 @@ namespace chiefrim::Caches
 		config.heavyChance = Settings::ReadFloat(L"Caches", L"fHeavyChance", 0.6f);
 		config.maxPerSite = static_cast<int>(Settings::ReadFloat(L"Caches", L"iMaxPerSite", 3.0f));
 		config.dungeonHeavyChance = Settings::ReadFloat(L"Caches", L"fDungeonHeavyChance", 0.15f);
+		config.ruinHeavyChance = Settings::ReadFloat(L"Caches", L"fRuinHeavyChance", 0.2f);
 		config.spare[0] = std::clamp(Settings::ReadFloat(L"Caches", L"fLightSpare", 0.5f), 0.0f, 1.0f);
 		config.spare[1] = std::clamp(Settings::ReadFloat(L"Caches", L"fMediumSpare", 0.25f), 0.0f, 1.0f);
 		config.spare[2] = std::clamp(Settings::ReadFloat(L"Caches", L"fHeavySpare", 0.0f), 0.0f, 1.0f);
