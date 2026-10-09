@@ -142,6 +142,18 @@ namespace chiefrim::Caches
 			return a_kind == Kind::kFort ? "fort" : a_kind == Kind::kCamp ? "camp" : "dungeon";
 		}
 
+		bool Listed(const std::string& a_weapon)
+		{
+			for (const auto& list : config.weapons) {
+				for (const auto& name : list) {
+					if (_stricmp(name.c_str(), a_weapon.c_str()) == 0) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
 		// the tier a cache's weapon is of (by the lists), for its ammunition
 		float SpareOf(const std::string& a_weapon)
 		{
@@ -291,13 +303,25 @@ namespace chiefrim::Caches
 			}
 			const auto now = ::GetTickCount64();
 			const auto here = a_player->GetPosition();
-			for (const auto& [id, cache] : caches) {
+			for (auto& [id, cache] : caches) {
 				if (cache.taken) {
 					continue;
 				}
 				auto* anchor = RE::TESForm::LookupByID<RE::TESObjectREFR>(id);
 				if (!anchor || anchor->GetPosition().GetDistance(here) > config.sendRadius) {
 					continue;
+				}
+				// chosen from lists since changed (a fuel rod, which Halo refuses Chief):
+				// another of its tier, kept
+				if (!Listed(cache.weapon)) {
+					const auto& list = config.weapons[IsBossChest(anchor) && !config.weapons[2].empty() ? 2 : 0];
+					if (list.empty()) {
+						continue;
+					}
+					auto rng = Rng(id, 1);
+					const auto old = cache.weapon;
+					cache.weapon = list[std::uniform_int_distribution<std::size_t>(0, list.size() - 1)(rng)];
+					logger::info("caches: the {} by {:08X} is in no list now: a {} instead", old, id, cache.weapon);
 				}
 				// again now and then: Halo gives one up that found nothing to lie on
 				if (auto it = sentAt.find(id); it != sentAt.end() && now - it->second < 5000) {
@@ -341,7 +365,8 @@ namespace chiefrim::Caches
 		config.sendRadius = Settings::ReadFloat(L"Caches", L"fSendRadius", 2500.0f);
 		config.weapons[0] = ReadList(L"sLightWeapons", L"pistol, plasma pistol, needler, assault rifle");
 		config.weapons[1] = ReadList(L"sMediumWeapons", L"shotgun, plasma rifle");
-		config.weapons[2] = ReadList(L"sHeavyWeapons", L"sniper rifle, rocket launcher, flamethrower, fuel rod");
+		// (not the fuel rod, the AI's, nor the flamethrower, an Xbox leftover: Halo refuses them to Chief)
+		config.weapons[2] = ReadList(L"sHeavyWeapons", L"sniper rifle, rocket launcher");
 	}
 
 	void Save(SKSE::SerializationInterface* a_intfc)
