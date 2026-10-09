@@ -599,7 +599,7 @@ and facing every tick.
   `fBlastObjectDamage` (50) at its centre to nothing at its edge. Decorative cobwebs (statics) have
   no destruction data and are untouched. `[Combat] bShootThroughDestructibles`. Offline: the
   pistol's rounds reported as 2304-unit ways from the muzzle. In game (2026-10-08): shots go through
-  webs and are found on them; the damage to check (the log gives a web's health before and after).
+  webs and break them (through the native call).
 - **Traps (Phase 5, 2026-10-08).** Skyrim's traps are scripts that react to a hit (Papyrus's
   `OnHit`, from `Scripts.zip`): a hanging oil lamp (`TrapFallingOilLamp`) falls, a tripwire, a
   rigged beam or a hinge trigger goes off, on any hit; an oil pool (`TrapOilPool`, after
@@ -617,6 +617,7 @@ and facing every tick.
   itself), and with `bShotsIgnite` scripted objects also get a fire effect applied
   (`TESMagicEffectApplyEvent`: Papyrus's `OnMagicEffectApply`, with Firebolt's `FireDamageFFAimed`,
   00012F03, in `TrapGasOnMagicEffectApply` and with `MagicDamageFire`), as Flames lights one.
+  Verified in game (2026-10-08): webs break, lamps fall, tripwires go off, oil pools light when shot.
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.
