@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 25
+VERSION = 26
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -570,7 +570,8 @@ def main():
     parser.add_argument("--actor-attack-at", type=float, default=0.0,
                         help="with --actor: seconds in, it attacks for 3 s (CR_ACTOR_ATTACKING: the tracker shows it standing)")
     parser.add_argument("--actor-dies-at", type=float, default=0.0,
-                        help="with --actor: seconds in, it dies (listed dead for 3 s, then gone): its proxy drops its kit")
+                        help="with --actor: seconds in, it dies (listed dead for 3 s, then gone): its proxy drops its kit"
+                             " (a person's gun and grenades; with --actor-shape wolf, 1 or 2 grenades)")
     parser.add_argument("--flashlight-at", type=float, default=0.0,
                         help="seconds in: switch Chief's flashlight on, and off again 4 s later")
     options = parser.parse_args()
@@ -787,6 +788,7 @@ def main():
                 listed = not (dead and t >= options.actor_dies_at + 3.0)
                 attacking = options.actor_attack_at and options.actor_attack_at <= t < options.actor_attack_at + 3.0
                 flags = (0 if options.actor_friendly else 0x1) | (0x2 if dead else 0) | (0x8 if attacking else 0) | (0x10 if options.actor_sneaks else 0)
+                flags |= 0x20 if options.actor_shape != "wolf" else 0  # CR_ACTOR_PERSON: a wolf drops grenades, no gun
                 walked = options.actor_walk * t % 1600.0 if options.actor_walk and not dead else 0.0
                 walked = walked if walked < 800.0 else 1600.0 - walked  # 0..800 and back
                 link.slot_write(OFF_ACTORS, actors_payload(frame, (0x0001A2B3, flags, options.x - 400.0 + walked if options.actor_walk else options.x,

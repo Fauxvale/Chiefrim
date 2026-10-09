@@ -477,6 +477,19 @@ namespace chiefrim::Combat
 			return (state && state->GetAttackState() != RE::ATTACK_STATE_ENUM::kNone) || a_actor->WhoIsCasting() != 0;
 		}
 
+		// Its race is a person's (ActorTypeNPC: the playable races, their
+		// vampires, dremora): its proxy carries a gun. Animals, draugr, falmer,
+		// skeletons, trolls, dragons and automatons have none (Skyrim.esm's
+		// races): theirs drop only a grenade or two (protocol 26)
+		constexpr RE::FormID kActorTypeNPC = 0x00013794;
+
+		bool Person(RE::Actor* a_actor)
+		{
+			static auto* keyword = RE::TESForm::LookupByID<RE::BGSKeyword>(kActorTypeNPC);
+			const auto*  race = a_actor->GetRace();
+			return keyword && (a_actor->HasKeyword(keyword) || (race && race->HasKeyword(keyword)));
+		}
+
 		// Halo's proxies: the living, and for a moment the newly dead (listed
 		// alive last frame), flagged so: a proxy drops its weapon and grenades.
 		// With each, where it's hit (Hitbox, protocol 18)
@@ -530,7 +543,7 @@ namespace chiefrim::Combat
 				out.form_id = actor->GetFormID();
 				out.flags = (actor->IsHostileToActor(a_player) ? CR_ACTOR_HOSTILE : 0u) | (actor->IsEssential() ? CR_ACTOR_ESSENTIAL : 0u) |
 				            (actor->IsDead() ? CR_ACTOR_DEAD : 0u) | (Attacking(actor) ? CR_ACTOR_ATTACKING : 0u) |
-				            (actor->IsSneaking() ? CR_ACTOR_SNEAKING : 0u);
+				            (actor->IsSneaking() ? CR_ACTOR_SNEAKING : 0u) | (Person(actor) ? CR_ACTOR_PERSON : 0u);
 				out.position = { position.x, position.y, position.z };
 				out.heading = actor->GetAngleZ();
 				out.height = std::clamp(actor->GetHeight(), 20.0f, 2000.0f);
