@@ -787,6 +787,34 @@ using the camera Skyrim is about to use. It draws three layers:
   (0.03 a tick): dark to daylight in about a second. Offline, standing still: brightness 11, then
   79 a second after the light changes. Offline: the MA5B in a 0.05 scene against a 1.0 scene, mean weapon brightness 52
   against 79 (its ammo counter glows by itself). `[Lighting] bEnabled`, `fBrightness`, `fPointLights`.
+- **Matched to Skyrim's weather (Phase 5, 2026-10-08, protocol 21).** The first in-game look found
+  Chief's weapon the wrong colour (none of dusk's warmth or night's blue) and too bright at night
+  and in shade. Skyrim's light was there; two things weren't:
+  - **The sun's shadows.** The key light reached every object, in a building's shade too. Now,
+    outside (an interior's directional light casts none), the plugin casts five rays towards the
+    sun or moon from the eye (Havok, line of sight, the player's capsule skipped; the eye and four
+    points 12 units around it, across the light's way) and sends how many get through
+    (`cr_msg_lighting.sun_visible`, `key_shadowed`). Chief, and what he holds (the first-person
+    weapon takes his lighting), get the key light by that much; every other object casts its own
+    ray through Chiefrim's collision BSP (`collision_test_vector`, structure, 40 world units:
+    past the BSP's reach). Halo's blend of each object's lighting softens the edge. Skyrim's
+    physics shapes cast the shadows: buildings, rocks, cliffs, tree trunks; not leaves.
+    `[Lighting] bShadows`. Offline (`fake_skyrim.py --sun-visible`, `--sun-visible-to`,
+    `--roof`): the MA5B 66 bright in the sun, 30 in shade a second after; a proxy
+    (`CHIEFRIM_SHOW_PROXIES`) 43 in the open, 26 under a roof.
+  - **Skyrim's grade.** The compositor draws at Present, after Skyrim's post-processing, so Halo's
+    pixels missed the image space Skyrim grades its picture with (the weather's or the cell's, with
+    the effects over it). Now the compositor grades them as Skyrim's HDR shader does after its tone
+    map, from `ImageSpaceManager`'s blended data: saturation, the tint (towards the tint colour
+    times the luminance), brightness, contrast (about 0.5; Skyrim's own pivot is a shader constant
+    not read here), then the fade. The world layer gets Skyrim's fog first, by its distance: the
+    weather's (`Sky`: near and far colours, planes, power, clamp) or an interior's (the cell's
+    lighting, or its template's where it inherits). The screen layer is graded only where it is
+    Chief's arms and weapon, not the HUD: Halo marks, in a fourth target, how much of each pixel's
+    colour came from the weapon (written 1, the HUD's draws 0, blended as the colour is), read
+    back after the layers (`CR_FRAME_MASK`, a byte a pixel). Offline: the mask is exactly the
+    arms and MA5B, none of the HUD; the shader compiles with Proton's `D3DCompile`.
+    `[Grade] bEnabled`, `fStrength`, `bFog`. In game: to check.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
@@ -867,7 +895,7 @@ Initial message catalog:
 | H→S | `PlayerDied` | Event |
 | S→H | `display` slot `{width, height, flags, frame}` (protocol 6) | Per frame (Present) |
 | S→H | `camera` slot `{frame, eye, forward, up, vertical_fov, near, far}` (protocol 7) | Per frame (world rendering starts) |
-| H→S | `frames`: 3 slots, each the screen layer and the world layer (RGBA8 premultiplied) and the world's depth (float), `{seq, width, height, frame, camera_frame, time_us, flags}` (protocol 7) | Per frame |
+| H→S | `frames`: 3 slots, each the screen layer and the world layer (RGBA8 premultiplied), the world's depth (float) and the screen layer's weapon share (a byte, protocol 21), `{seq, width, height, frame, camera_frame, time_us, flags}` (protocol 7) | Per frame |
 | H→S | `MenuState {haloScreenOpen}` | On change |
 | H→S | `ChiefState {kit}`: weapons, ammo, grenades, vitality, flashlight (protocol 14) | On change, ≤ 4 Hz |
 
@@ -977,7 +1005,7 @@ Each phase ends in something you can play.
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: done (2026-10-06), verified in game:** Skyrim's HUD and light on Halo's objects (§9); the hand-off to Skyrim's furniture, beds, mounts, scenes and swimming (§11; beast forms verified 2026-10-07); load doors, interiors and fast travel (a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). The one crash in testing was MaxsuCombatEscape's (combat pathing run inside a cell change; it crashes the same way without Chiefrim). |
-| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather, better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
+| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather (**built 2026-10-08, checked offline**, §9: the sun's shadows, Skyrim's grade and fog on Halo's layers, protocol 21; in game to check), better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
 ## 13. Decisions

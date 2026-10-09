@@ -39,6 +39,13 @@ namespace chiefrim::Overlay
 			float depth[4];       // Skyrim's near, far, 1 if its depth is reversed, Skyrim units per Halo world unit
 			float now[4][4];      // Skyrim's camera now: forward, up, right (xyz), and its tangents (x, y)
 			float halo[4][4];     // the camera Halo's frame was drawn through, and Halo's tangents
+			// Skyrim's grade of its own picture (its image space), for Halo's
+			float grade[4];       // saturation, brightness, contrast, strength (0: none)
+			float tint[4];        // colour, amount
+			float fade[4];        // colour, amount
+			float fogNear[4];     // Skyrim's fog: the near colour, power
+			float fogFar[4];      // the far colour, the most it covers
+			float fogPlanes[4];   // where it starts and is full (Skyrim units), 1 if on
 		};
 
 		// A camera Skyrim published, for mapping Halo's frame onto the camera
@@ -55,7 +62,8 @@ namespace chiefrim::Overlay
 		{
 			ID3D11Device*             device = nullptr;
 			ID3D11DeviceContext*      context = nullptr;
-			Layer                     screen, world, worldDepth;
+			Layer                     screen, world, worldDepth, weapon;  // weapon: the screen layer's weapon share
+			bool                      weaponShown = false;                // in the textures
 			ID3D11VertexShader*       vs = nullptr;
 			ID3D11PixelShader*        screenPs = nullptr;
 			ID3D11PixelShader*        worldPs = nullptr;
@@ -100,10 +108,15 @@ namespace chiefrim::Overlay
 		// the back buffer if Halo's are smaller (screens over CR_FRAME_MAX_*).
 		// The world layer's pixels behind Skyrim's own are dropped.
 		constexpr char kShader[] = R"(
-cbuffer Params : register(b0) { float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4]; };
+cbuffer Params : register(b0)
+{
+	float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4];
+	float4 grade; float4 tint; float4 fade; float4 fogNear; float4 fogFar; float4 fogPlanes;
+};
 Texture2D picture : register(t0);
 Texture2D<float> haloDepth : register(t1);
 Texture2D<float> skyrimDepth : register(t2);
+Texture2D<float> weaponShare : register(t3);
 SamplerState linear_clamp : register(s0);
 SamplerState point_clamp : register(s1);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -115,9 +128,25 @@ VSOut VSMain(uint id : SV_VertexID)
 	o.uv = uv;
 	return o;
 }
+// Skyrim's grade, as its HDR shader makes it after the tone map: saturation,
+// the tint, brightness and contrast, then a fade. On Halo's premultiplied
+// colour, by the amount a_share of it that is Skyrim's world (not the HUD).
+float4 Grade(float4 c, float a_share)
+{
+	float w = a_share * grade.w;
+	if (w <= 0 || c.a <= 0.002)
+		return c;
+	float3 u = c.rgb / c.a;
+	float  luminance = dot(u, float3(0.2125, 0.7154, 0.0721));
+	float3 g = lerp(luminance.xxx, u, grade.x);
+	g = lerp(g, tint.rgb * luminance, tint.a);
+	g = grade.z * (grade.y * g - 0.5) + 0.5;
+	g = lerp(g, fade.rgb, fade.a);
+	return float4(lerp(c.rgb, saturate(g) * c.a, w), c.a);
+}
 float4 PSScreen(VSOut i) : SV_Target
 {
-	return picture.Sample(linear_clamp, i.uv);
+	return Grade(picture.Sample(linear_clamp, i.uv), weaponShare.Sample(linear_clamp, i.uv));
 }
 // Skyrim's view distance (along the view, Skyrim units) from its depth buffer.
 float SkyrimViewDepth(float d)
@@ -149,7 +178,13 @@ float4 PSWorld(VSOut i) : SV_Target
 	// a little slack: Halo's decals lie on Skyrim's own surfaces
 	if (halo > skyrim * 1.003 + 4.0)
 		discard;
-	return c;
+	// Skyrim's fog on what lies in it, as on its own world
+	if (fogPlanes.z > 0.5)
+	{
+		float f = min(pow(saturate((halo - fogPlanes.x) / max(fogPlanes.y - fogPlanes.x, 1.0)), fogNear.w), fogFar.w);
+		c.rgb = lerp(c.rgb, lerp(fogNear.rgb, fogFar.rgb, f) * c.a, f);
+	}
+	return Grade(c, 1.0);
 }
 )";
 
@@ -359,11 +394,14 @@ float4 PSWorld(VSOut i) : SV_Target
 			                   EnsureLayer(s.worldDepth, width, height, DXGI_FORMAT_R32_FLOAT, "world layer's depth") &&
 			                   Upload(s.world, pixels + CR_FRAME_LAYER_BYTES, height, std::size_t(width) * 4) &&
 			                   Upload(s.worldDepth, pixels + 2 * std::size_t(CR_FRAME_LAYER_BYTES), height, std::size_t(width) * 4);
+			const bool weapon = (flags & CR_FRAME_MASK) && EnsureLayer(s.weapon, width, height, DXGI_FORMAT_R8_UNORM, "weapon's share") &&
+			                    Upload(s.weapon, pixels + 3 * std::size_t(CR_FRAME_LAYER_BYTES), height, width);
 			CR_FENCE_ACQ();
 			if (CR_LOAD_ACQ(&header.seq) != seq) {
 				++s.torn;
 				return;
 			}
+			s.weaponShown = weapon;
 			s.lastFrame = frame;
 			s.haveFrame = true;
 			s.worldShown = world;
@@ -406,11 +444,114 @@ float4 PSWorld(VSOut i) : SV_Target
 			s.waitMs += NowMs() - start;
 		}
 
+		struct GradeConfig
+		{
+			bool  enabled = true;   // [Grade] bEnabled
+			float strength = 1.0f;  // [Grade] fStrength
+			bool  fog = true;       // [Grade] bFog
+		};
+
+		const GradeConfig& Grading()
+		{
+			static const GradeConfig config{ Settings::ReadBool(L"Grade", L"bEnabled", true),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fStrength", 1.0f), 0.0f, 1.0f), Settings::ReadBool(L"Grade", L"bFog", true) };
+			return config;
+		}
+
+		void PutColor(float (&a_out)[4], const RE::NiColor& a_color, float a_w)
+		{
+			a_out[0] = a_color.red;
+			a_out[1] = a_color.green;
+			a_out[2] = a_color.blue;
+			a_out[3] = a_w;
+		}
+
+		RE::NiColor FromColor(const RE::Color& a_color)
+		{
+			return { a_color.red / 255.0f, a_color.green / 255.0f, a_color.blue / 255.0f };
+		}
+
+		// Skyrim's grade of its picture now (its image space: the weather's or
+		// the cell's, with the effects over it, blended) and its fog (the
+		// weather's outside, the cell's or its lighting template's inside),
+		// for Halo's layers to look as its own world does
+		void PutGrade(Params& a_params)
+		{
+			const auto& config = Grading();
+			a_params.grade[0] = a_params.grade[1] = a_params.grade[2] = 1.0f;
+			a_params.grade[3] = 0.0f;
+			if (!config.enabled) {
+				return;
+			}
+			if (auto* manager = RE::ImageSpaceManager::GetSingleton()) {
+				const auto& data = manager->GetRuntimeData().data;
+				const auto& cinematic = data.baseData.cinematic;
+				// nothing set yet (no game loaded): no grade
+				if (cinematic.saturation > 0.0f || cinematic.brightness > 0.0f || cinematic.contrast > 0.0f) {
+					a_params.grade[0] = cinematic.saturation;
+					a_params.grade[1] = cinematic.brightness;
+					a_params.grade[2] = cinematic.contrast;
+					a_params.grade[3] = config.strength;
+					PutColor(a_params.tint, data.baseData.tint.color, std::clamp(data.baseData.tint.amount, 0.0f, 1.0f));
+					a_params.fade[0] = data.modData.data[RE::ImageSpaceModData::kFadeR];
+					a_params.fade[1] = data.modData.data[RE::ImageSpaceModData::kFadeG];
+					a_params.fade[2] = data.modData.data[RE::ImageSpaceModData::kFadeB];
+					a_params.fade[3] = std::clamp(data.modData.data[RE::ImageSpaceModData::kFadeAmount], 0.0f, 1.0f);
+				}
+			}
+			if (!config.fog) {
+				return;
+			}
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* cell = player ? player->GetParentCell() : nullptr;
+			if (!cell) {
+				return;
+			}
+			float       nearPlane = 0.0f, farPlane = 0.0f, power = 1.0f, most = 1.0f;
+			RE::NiColor nearColor, farColor;
+			if (cell->IsInteriorCell()) {
+				const auto* own = cell->GetLighting();
+				if (!own) {
+					return;
+				}
+				// what the cell takes from its lighting template
+				auto*       lighting = cell->GetRuntimeData().lightingTemplate;
+				const auto* shared = lighting ? &lighting->data : nullptr;
+				const auto  from = [&](RE::INTERIOR_DATA::Inherit a_what) {
+					return shared && own->lightingTemplateInheritanceFlags.any(a_what) ? shared : own;
+				};
+				using Inherit = RE::INTERIOR_DATA::Inherit;
+				nearColor = FromColor(from(Inherit::kFogColor)->fogColorNear);
+				farColor = FromColor(from(Inherit::kFogColor)->fogColorFar);
+				nearPlane = from(Inherit::kFogNear)->fogNear;
+				farPlane = from(Inherit::kFogFar)->fogFar;
+				power = from(Inherit::kFogPower)->fogPower;
+				most = from(Inherit::kFogMax)->fogClamp;
+			} else if (auto* sky = RE::Sky::GetSingleton()) {
+				nearColor = sky->skyColor[RE::TESWeather::ColorTypes::kFogNear];
+				farColor = sky->skyColor[RE::TESWeather::ColorTypes::kFogFar];
+				nearPlane = sky->fogNear;
+				farPlane = sky->fogFar;
+				power = sky->fogPower;
+				most = sky->fogClamp;
+			}
+			if (farPlane <= nearPlane || farPlane <= 0.0f) {
+				return;  // no fog
+			}
+			PutColor(a_params.fogNear, nearColor, power > 0.0f ? power : 1.0f);
+			PutColor(a_params.fogFar, farColor, most > 0.0f ? std::min(most, 1.0f) : 1.0f);
+			a_params.fogPlanes[0] = nearPlane;
+			a_params.fogPlanes[1] = farPlane;
+			a_params.fogPlanes[2] = 1.0f;
+		}
+
 		void SetParams()
 		{
 			D3D11_MAPPED_SUBRESOURCE mapped{};
 			if (SUCCEEDED(s.context->Map(s.params, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 				auto* p = static_cast<Params*>(mapped.pData);
+				*p = {};
+				PutGrade(*p);
 				p->depth[0] = s.nearPlane;
 				p->depth[1] = s.farPlane;
 				p->depth[2] = s.reversed == 1 ? 1.0f : 0.0f;
@@ -464,7 +605,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			ID3D11HullShader*         oldHs = nullptr;
 			ID3D11DomainShader*       oldDs = nullptr;
 			ID3D11PixelShader*        oldPs = nullptr;
-			ID3D11ShaderResourceView* oldSrvs[3]{};
+			ID3D11ShaderResourceView* oldSrvs[4]{};
 			ID3D11SamplerState*       oldSamplers[2]{};
 			ID3D11Buffer*             oldCb = nullptr;
 			context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, oldRtv, &oldDsv);
@@ -479,7 +620,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			context->HSGetShader(&oldHs, nullptr, nullptr);
 			context->DSGetShader(&oldDs, nullptr, nullptr);
 			context->PSGetShader(&oldPs, nullptr, nullptr);
-			context->PSGetShaderResources(0, 3, oldSrvs);
+			context->PSGetShaderResources(0, 4, oldSrvs);
 			context->PSGetSamplers(0, 2, oldSamplers);
 			context->PSGetConstantBuffers(0, 1, &oldCb);
 
@@ -501,18 +642,19 @@ float4 PSWorld(VSOut i) : SV_Target
 			context->PSSetConstantBuffers(0, 1, &s.params);
 
 			// The world layer, where Skyrim's own picture isn't nearer; then
-			// the screen layer over everything.
+			// the screen layer over everything. Both graded as Skyrim's picture
+			// is (the screen layer's weapon, not its HUD).
+			SetParams();
 			if (s.worldShown && s.depthCopied && s.reversed >= 0 && s.current.frame) {
-				ID3D11ShaderResourceView* srvs[3]{ s.world.srv, s.worldDepth.srv, s.depthCopySrv };
-				SetParams();
+				ID3D11ShaderResourceView* srvs[4]{ s.world.srv, s.worldDepth.srv, s.depthCopySrv, nullptr };
 				context->PSSetShader(s.worldPs, nullptr, 0);
-				context->PSSetShaderResources(0, 3, srvs);
+				context->PSSetShaderResources(0, 4, srvs);
 				context->Draw(3, 0);
 			}
 			if (!Handoff::Active()) {  // Skyrim has the player: no weapon or HUD of Chief's
-				ID3D11ShaderResourceView* srvs[3]{ s.screen.srv, nullptr, nullptr };
+				ID3D11ShaderResourceView* srvs[4]{ s.screen.srv, nullptr, nullptr, s.weaponShown ? s.weapon.srv : nullptr };
 				context->PSSetShader(s.screenPs, nullptr, 0);
-				context->PSSetShaderResources(0, 3, srvs);
+				context->PSSetShaderResources(0, 4, srvs);
 				context->Draw(3, 0);
 			}
 
@@ -528,7 +670,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			context->HSSetShader(oldHs, nullptr, 0);
 			context->DSSetShader(oldDs, nullptr, 0);
 			context->PSSetShader(oldPs, nullptr, 0);
-			context->PSSetShaderResources(0, 3, oldSrvs);
+			context->PSSetShaderResources(0, 4, oldSrvs);
 			context->PSSetSamplers(0, 2, oldSamplers);
 			context->PSSetConstantBuffers(0, 1, &oldCb);
 			for (auto*& old : oldRtv) {

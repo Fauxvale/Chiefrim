@@ -19,6 +19,7 @@ Without it, every function here does nothing and the game is unchanged.
 #include "chiefrim/chiefrim_protocol.h"
 
 boolean chiefrim_active(void);
+long chiefrim_local_unit(void);  /* Chief's unit (NONE: none) */
 
 /* main_loop, before its first frame */
 void chiefrim_initialize(void);
@@ -56,6 +57,10 @@ long chiefrim_overlay_layer(void);
 void chiefrim_note_projection(real x0, real x1, real y0, real y1); /* render.c: the view's tangents */
 void chiefrim_overlay_projection(float *tangent_x, float *tangent_y);
 void chiefrim_set_render_layer(long layer);
+/* in the screen layer: the HUD's draws now, not the weapon's (Skyrim grades
+the weapon as its own picture, not the HUD: CR_FRAME_MASK) */
+void chiefrim_set_render_hud(boolean hud);
+long chiefrim_overlay_hud(void);
 void chiefrim_overlay_world_done(void); /* port: the world layer is drawn; on to the screen's */
 
 /* chiefrim_input.c (docs §7): Chief's controls from Skyrim's actions.

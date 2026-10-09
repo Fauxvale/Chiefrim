@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 20
+VERSION = 21
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -36,7 +36,7 @@ OFF_FRAMES = OFF_DISPLAY + 96 + SLOT_ACTORS_BYTES + 32
 OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
-FRAME_BYTES = 3 * FRAME_LAYER_BYTES
+FRAME_BYTES = 3 * FRAME_LAYER_BYTES + FRAME_MAX_W * FRAME_MAX_H  # the layers, the weapon share
 OFF_CAMERA = OFF_DISPLAY + 24
 TOTAL_SIZE = OFF_FRAMES + 192 + FRAME_SLOTS * FRAME_BYTES
 
@@ -131,6 +131,8 @@ CR_TRIANGLE_ONE_SIDED = 0x0001
 CR_TRIANGLE_LAND = 0x0002
 LEDGE = 0.0
 PLANK = False
+ROOF = 0.0  # a slab this high over where the actor stands (--roof)
+ROOF_Y = 0.0
 
 
 def terrain_triangles(ox, oy, oz):
@@ -167,6 +169,9 @@ def terrain_triangles(ox, oy, oz):
             add_box(tris, corners)
     if LEDGE:  # a slab like a road piece across the way north, LEDGE units up, from y 80 to 200
         corners = [(ox + (300 if k & 1 else -300), oy + (200 if k & 2 else 80), oz + (LEDGE if k & 4 else (LEDGE - 4 if PLANK else -10))) for k in range(8)]
+        add_box(tris, corners)
+    if ROOF:  # a slab over the actor's spot, ROOF units up, 20 thick: a shadow from above
+        corners = [(ox + (250 if k & 1 else -250), oy + ROOF_Y + (250 if k & 2 else -250), oz + (ROOF + 20 if k & 4 else ROOF)) for k in range(8)]
         add_box(tris, corners)
     # a wall south of the start, 400 high, facing north
     a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
@@ -359,6 +364,16 @@ def text(raw):
     return raw.split(b"\0", 1)[0].decode(errors="replace")
 
 
+def covered_mean(pixels):
+    """mean brightness (0-255) of a layer's covered pixels (alpha over 200), and how many"""
+    total = count = 0
+    for i in range(0, len(pixels), 4 * 7):  # every 7th pixel: enough, and quick
+        if pixels[i + 3] > 200:
+            total += pixels[i] + pixels[i + 1] + pixels[i + 2]
+            count += 1
+    return (total / (3 * count) if count else 0.0), count
+
+
 def grab_frame(link, directory, index):
     """The latest overlay frame (cr_frames) as a PNG over a checkerboard; False if none or torn."""
     import zlib
@@ -372,17 +387,25 @@ def grab_frame(link, directory, index):
         return False
     start = OFF_FRAMES + 192 + slot * FRAME_BYTES
     pixels = bytes(link.shm[start:start + width * height * 4])
+    mask = bytes(link.shm[start + 3 * FRAME_LAYER_BYTES:start + 3 * FRAME_LAYER_BYTES + width * height]) if flags & 4 else None
     world = bytes(link.shm[start + FRAME_LAYER_BYTES:start + FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     depth = bytes(link.shm[start + 2 * FRAME_LAYER_BYTES:start + 2 * FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     if link.u32(header) != seq:
         return False
     saved = [write_png(directory, f"overlay{index:03}.png", width, height, pixels)]
-    note = ""
+    mean, count = covered_mean(pixels)
+    note = f"; screen layer {mean:.0f} bright on {count}"
+    if mask:
+        saved.append(write_png(directory, f"weapon{index:03}.png", width, height, b"".join(bytes((m, m, m, 255)) for m in mask)))
+        weapon = sum(1 for i in range(0, len(mask), 7) if mask[i] > 127)
+        note += f" ({weapon} of them the weapon's)"
     if world:
         saved.append(write_png(directory, f"world{index:03}.png", width, height, world))
+        mean, count = covered_mean(world)
+        note += f", world layer {mean:.0f} on {count}"
         values = [v for v in struct.unpack(f"<{width * height}f", depth) if v < 1e29]
         if values:
-            note = (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
+            note += (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
                     f"-{max(values) * 213.36:.0f} Skyrim units")
     print(f"fake_skyrim: frame {frame} ({width}x{height}, flags {flags}, camera {camera_frame} of"
           f" {LAST_CAMERA[0]}, tangents {tangent_x:.4f} x {tangent_y:.4f}{note}) -> {', '.join(saved)}", flush=True)
@@ -497,6 +520,12 @@ def main():
                         help="Skyrim's light for Halo's objects (CR_MSG_LIGHTING): ambient and a sun from above, this bright (0: dark)")
     parser.add_argument("--light-to", type=float, default=-1.0, help="with --light: this bright from --light-at seconds in")
     parser.add_argument("--light-at", type=float, default=10.0)
+    parser.add_argument("--sun-visible", type=float, default=-1.0,
+                        help="with --light: shadows on (protocol 21), and this much of the sun reaches Chief's eye (0..1)")
+    parser.add_argument("--sun-visible-to", type=float, default=-1.0, help="with --sun-visible: this from --sun-visible-at seconds in")
+    parser.add_argument("--sun-visible-at", type=float, default=10.0)
+    parser.add_argument("--roof", type=float, default=0.0,
+                        help="with --terrain: a slab this high over --actor's spot (its shadow from above)")
     parser.add_argument("--key-names", default="",
                         help="comma-separated, per CR_ACTION_* (jump,crouch,fire,zoom,reload,grenade,melee,action,...): "
                              "the keys Halo's prompts show")
@@ -578,8 +607,9 @@ def main():
         ROUGH = options.rough
         HOLE = options.hole
         LEDGE = options.ledge
-        global PLANK
+        global PLANK, ROOF, ROOF_Y
         PLANK = options.plank
+        ROOF, ROOF_Y = options.roof, options.actor
         send_terrain(link, 1, *(options.dump_origin if DUMP else (options.x, options.y, options.z)))
 
     display = None
@@ -744,8 +774,10 @@ def main():
                 drive_state["next_light"] = time.monotonic() + 0.1
                 level = options.light_to if options.light_to >= 0.0 and t >= options.light_at else options.light
                 a, k = 0.3 * level, 1.0 * level
+                seen = options.sun_visible_to if options.sun_visible_to >= 0.0 and t >= options.sun_visible_at else options.sun_visible
                 link.push(RING_TO_HALO, MSG_LIGHTING, struct.pack("<3f3f3f3fI", a, a, a, 0.0, 0.0, 0.0, k, k * 0.95, k * 0.85,
-                                                                  0.3, 0.4, -0.866, 0) + bytes(4 * 28))
+                                                                  0.3, 0.4, -0.866, 0) + bytes(4 * 28)
+                          + struct.pack("<If", 1 if seen >= 0.0 else 0, max(seen, 0.0)))
             if options.key_names and not drive_state.get("named"):
                 # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
                 names = options.key_names.split(",") + [""] * 12

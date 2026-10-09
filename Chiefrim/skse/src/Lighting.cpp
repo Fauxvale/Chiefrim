@@ -15,6 +15,9 @@ namespace chiefrim::Lighting
 			bool  flashlight = true;  // [Flashlight] bEnabled
 			float flashBrightness = 1.5f;  // [Flashlight] fBrightness
 			float flashReach = 1.0f;       // [Flashlight] fReach: of Halo's
+			bool  shadows = true;          // [Lighting] bShadows: the sun's, on Halo's objects
+			float shadowReach = 16384.0f;  // how far towards the sun a shadow's caster is looked for
+			float shadowSpread = 12.0f;    // the rays around the eye, apart
 		} config;
 
 		// Chief's flashlight: a point light of Skyrim's (its renderer has no
@@ -31,9 +34,57 @@ namespace chiefrim::Lighting
 
 		ULONGLONG next = 0;
 		float     reportedLevel = -1.0f;  // the brightness last logged
+		bool      reportedShade = false;  // and whether Chief was in shade
 		ULONGLONG nextReport = 0;
 
 		cr_vec3 Vec(const RE::NiPoint3& a_point) { return { a_point.x, a_point.y, a_point.z }; }
+
+		// How far along from -> to a ray goes before it hits something of
+		// Skyrim's (line of sight: the player's own capsule aside), 0..1
+		float RayFraction(RE::PlayerCharacter* a_player, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
+		{
+			auto* cell = a_player->GetParentCell();
+			auto* world = cell ? cell->GetbhkWorld() : nullptr;
+			if (!world) {
+				return 1.0f;
+			}
+			const float scale = RE::bhkWorld::GetWorldScale();
+			RE::bhkPickData pick{};
+			pick.rayInput.from = RE::hkVector4(a_from.x * scale, a_from.y * scale, a_from.z * scale, 0.0f);
+			pick.rayInput.to = RE::hkVector4(a_to.x * scale, a_to.y * scale, a_to.z * scale, 0.0f);
+			RE::CFilter filter{};
+			a_player->GetCollisionFilterInfo(filter);  // its group: the player's own capsule isn't hit
+			filter.SetCollisionLayer(RE::COL_LAYER::kLOS);
+			pick.rayInput.filterInfo = filter;
+			{
+				RE::BSReadLockGuard lock(world->worldLock);
+				world->PickObject(pick);
+			}
+			return pick.rayOutput.HasHit() ? std::clamp(pick.rayOutput.hitFraction, 0.0f, 1.0f) : 1.0f;
+		}
+
+		// How much of the sun (or moon) reaches the eye: rays towards it from
+		// the eye and four points around it, across the light's way, so a
+		// shadow's edge comes in by steps (Halo blends the rest)
+		float SunVisible(RE::PlayerCharacter* a_player, const RE::NiPoint3& a_eye, const RE::NiPoint3& a_travel)
+		{
+			const RE::NiPoint3 towards = a_travel * -1.0f;
+			RE::NiPoint3       side = towards.Cross({ 0.0f, 0.0f, 1.0f });
+			if (side.Length() < 1e-3f) {
+				side = { 1.0f, 0.0f, 0.0f };
+			}
+			side = side / side.Length();
+			RE::NiPoint3 up = side.Cross(towards);
+			up = up / std::max(up.Length(), 1e-3f);
+			const std::array offsets{ RE::NiPoint3{}, side * config.shadowSpread, side * -config.shadowSpread, up * config.shadowSpread,
+				up * -config.shadowSpread };
+			int lit = 0;
+			for (const auto& offset : offsets) {
+				const auto from = a_eye + offset;
+				lit += RayFraction(a_player, from, from + towards * config.shadowReach) >= 1.0f;
+			}
+			return static_cast<float>(lit) / static_cast<float>(offsets.size());
+		}
 		cr_vec3 Color(const RE::NiColor& a_color, float a_scale) { return { a_color.red * a_scale, a_color.green * a_scale, a_color.blue * a_scale }; }
 
 		struct Point
@@ -79,6 +130,7 @@ namespace chiefrim::Lighting
 		config.enabled = Settings::ReadFloat(L"Lighting", L"bEnabled", 1.0f) != 0.0f;
 		config.scale = Settings::ReadFloat(L"Lighting", L"fBrightness", 1.0f);
 		config.pointScale = Settings::ReadFloat(L"Lighting", L"fPointLights", 1.0f);
+		config.shadows = Settings::ReadBool(L"Lighting", L"bShadows", true);
 		config.flashlight = Settings::ReadBool(L"Flashlight", L"bEnabled", true);
 		config.flashBrightness = Settings::ReadFloat(L"Flashlight", L"fBrightness", 1.5f);
 		config.flashReach = Settings::ReadFloat(L"Flashlight", L"fReach", 1.0f);
@@ -115,6 +167,7 @@ namespace chiefrim::Lighting
 
 		// The key light: the sun or moon outside, the cell's directional light inside.
 		message.key_direction = { 0.0f, 0.0f, -1.0f };
+		message.sun_visible = 1.0f;
 		if (auto* sun = runtime.sunLight; sun && sun->light) {
 			const auto& data = sun->light->GetLightRuntimeData();
 			message.key_color = Color(data.diffuse, data.fade * config.scale);
@@ -124,7 +177,16 @@ namespace chiefrim::Lighting
 					direction = -direction;  // it lights from above: the way it travels is down
 				}
 				if (direction.Length() > 1e-3f) {
-					message.key_direction = Vec(direction / direction.Length());
+					direction = direction / direction.Length();
+					message.key_direction = Vec(direction);
+					// outside, the sun and moon cast shadows; an interior's
+					// directional light lights everything
+					auto* cell = a_player->GetParentCell();
+					auto* camera = RE::Main::WorldRootCamera();
+					if (config.shadows && cell && !cell->IsInteriorCell() && camera) {
+						message.key_shadowed = 1;
+						message.sun_visible = SunVisible(a_player, camera->world.translate, direction);
+					}
 				}
 			}
 		}
@@ -134,13 +196,16 @@ namespace chiefrim::Lighting
 			return;
 		}
 		// logged at first and when it changes a lot (a door, nightfall, a torch), every 5 s at most
+		const bool  shade = message.key_shadowed && message.sun_visible < 0.5f;
 		const float level = (message.ambient.x + message.ambient.y + message.ambient.z + message.key_color.x + message.key_color.y + message.key_color.z) / 3.0f;
-		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f))) {
+		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f) || shade != reportedShade)) {
 			reportedLevel = level;
+			reportedShade = shade;
 			nextReport = now + 5000;
-			logger::info("lighting: Halo's objects lit by Skyrim's: ambient ({:.2f} {:.2f} {:.2f}), key ({:.2f} {:.2f} {:.2f}) towards ({:.2f} {:.2f} {:.2f}), {} point lights near",
+			logger::info("lighting: Halo's objects lit by Skyrim's: ambient ({:.2f} {:.2f} {:.2f}), key ({:.2f} {:.2f} {:.2f}) towards ({:.2f} {:.2f} {:.2f}), {} point lights near, {}",
 				message.ambient.x, message.ambient.y, message.ambient.z, message.key_color.x, message.key_color.y, message.key_color.z,
-				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count);
+				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count,
+				!message.key_shadowed ? "no shadows (inside)" : std::format("the sun {:.0f}% seen", message.sun_visible * 100.0f));
 		}
 	}
 }
@@ -172,25 +237,7 @@ namespace chiefrim::Lighting
 		// (the player's own capsule aside), up to a_reach
 		float BeamLength(RE::PlayerCharacter* a_player, const RE::NiPoint3& a_eye, const RE::NiPoint3& a_forward, float a_reach)
 		{
-			auto* cell = a_player->GetParentCell();
-			auto* world = cell ? cell->GetbhkWorld() : nullptr;
-			if (!world) {
-				return a_reach;
-			}
-			const float scale = RE::bhkWorld::GetWorldScale();
-			const auto  to = a_eye + a_forward * a_reach;
-			RE::bhkPickData pick{};
-			pick.rayInput.from = RE::hkVector4(a_eye.x * scale, a_eye.y * scale, a_eye.z * scale, 0.0f);
-			pick.rayInput.to = RE::hkVector4(to.x * scale, to.y * scale, to.z * scale, 0.0f);
-			RE::CFilter filter{};
-			a_player->GetCollisionFilterInfo(filter);  // its group: the player's own capsule isn't hit
-			filter.SetCollisionLayer(RE::COL_LAYER::kLOS);
-			pick.rayInput.filterInfo = filter;
-			{
-				RE::BSReadLockGuard lock(world->worldLock);
-				world->PickObject(pick);
-			}
-			return pick.rayOutput.HasHit() ? std::clamp(pick.rayOutput.hitFraction, 0.0f, 1.0f) * a_reach : a_reach;
+			return RayFraction(a_player, a_eye, a_eye + a_forward * a_reach) * a_reach;
 		}
 	}
 

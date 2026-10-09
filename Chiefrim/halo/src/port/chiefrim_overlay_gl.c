@@ -27,6 +27,7 @@ and Chiefrim/docs/DESIGN.md §9.
 
 struct cr_shared *chiefrim_shared(void);
 long chiefrim_overlay_layer(void);
+long chiefrim_overlay_hud(void);
 void chiefrim_overlay_projection(float *tangent_x, float *tangent_y);
 
 /* entry points the port's list (gl.h) doesn't have */
@@ -55,8 +56,9 @@ static struct
 	int loaded, failed;
 	/* the targets beside the back buffer's colour: how much of Skyrim's
 	picture shows through each pixel (R8, the transmittance), and the world
-	layer's view depth (R32F, min-blended) */
-	GLuint coverage, depth;
+	layer's view depth (R32F, min-blended), and in the screen layer how much
+	of each pixel's colour is the weapon's, not the HUD's (R8: CR_FRAME_MASK) */
+	GLuint coverage, depth, weapon;
 	unsigned long width, height;
 	struct overlay_framebuffer framebuffers[OVERLAY_FRAMEBUFFERS];
 	long framebuffer_count;
@@ -180,7 +182,7 @@ static void overlay_target(GLuint *texture, GLint format, GLenum layout, GLenum 
 unsigned int chiefrim_overlay_framebuffer(unsigned int color, unsigned int depth,
 	unsigned long width, unsigned long height)
 {
-	static const GLenum draw_buffers[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+	static const GLenum draw_buffers[4] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3 };
 	struct overlay_framebuffer *entry;
 	unsigned long w, h, frame;
 	long index;
@@ -192,6 +194,7 @@ unsigned int chiefrim_overlay_framebuffer(unsigned int color, unsigned int depth
 		overlay_forget_framebuffers();
 		overlay_target(&overlay.coverage, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height);
 		overlay_target(&overlay.depth, GL_R32F, GL_RED, GL_FLOAT, width, height);
+		overlay_target(&overlay.weapon, GL_R8, GL_RED, GL_UNSIGNED_BYTE, width, height);
 		overlay.width = width;
 		overlay.height = height;
 		xgpu_gl_state_invalidate();
@@ -217,11 +220,13 @@ unsigned int chiefrim_overlay_framebuffer(unsigned int color, unsigned int depth
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, overlay.coverage, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, overlay.depth, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, overlay.weapon, 0);
 	if (depth)
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
-	glDrawBuffers(3, draw_buffers);
+	glDrawBuffers(4, draw_buffers);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		platform_log("chiefrim: overlay: framebuffer %u/%u/%u/%u is incomplete", color, overlay.coverage, overlay.depth, depth);
+		platform_log("chiefrim: overlay: framebuffer %u/%u/%u/%u/%u is incomplete", color, overlay.coverage, overlay.depth,
+			overlay.weapon, depth);
 	xgpu_gl_state_invalidate();
 	overlay.bound = entry->framebuffer;
 	overlay.bound_color = color;
@@ -291,12 +296,30 @@ void chiefrim_overlay_draw_state(unsigned long blend_enable, unsigned long sourc
 	overlay_glEnablei(GL_BLEND, 1);
 	overlay_glBlendEquationi(1, GL_FUNC_ADD);
 	overlay_glBlendFunci(1, s, d);
+
+	/* the weapon's share of the screen layer's colour: the shader writes
+	(1, 0, 0, alpha), and this target blends as the colour does, its source
+	counted only for the weapon's draws (the HUD's: zero), so where the HUD
+	covers the weapon its share goes; a draw that subtracts or keeps a
+	min or max keeps it. Its blend is always on: a draw that replaces is
+	the weapon's (1) or the HUD's (0). */
+	overlay_glColorMaski(3, !world && (color_mask & 7) != 0, GL_FALSE, GL_FALSE, GL_FALSE);
+	if (!blend_enable)
+		s = chiefrim_overlay_hud() ? GL_ZERO : GL_ONE, d = GL_ZERO;
+	else if (!adds)
+		s = GL_ZERO, d = GL_ONE;
+	else
+		s = chiefrim_overlay_hud() ? GL_ZERO : (GLenum)source, d = (GLenum)destination;
+	overlay_glEnablei(GL_BLEND, 3);
+	overlay_glBlendEquationi(3, GL_FUNC_ADD);
+	overlay_glBlendFunci(3, s, d);
 }
 
 void chiefrim_overlay_cleared(void)
 {
 	static const GLfloat far[4] = { OVERLAY_FAR, OVERLAY_FAR, OVERLAY_FAR, OVERLAY_FAR };
 	static const GLfloat through[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	static const GLfloat none[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 	if (!overlay.loaded)
 		return;
@@ -304,6 +327,8 @@ void chiefrim_overlay_cleared(void)
 	overlay_glClearBufferfv(GL_COLOR, 1, through); /* all of Skyrim shows through */
 	overlay_glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	overlay_glClearBufferfv(GL_COLOR, 2, far);
+	overlay_glColorMaski(3, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	overlay_glClearBufferfv(GL_COLOR, 3, none);
 	xgpu_gl_state_invalidate();
 }
 
@@ -432,6 +457,8 @@ void chiefrim_overlay_world_done(void)
 	overlay_glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	overlay_glClearBufferfv(GL_COLOR, 0, clear);
 	overlay_glClearBufferfv(GL_COLOR, 1, through); /* all of Skyrim shows through */
+	overlay_glColorMaski(3, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	overlay_glClearBufferfv(GL_COLOR, 3, clear); /* none of it the weapon's yet */
 	glDepthMask(GL_TRUE);
 	glStencilMask(0xff);
 	glClearDepth(1.0);
@@ -487,12 +514,18 @@ int chiefrim_overlay_present(unsigned int color, unsigned long width, unsigned l
 			pixels + CR_FRAME_LAYER_BYTES);
 		overlay_read(overlay.bound, GL_COLOR_ATTACHMENT2, GL_RED, GL_FLOAT, pixels + 2 * CR_FRAME_LAYER_BYTES);
 	}
+	if (overlay.bound)
+	{
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		overlay_read(overlay.bound, GL_COLOR_ATTACHMENT3, GL_RED, GL_UNSIGNED_BYTE, pixels + 3 * CR_FRAME_LAYER_BYTES);
+		glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	}
 	header->width = (uint32_t)width;
 	header->height = (uint32_t)height;
 	header->frame = (uint32_t)++overlay.frame;
 	header->camera_frame = (uint32_t)camera_frame;
 	header->time_us = (uint32_t)overlay_now_us();
-	header->flags = CR_FRAME_VISIBLE | (world ? CR_FRAME_WORLD : 0u);
+	header->flags = CR_FRAME_VISIBLE | (world ? CR_FRAME_WORLD : 0u) | (overlay.bound ? CR_FRAME_MASK : 0u);
 	chiefrim_overlay_projection(&header->tangent_x, &header->tangent_y);
 	cr_slot_write_end(&header->seq);
 	CR_STORE_REL(&shm->frames.latest, slot + 1);

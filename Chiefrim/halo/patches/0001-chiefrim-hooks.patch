@@ -119,7 +119,7 @@ index 912e3f1a..8b82a8e4 100644
  		xgpu_texture_cache_begin_frame();
  #ifdef HALO_ANDROID
 diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
-index 211146d1..c2b46a99 100644
+index 211146d1..0a8bf1d5 100644
 --- a/port/linux/src/nv2a_psh.c
 +++ b/port/linux/src/nv2a_psh.c
 @@ -17,6 +17,7 @@ Register values are clamped to [-1, 1] between stages, as on the hardware.
@@ -130,17 +130,18 @@ index 211146d1..c2b46a99 100644
  
  #include <stdio.h>
  #include <stdlib.h>
-@@ -618,6 +619,9 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+@@ -618,6 +619,10 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  		"in float xFog;\n"
  		"layout(location = 0) out vec4 fragment_color;\n"
  		XGPU_PIXEL_UNIFORMS);
 +	if (chiefrim_overlay_enabled()) /* CHIEFRIM: the overlay's coverage (chiefrim_overlay_gl.h) */
 +		xgpu_text_append(&text, "layout(location = 1) out vec4 chiefrim_coverage;\n"
-+			"layout(location = 2) out vec4 chiefrim_depth;\n");
++			"layout(location = 2) out vec4 chiefrim_depth;\n"
++			"layout(location = 3) out vec4 chiefrim_weapon;\n");
  	for (stage = 0; stage < 4; stage++)
  		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
  	if (key->per_pixel_lighting)
-@@ -745,6 +749,15 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+@@ -745,6 +750,16 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  	if (key->count_samples)
  		xgpu_text_append(&text, "\tatomicCounterIncrement(visible_samples);\n");
  #endif
@@ -151,7 +152,8 @@ index 211146d1..c2b46a99 100644
 +		xgpu_text_append(&text, "\tvec4 shown = clamp(result, 0.0, 1.0);\n"
 +			"\tchiefrim_coverage = vec4(dot(shown.rgb, vec3(1.0 / 3.0)), 0.0, 0.0, shown.a);\n"
 +			"\tchiefrim_depth = vec4(max(max(shown.r, shown.g), max(shown.b, shown.a)) > 0.004 ?\n"
-+			"\t\t1.0 / gl_FragCoord.w : 1.0e30);\n");
++			"\t\t1.0 / gl_FragCoord.w : 1.0e30);\n"
++			"\tchiefrim_weapon = vec4(1.0, 0.0, 0.0, shown.a);\n");
 +	}
  	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
  	return text.buffer;
@@ -707,7 +709,7 @@ index 42775183..ab3ca026 100644
  			{
  				struct physics_instance instance;
 diff --git a/source/render/render.c b/source/render/render.c
-index d9109fc5..0f511d50 100644
+index d9109fc5..35745d1d 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
 @@ -87,6 +87,8 @@ symbols in this file:
@@ -729,7 +731,7 @@ index d9109fc5..0f511d50 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -323,13 +328,68 @@ static void render_window(
+@@ -323,13 +328,69 @@ static void render_window(
  	parameters.rasterizer_target = rasterizer_target;
  	parameters.has_mirror = has_mirror;
  	parameters.window_index = render.window_index;
@@ -787,6 +789,7 @@ index d9109fc5..0f511d50 100644
 +		rasterizer_transparent_geometry_draw(TRUE);
 +		rasterizer_transparent_geometry_draw(FALSE);
 +		rasterizer_transparent_geometry_stop();
++		chiefrim_set_render_hud(TRUE); /* Skyrim grades the weapon, not the HUD */
 +		interface_draw_screen();
 +		rasterizer_screen_flash();
 +		halo_screen_ui_offset(TRUE);
@@ -799,7 +802,7 @@ index d9109fc5..0f511d50 100644
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -538,7 +598,7 @@ static void render_player_frame(
+@@ -538,7 +599,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  

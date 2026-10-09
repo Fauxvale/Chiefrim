@@ -10,7 +10,14 @@ player instead (CR_MSG_LIGHTING): its directional ambient, its key light (the
 sun, the moon, an interior's directional light) and the point lights nearest
 the player (torches, fires, spells). Each object takes them at its own
 position: the nearest strong point light is its fill, the others brighten
-its ambient. object_lights.c's hook calls this in place of the lightmap. */
+its ambient. object_lights.c's hook calls this in place of the lightmap.
+
+Shadows (protocol 21): outside, the sun or moon reaches an object only if
+nothing of Skyrim's is in its way. Chief, and what he holds (his arms and
+weapon take his lighting), use what Skyrim found at his eye (its own
+physics, as far as its loaded cells); every other object casts a ray to it
+through Chiefrim's collision BSP, Skyrim's shapes around Chief. Halo's
+blend of each object's lighting softens the change. */
 
 #include "cseries.h"
 #include "chiefrim/chiefrim.h"
@@ -19,6 +26,7 @@ its ambient. object_lights.c's hook calls this in place of the lightmap. */
 #include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
 #include "objects/objects.h"
+#include "physics/collisions.h"
 #include "render/render.h"
 
 #include <math.h>
@@ -45,6 +53,42 @@ void chiefrim_lighting_message(cr_msg_lighting const *message)
 void chiefrim_lighting_forget(void)
 {
 	chiefrim_lighting.valid = FALSE;
+}
+
+/* how far towards the sun an object's ray looks for what shades it: past
+the collision BSP's reach (iRadius 2 rings of 1024 units, ~12 world units) */
+#define CHIEFRIM_SHADOW_REACH 40.f
+
+/* How much of the key light reaches the object: 1 inside (an interior's
+directional light casts no shadows) */
+static real chiefrim_key_visible(long object_index, struct object_datum const *object, real_vector3d const *key)
+{
+	cr_msg_lighting const *light = &chiefrim_lighting.light;
+	struct collision_result collision;
+	real_point3d from;
+	real_vector3d towards;
+	long root = object_index, chief = chiefrim_local_unit();
+	struct object_datum const *parent = object;
+
+	if (!light->key_shadowed)
+		return 1.f;
+	while (parent->object.parent_object_index != NONE)
+	{
+		root = parent->object.parent_object_index;
+		parent = object_get(root);
+	}
+	if (root == chief && chief != NONE)
+		return PIN(light->sun_visible, 0.f, 1.f);
+	/* from its centre, a little towards the sun: past its own surface */
+	from = object->object.bounding_sphere_center;
+	from.x -= key->i * 0.05f;
+	from.y -= key->j * 0.05f;
+	from.z -= key->k * 0.05f;
+	towards.i = -key->i * CHIEFRIM_SHADOW_REACH;
+	towards.j = -key->j * CHIEFRIM_SHADOW_REACH;
+	towards.k = -key->k * CHIEFRIM_SHADOW_REACH;
+	return collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_back_facing_surfaces_bit), &from, &towards, object_index, &collision) ? 0.f : 1.f;
 }
 
 static real chiefrim_luminance(real_rgb_color const *color)
@@ -90,7 +134,7 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		key.j = 0.f;
 		key.k = -1.f;
 	}
-	chiefrim_rgb(&lighting->distant_lights[0].color, light->key_color, 1.f);
+	chiefrim_rgb(&lighting->distant_lights[0].color, light->key_color, chiefrim_key_visible(object_index, object, &key));
 	lighting->distant_lights[0].direction = key;
 
 	/* the fill: the sky's light from above, unless a point light is stronger */

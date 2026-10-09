@@ -120,6 +120,7 @@ static struct
 	uint32_t camera_frame;        /* Skyrim's camera this frame is drawn through (0: Halo's) */
 	uint32_t last_camera_frame;   /* the last one drawn */
 	long render_layer;            /* CHIEFRIM_LAYER_*: what render_window draws now */
+	boolean render_hud;           /* in the screen layer: the HUD's draws, not the weapon's */
 	float tangent_x, tangent_y;   /* the projection of the frame being drawn (0: unknown) */
 	long chief_unit;              /* Chief's unit last frame (NONE: none) */
 } chiefrim;
@@ -131,7 +132,7 @@ static uint32_t chiefrim_now_ms(void)
 	return (uint32_t)system_milliseconds();
 }
 
-static long chiefrim_local_unit(void)
+long chiefrim_local_unit(void)
 {
 	long player_index = local_player_get_player_index(0);
 
@@ -870,6 +871,17 @@ long chiefrim_overlay_layer(void)
 void chiefrim_set_render_layer(long layer)
 {
 	chiefrim.render_layer = layer;
+	chiefrim.render_hud = FALSE;
+}
+
+void chiefrim_set_render_hud(boolean hud)
+{
+	chiefrim.render_hud = hud;
+}
+
+long chiefrim_overlay_hud(void)
+{
+	return chiefrim.render_hud;
 }
 
 /* Lockstep with Skyrim (docs §9): the frame Halo draws next is for the

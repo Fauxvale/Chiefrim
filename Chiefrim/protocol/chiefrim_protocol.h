@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 20u
+#define CR_PROTOCOL_VERSION 21u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -475,6 +475,12 @@ typedef struct cr_msg_lighting
 	cr_vec3  key_direction;    /* unit */
 	uint32_t point_count;      /* the point lights nearest the player (torches, fires, spells) */
 	cr_light_point points[CR_LIGHTING_POINTS];
+	/* protocol 21: shadows from the key light. key_shadowed: it casts them
+	(the sun or moon outside; an interior's directional light doesn't), so
+	Halo tests each object's way to it. sun_visible: how much of it reaches
+	Chief's eye past Skyrim's world (0..1), for Chief, his arms and weapon. */
+	uint32_t key_shadowed;
+	float    sun_visible;
 } cr_msg_lighting;
 
 /* Chief's kit (docs §11, save and load): what the Skyrim co-save keeps.
@@ -582,7 +588,11 @@ Colours are RGBA8, premultiplied (draw with ONE, INV_SRC_ALPHA), on
 transparent black; depth is float32. Top row first, rows of width
 elements. In a slot: the screen layer at 0, the world layer at
 CR_FRAME_LAYER_BYTES, its depth at 2 * CR_FRAME_LAYER_BYTES; the world
-layer and depth only if the header says CR_FRAME_WORLD.
+layer and depth only if the header says CR_FRAME_WORLD. With CR_FRAME_MASK
+(protocol 21), at 3 * CR_FRAME_LAYER_BYTES: the screen layer's weapon share,
+one byte a pixel (255: all of the pixel's colour is Chief's arms and weapon,
+0: the HUD's, or nothing), so Skyrim grades the weapon as its own picture
+and leaves the HUD alone.
 
 Halo writes the slots round-robin, each under its own seqlock, and then
 names it the latest. Skyrim copies the latest slot out and checks its seq
@@ -593,7 +603,8 @@ can restart at any time. */
 #define CR_FRAME_MAX_WIDTH  2560u /* larger screens get a smaller picture, scaled up */
 #define CR_FRAME_MAX_HEIGHT 1440u
 #define CR_FRAME_LAYER_BYTES (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
-#define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES)
+#define CR_FRAME_MASK_BYTES  (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT)
+#define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES + CR_FRAME_MASK_BYTES)
 
 typedef struct cr_frame_header
 {
@@ -613,6 +624,7 @@ typedef struct cr_frame_header
 
 #define CR_FRAME_VISIBLE 0x0001u /* reserved: always set */
 #define CR_FRAME_WORLD   0x0002u /* the world layer has something (else it is all transparent) */
+#define CR_FRAME_MASK    0x0004u /* the screen layer's weapon share follows (protocol 21) */
 
 typedef struct cr_frames
 {
@@ -881,7 +893,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_m
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
-CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");
+CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28 + 8, "cr_msg_lighting");
 CR_STATIC_ASSERT(sizeof(cr_chief_weapon) == 80, "cr_chief_weapon");
 CR_STATIC_ASSERT(sizeof(cr_chief_state) == 40 + 4 * 80, "cr_chief_state");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_state) == 8 + 360, "cr_msg_chief_state");
