@@ -177,6 +177,8 @@ namespace chiefrim::Caches
 			std::ranges::shuffle(anchors, rng);
 			// a boss chest first: the best place for one
 			std::ranges::stable_partition(anchors, [](auto* a_ref) { return IsBossChest(a_ref); });
+			const int before = a_record.count;
+			const auto bosses = std::ranges::count_if(anchors, [](auto* a_ref) { return IsBossChest(a_ref); });
 			for (auto* anchor : anchors) {
 				if (a_record.count >= config.maxPerSite) {
 					break;
@@ -208,6 +210,8 @@ namespace chiefrim::Caches
 				logger::info("caches: {} by {:08X}{} in {:08X} ({})", weapon, anchor->GetFormID(), boss ? " (the boss's chest)" : "",
 					a_cell->GetFormID(), a_site->GetName());
 			}
+			logger::info("caches: cell {:08X} of {}: {} chests and racks ({} the boss's), {} caches chosen; {} of {} in the site", a_cell->GetFormID(),
+				a_site->GetName(), anchors.size(), bosses, a_record.count - before, a_record.count, config.maxPerSite);
 		}
 
 		// Where the weapon lies: on a chest's lid, before a rack
