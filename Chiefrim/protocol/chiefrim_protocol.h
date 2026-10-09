@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 23u
+#define CR_PROTOCOL_VERSION 24u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -315,6 +315,8 @@ vehicles); docs §10. */
 #define CR_MSG_CONSOLE       0x11u /* H->S: a line for Skyrim's console, answering a console command (cr_msg_log; protocol 19) */
 #define CR_MSG_DEBUG         0x12u /* S->H: debug drawing on or off (protocol 19) */
 #define CR_MSG_SHOT          0x13u /* H->S: a projectile's way this tick: Skyrim's destructible objects on it are hurt (protocol 23) */
+#define CR_MSG_CACHE_PLACE   0x14u /* S->H: a weapon cache: a weapon lying in Skyrim's world (protocol 24) */
+#define CR_MSG_CACHE_TAKEN   0x15u /* H->S: Chief picked a cache's weapon up (protocol 24) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -550,6 +552,30 @@ typedef struct cr_msg_chief_state
 	cr_msg_header  header;
 	cr_chief_state state;
 } cr_msg_chief_state;
+
+/* Weapon caches (protocol 24, docs §8.4): Skyrim chooses where weapons lie
+in its bandit camps and forts, keeps them in its co-save, and has Halo lay
+each down in the world it is in now (its world_context generation; a
+message for another world is dropped, as a new world erases Halo's loose
+objects and Skyrim sends its caches again). Halo drops it onto what lies
+below the position (once its collision has it) and reports the cache taken
+when Chief picks the weapon up. */
+typedef struct cr_msg_cache_place
+{
+	cr_msg_header header;
+	uint32_t id;           /* Skyrim's, for the taken report */
+	uint32_t generation;   /* the world_context it is for */
+	cr_vec3  position;     /* Skyrim units: above where it lies */
+	float    yaw;          /* radians from +x, counterclockwise: which way it points */
+	char     weapon[CR_WEAPON_TAG_LENGTH]; /* a tag path or its last part, NUL-terminated */
+} cr_msg_cache_place;
+
+typedef struct cr_msg_cache_taken
+{
+	cr_msg_header header;
+	uint32_t id;
+	uint32_t reserved[3];
+} cr_msg_cache_taken;
 
 typedef struct cr_msg_hello
 {
@@ -908,6 +934,8 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
 CR_STATIC_ASSERT(sizeof(cr_msg_shot) == 40, "cr_msg_shot");
+CR_STATIC_ASSERT(sizeof(cr_msg_cache_place) == 96, "cr_msg_cache_place");
+CR_STATIC_ASSERT(sizeof(cr_msg_cache_taken) == 24, "cr_msg_cache_taken");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");

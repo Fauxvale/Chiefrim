@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "Caches.h"
 #include "Camera.h"
 #include "CoSave.h"
 #include "Combat.h"
@@ -39,6 +40,7 @@ namespace
 			chiefrim::Hud::Install();
 			chiefrim::Handoff::Install();
 			chiefrim::Lighting::Install();
+			chiefrim::Caches::Install();
 		}
 	}
 }

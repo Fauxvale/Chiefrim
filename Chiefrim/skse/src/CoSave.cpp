@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "CoSave.h"
+#include "Caches.h"
 #include "Link.h"
 #include "Settings.h"
 
@@ -82,6 +83,7 @@ namespace chiefrim::CoSave
 
 		void OnSave(SKSE::SerializationInterface* a_intfc)
 		{
+			Caches::Save(a_intfc);  // this plugin's one co-save: the caches' record too
 			std::scoped_lock guard(lock);
 			if (!latest) {
 				logger::info("co-save: no kit of Chief's yet; the save has none");
@@ -99,6 +101,10 @@ namespace chiefrim::CoSave
 			std::scoped_lock guard(lock);
 			std::uint32_t type, version, length;
 			while (a_intfc->GetNextRecordInfo(type, version, length)) {
+				if (type == Caches::kRecord) {
+					Caches::Load(a_intfc, version, length);
+					continue;
+				}
 				if (type != kKitRecord) {
 					continue;
 				}
@@ -117,6 +123,7 @@ namespace chiefrim::CoSave
 		// Before a load or a new game: until a kit loads, the starting loadout.
 		void OnRevert(SKSE::SerializationInterface*)
 		{
+			Caches::Revert();
 			std::scoped_lock guard(lock);
 			latest.reset();
 			pending = Pending::kStartingLoadout;

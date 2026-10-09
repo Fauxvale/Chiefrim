@@ -105,6 +105,10 @@ wchar_t const *chiefrim_control_key_name(long control); /* hud_messaging.c: the 
 void chiefrim_inventory_linked(void);                  /* Skyrim said hello */
 void chiefrim_inventory_message(cr_msg_chief_state const *message); /* CR_MSG_CHIEF_RESTORE */
 void chiefrim_inventory_update(long chief, boolean world_valid, boolean dead); /* each frame while linked, after the world */
+/* chiefrim_caches.c (docs §8.4): weapon caches in Skyrim's camps and forts */
+void chiefrim_caches_message(cr_msg_cache_place const *message);
+void chiefrim_caches_update(long chief, uint32_t generation, cr_vec3 origin);
+void chiefrim_caches_forget(void);
 long chiefrim_weapon_tag(char const *name);            /* the map's weapon by tag path or its last part ("needler"), or NONE */
 /* chiefrim_lighting.c (docs §9): Skyrim's light on Halo's objects */
 void chiefrim_lighting_message(cr_msg_lighting const *message);

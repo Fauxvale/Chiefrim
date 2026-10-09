@@ -674,7 +674,37 @@ Without Covenant enemies there are no weapon drops. Options:
 - **c)** A loot bridge, where certain Skyrim items in containers become Halo weapons or ammo.
 
 v1 ships (a) with a debug command to spawn any weapon (the F7 key, and the console's
-`chiefrim give <name>`, §11). (b) and (c) are later work.
+`chiefrim give <name>`, §11). (c) is later work.
+
+**(b) Weapon caches (Phase 5, 2026-10-08, protocol 24, `skse/src/Caches.cpp`,
+`halo/src/chiefrim_caches.c`).** Halo weapons lying in Skyrim's world: Halo objects, not Skyrim
+items, so no Skyrim plugin (esp) or assets. Halo lays each one down in its world (drawn in the world
+layer, lit by Skyrim's light, on Skyrim's surfaces through the collision BSP) and Chief picks it up
+as in Halo.
+- **Sites:** a location (or one it's in) with `LocTypeBanditCamp`, `LocTypeForswornCamp` or
+  `LocTypeMilitaryCamp` is a camp, with `LocTypeMilitaryFort` a fort. The first visit decides
+  whether it has any (`fSiteChance`, 0.5).
+- **Which and what:** the first time each cell of a site with caches loads, its chests (a container
+  whose model's path has "chest") and weapon racks are shuffled and each gets one by `fChestChance`
+  (0.35), up to `iMaxPerSite` (3) in the site: a light weapon (`sLightWeapons`: pistol, plasma
+  pistol, needler, assault rifle), or in a fort a medium one by `fMediumChance` (0.3; shotgun,
+  plasma rifle). A fort's boss chest (location ref type `BossContainer`, 000130F8) gets a heavy one by
+  `fHeavyChance` (0.6; sniper rifle, rocket launcher, flamethrower, fuel rod), found nowhere else; a
+  fort's other chests stop one short of the limit to leave it a place. Chance is seeded by the
+  playthrough (a seed in the co-save), the site and the cell.
+- **Kept:** the co-save's `CACH` record has the seed, every site seen (with or without caches), every
+  cell chosen, and each cache (its chest, cell, site, weapon, taken), written as they are chosen
+  and read back with form IDs resolved (a plugin gone takes its caches). So a cache never moves, a
+  site never rolls again, and a taken one stays taken.
+- **Laid down:** the untaken caches within `fSendRadius` (2500, about the collision's reach) go to
+  Halo (`CR_MSG_CACHE_PLACE`: on a chest's lid, before a rack), every 5 s, for the world Halo is in
+  (the generation; a new world erases Halo's loose objects, and the next sends lay them down
+  again). Halo drops each onto what lies below once its collision has it, keeps one per cache a
+  world, and reports it taken (`CR_MSG_CACHE_TAKEN`) when Chief holds it.
+Offline (`fake_skyrim.py --cache NAME`, `--cache-north`, `--action-at`): a shotgun laid on the
+ground 150 units ahead, once a world across two recenters; laid at Chief's feet, picked up (into
+his free slot) and reported taken once. In game: to check (the log names each site's decision and
+each cache chosen and taken).
 
 ## 9. Rendering
 
@@ -1077,7 +1107,7 @@ Each phase ends in something you can play.
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: done (2026-10-06), verified in game:** Skyrim's HUD and light on Halo's objects (§9); the hand-off to Skyrim's furniture, beds, mounts, scenes and swimming (§11; beast forms verified 2026-10-07); load doors, interiors and fast travel (a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). The one crash in testing was MaxsuCombatEscape's (combat pathing run inside a cell change; it crashes the same way without Chiefrim). |
-| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout, lighting matched to Skyrim weather (**built 2026-10-08, checked offline**, §9: the sun's shadows, Skyrim's grade and fog on Halo's layers, protocol 21; in game to check), better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
+| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout (**weapon caches built 2026-10-08, checked offline**, §8.4, protocol 24; in game to check), lighting matched to Skyrim weather (**built 2026-10-08, checked offline**, §9: the sun's shadows, Skyrim's grade and fog on Halo's layers, protocol 21; in game to check), better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
 ## 13. Decisions

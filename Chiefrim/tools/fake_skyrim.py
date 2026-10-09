@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 23
+VERSION = 24
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -52,6 +52,7 @@ MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
 MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION, MSG_FLASHLIGHT = 12, 13, 14, 15, 16
 MSG_SHOT = 0x13
+MSG_CACHE_PLACE, MSG_CACHE_TAKEN = 0x14, 0x15
 SHOTS = [0]
 MSG_CONSOLE, MSG_DEBUG = 17, 18
 GIVE_LIST, DEBUG_HITBOXES = 1, 1
@@ -501,6 +502,12 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--cache", default="",
+                        help="a weapon cache: this weapon laid down 150 units north of the start, sent every 2 s as the plugin does")
+    parser.add_argument("--cache-at", type=float, default=2.0)
+    parser.add_argument("--cache-north", type=float, default=150.0, help="how far north of the start the cache lies")
+    parser.add_argument("--action-at", type=float, default=0.0,
+                        help="seconds in: hold the action key (pick up, swap) for 2 s")
     parser.add_argument("--give-name", default="",
                         help="with --give-at: weapons by name, comma-separated, in turn (the console's chiefrim give); empty: the next")
     parser.add_argument("--list-weapons-at", type=float, default=0.0, help="seconds in: the console's chiefrim weapons")
@@ -674,6 +681,8 @@ def main():
                 elif msg_type == MSG_EXPLOSION:
                     cx, cy, cz, radius, acceleration = struct.unpack_from("<3fff", body)
                     print(f"fake_skyrim: explosion at ({cx:.0f} {cy:.0f} {cz:.0f}), radius {radius:.0f}, acceleration {acceleration:.3f}", flush=True)
+                elif msg_type == MSG_CACHE_TAKEN:
+                    print(f"fake_skyrim: cache {struct.unpack_from('<I', body)[0]:08X} taken", flush=True)
                 elif msg_type == MSG_SHOT:
                     fx, fy, fz, tx, ty, tz = struct.unpack_from("<3f3f", body)
                     SHOTS[0] += 1
@@ -836,6 +845,20 @@ def main():
                 name = names[(drive_state["gives"] - 1) % len(names)] if names else ""
                 link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, 0, name.encode()[:63]))
                 print(f"fake_skyrim: give weapon #{drive_state['gives']} {name!r}", flush=True)
+            if options.cache and t >= options.cache_at and t >= drive_state.get("cache_next", 0.0):
+                drive_state["cache_next"] = t + 2.0
+                # cr_msg_cache_place: id, generation, position, yaw, weapon
+                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64s", 0xCAC1, generation,
+                    options.x, options.y + options.cache_north, options.z + 120.0, math.pi / 2, options.cache.encode()[:63]))
+                if not drive_state.get("cache_said"):
+                    drive_state["cache_said"] = True
+                    print(f"fake_skyrim: cache CAC1: {options.cache} {options.cache_north:.0f} units north, world {generation}", flush=True)
+            if options.action_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                holding = options.action_at <= t < options.action_at + 2.0
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 7) if holding else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
             if options.list_weapons_at and t >= options.list_weapons_at and not drive_state.get("listed"):
                 drive_state["listed"] = True
                 link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, GIVE_LIST, b""))

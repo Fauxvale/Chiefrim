@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Link.h"
+#include "Caches.h"
 #include "CoSave.h"
 #include "Combat.h"
 #include "Console.h"
@@ -202,6 +203,9 @@ namespace chiefrim
 				break;
 			case CR_MSG_SHOT:
 				Combat::OnShot(*reinterpret_cast<const cr_msg_shot*>(buffer));
+				break;
+			case CR_MSG_CACHE_TAKEN:
+				Caches::OnTaken(*reinterpret_cast<const cr_msg_cache_taken*>(buffer));
 				break;
 			case CR_MSG_CHIEF_STATE:
 				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));
