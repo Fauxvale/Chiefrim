@@ -1032,6 +1032,16 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   they had hung where the old collision was. Offline (`fake_skyrim.py --recenter-every`): the two
   weapons Chief dropped and 44 bullet holes gone at the recenter; firing and a grenade across
   three recenters, no decal errors.
+  **Two fixes (2026-10-09).** (1) The erase kept what has Chief as its ultimate parent, but a weapon
+  he has put away isn't attached to him, only in his slots: a door erased it (a load gave it back,
+  from the co-save). Now everything in his weapon slots stays. (2) Halo halted going into a fort's
+  interior (`items.c`: "#17185 is not a valid index in [#0,#4)": an item resting by its surface's
+  index in a BSP swapped out, looked up in the stand-in floor's 4). The hang's stack (supervisor,
+  below) named `item_update`. An item's rested surface is now checked against the collision
+  installed when it's looked up (`chiefrim_item_rest_valid`, both places in `items.c`; else it
+  rests on none and settles again), and each swap moves resting items onto the new BSP's surface
+  under them, as bipeds (`chiefrim_world_install`; one Chief carries rests on none). The exact
+  sequence that left the stale index wasn't reproduced offline; the check covers any.
 - **Skyrim's own animations (the hand-off, Phase 4, `skse/src/Handoff.cpp`):** while the player
   sits (chairs, crafting stations, any furniture: its sit/sleep state), sleeps, rides, swims (§6),
   is in a beast form (werewolf, vampire lord: a race that isn't playable), is in a kill move, or a script holds him (AI-driven, or his movement controls turned off: the

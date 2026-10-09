@@ -109,6 +109,10 @@ void chiefrim_inventory_update(long chief, boolean world_valid, boolean dead); /
 void chiefrim_caches_message(cr_msg_cache_place const *message);
 void chiefrim_caches_update(long chief, uint32_t generation, cr_vec3 origin);
 void chiefrim_caches_forget(void);
+/* items.c: the surface an item says it rests on is one of the collision
+installed now (else it rests on none, and settles again) */
+struct item_datum;
+boolean chiefrim_item_rest_valid(struct item_datum *item);
 long chiefrim_weapon_tag(char const *name);            /* the map's weapon by tag path or its last part ("needler"), or NONE */
 /* chiefrim_lighting.c (docs §9): Skyrim's light on Halo's objects */
 void chiefrim_lighting_message(cr_msg_lighting const *message);

@@ -444,10 +444,28 @@ index 9607f857..9ea8e212 100644
  			_unit_control_weapon_primary_trigger_bit) ||
  			(unit->unit.grenade_throw_state != _unit_grenade_throw_idle &&
 diff --git a/source/items/items.c b/source/items/items.c
-index 3e2c7c0c..e4cc47f6 100644
+index 3e2c7c0c..a6bc5435 100644
 --- a/source/items/items.c
 +++ b/source/items/items.c
-@@ -678,6 +678,11 @@ boolean item_update(
+@@ -76,6 +76,7 @@ symbols in this file:
+ #include "scenario/scenario.h"
+ #include "sound/game_sound.h"
+ #include "units/units.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -347,7 +348,8 @@ void item_accelerate(
+ 		{
+ 			struct object_marker marker;
+ 
+-			if (object_get_marker_by_name(item_index, "ground point", &marker, 1))
++			if (object_get_marker_by_name(item_index, "ground point", &marker, 1) &&
++				chiefrim_item_rest_valid(item)) /* CHIEFRIM: a surface of the collision installed now */
+ 			{
+ 				struct collision_bsp *collision_bsp;
+ 				struct collision_surface const *surface;
+@@ -678,6 +680,11 @@ boolean item_update(
  					switch (collision.type)
  					{
  					case _collision_result_structure:
@@ -459,6 +477,16 @@ index 3e2c7c0c..e4cc47f6 100644
  						SET_FLAG(item->item.flags, _item_on_structure_bit, TRUE);
  						item->item.rested_surface_index =
  							(short)collision.surface_index;
+@@ -767,7 +774,8 @@ boolean item_update(
+ 
+ 			if (TEST_FLAG(item->item.flags, _item_on_structure_bit) &&
+ 				item->item.rested_surface_index != NONE &&
+-				item->item.bsp_index == global_structure_bsp_index_get())
++				item->item.bsp_index == global_structure_bsp_index_get() &&
++				chiefrim_item_rest_valid(item)) /* CHIEFRIM: a surface of the collision installed now */
+ 			{
+ 				struct collision_bsp *collision_bsp;
+ 				struct collision_surface const *surface;
 diff --git a/source/items/projectiles.c b/source/items/projectiles.c
 index 86100135..42d030ce 100644
 --- a/source/items/projectiles.c

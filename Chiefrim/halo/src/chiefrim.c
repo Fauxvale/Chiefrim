@@ -958,7 +958,17 @@ static void chiefrim_clear_level_objects(long chief, char const *why)
 	object_iterator_new(&iterator, _object_mask_all, 0);
 	while (object_iterator_next(&iterator) && count < (long)NUMBEROF(doomed))
 	{
-		if (iterator.index != chief && object_get_ultimate_parent(iterator.index) != chief)
+		boolean carried = FALSE;
+		short slot;
+
+		/* his weapons put away aren't attached to him, only in his slots: a
+		door erased the one he wasn't holding */
+		if (chief != NONE && unit_try_and_get(chief))
+		{
+			for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+				carried |= unit_get(chief)->unit.weapon_object_indices[slot] == iterator.index;
+		}
+		if (iterator.index != chief && !carried && object_get_ultimate_parent(iterator.index) != chief)
 			doomed[count++] = iterator.index;
 	}
 	for (index = 0; index < count; index++)

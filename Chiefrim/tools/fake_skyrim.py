@@ -506,8 +506,10 @@ def main():
                         help="a weapon cache: this weapon laid down 150 units north of the start, sent every 2 s as the plugin does")
     parser.add_argument("--cache-at", type=float, default=2.0)
     parser.add_argument("--cache-north", type=float, default=150.0, help="how far north of the start the cache lies")
-    parser.add_argument("--action-at", type=float, default=0.0,
-                        help="seconds in: hold the action key (pick up, swap) for 2 s")
+    parser.add_argument("--action-at", default="",
+                        help="seconds in (comma-separated): hold the action key (pick up, swap) for 1 s")
+    parser.add_argument("--cache2", default="", help="a second cache, at Chief's feet, from --cache2-at seconds in")
+    parser.add_argument("--cache2-at", type=float, default=0.0)
     parser.add_argument("--give-name", default="",
                         help="with --give-at: weapons by name, comma-separated, in turn (the console's chiefrim give); empty: the next")
     parser.add_argument("--list-weapons-at", type=float, default=0.0, help="seconds in: the console's chiefrim weapons")
@@ -856,9 +858,13 @@ def main():
             if options.action_at and not options.drive:
                 t = time.monotonic() - started
                 frame += 1
-                holding = options.action_at <= t < options.action_at + 2.0
+                holding = any(float(a) <= t < float(a) + 1.0 for a in options.action_at.split(","))
                 link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 7) if holding else 0, 1,
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
+            if options.cache2 and t >= options.cache2_at and t >= drive_state.get("cache2_next", 0.0):
+                drive_state["cache2_next"] = t + 0.2
+                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64s", 0xCAC2, generation,
+                    options.x, options.y + 20.0, options.z + 120.0, 0.0, options.cache2.encode()[:63]))
             if options.list_weapons_at and t >= options.list_weapons_at and not drive_state.get("listed"):
                 drive_state["listed"] = True
                 link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, GIVE_LIST, b""))
