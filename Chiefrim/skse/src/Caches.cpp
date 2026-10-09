@@ -68,6 +68,7 @@ namespace chiefrim::Caches
 		std::uint32_t                              generation = 0;  // Halo's world
 		std::unordered_map<RE::FormID, ULONGLONG>  sentAt;    // in this world
 		ULONGLONG                                  next = 0;
+		RE::FormID                                 lastLocation = 0;  // logged
 
 		std::vector<std::string> ReadList(const wchar_t* a_key, const wchar_t* a_default)
 		{
@@ -410,7 +411,15 @@ namespace chiefrim::Caches
 		std::scoped_lock guard(lock);
 		auto* cell = a_player->GetParentCell();
 		RE::BGSLocation* site = nullptr;
-		const auto kind = SiteOf(a_player->GetCurrentLocation(), site);
+		auto*      location = a_player->GetCurrentLocation();
+		const auto kind = SiteOf(location, site);
+		if (const auto id = location ? location->GetFormID() : 0; id != lastLocation) {
+			lastLocation = id;
+			logger::info("caches: in {} {:08X}{}", location ? location->GetName() : "no location", id,
+				kind == Kind::kNone ? ": not a camp or fort" :
+				std::format(": the {} {} ({})", kind == Kind::kFort ? "fort" : "camp", site->GetName(),
+					!sites.contains(site->GetFormID()) ? "first visit" : sites[site->GetFormID()].chosen ? "has caches" : "none"));
+		}
 		if (kind != Kind::kNone && cell && !cells.contains(cell->GetFormID())) {
 			if (!seed) {
 				seed = std::random_device{}() | 1u;  // this playthrough's

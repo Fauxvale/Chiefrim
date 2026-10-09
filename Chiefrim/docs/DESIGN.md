@@ -707,7 +707,13 @@ his free slot) and reported taken once. Verified in game (2026-10-09): Fort Grey
 Broken Tower Redoubt (a Forsworn camp) rolled caches, its interior a plasma pistol by a chest, laid
 down at once, laid again after a teleport, taken by a swap, saved taken, and not laid again after a
 load. The log names each site's decision, each cell's chests and racks and the caches chosen, and
-each one taken. Heavy weapons (a fort's boss chest): to check.
+each one taken. Heavy weapons (a fort's boss chest): to check. White River Watch (a bandit camp):
+its cells logged 1, 0, 1 and 1 (the boss's) chests, two needlers chosen; reloading saves from before
+it chose the same again (the playthrough's seed). One needler, by a chest up its watchtower, was
+laid on the tower once and on the ground below twice: Halo looked 4 world units down for something
+to lie on, and before the tower's collision arrived found the ground. It looks 1 (~210 Skyrim
+units) now, and waits for the chest's own. The log also names each location the player enters and
+whether it's a camp or fort (and its decision), for a fort that logged nothing.
 
 ## 9. Rendering
 

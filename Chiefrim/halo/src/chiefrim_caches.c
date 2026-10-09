@@ -27,8 +27,10 @@ when Chief picks it up (CR_MSG_CACHE_TAKEN), so it stays taken.
 
 #define CHIEFRIM_CACHES 64
 /* how far below its position a cache looks for something to lie on (world
-units: ~850 Skyrim units) */
-#define CHIEFRIM_CACHE_DROP 4.f
+units: ~210 Skyrim units: its chest's lid, the floor before its rack). Not
+further: before the chest's own collision arrived, one on a watchtower
+fell through to the ground below it (in game) */
+#define CHIEFRIM_CACHE_DROP 1.f
 /* a cache that finds nothing to lie on in this long is given up (until
 Skyrim sends it again) */
 #define CHIEFRIM_CACHE_PATIENCE_MS 60000u
