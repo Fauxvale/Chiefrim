@@ -799,6 +799,15 @@ using the camera Skyrim is about to use. It draws three layers:
   dx,dy,dz,reach,r,g,b`), in the dark: the MA5B 4 alone, 17 to 28 with a torch beside it, the
   barrel orange in its light; daylight 36 and 67 as before. The log names the lights sent when
   their number changes (distance, reach, colour) and how many the scene has on.
+- **The shine in the sun's colour (Phase 5, 2026-10-08).** Halo has no sun of its own (its maps
+  light objects from lightmaps); Skyrim's sun or moon is already the key light, its direction and
+  colour. But the reflection's tint, most of what a shiny weapon shows, was the ambient's size
+  (times 2, plus 0.25: Halo's own formula, by its lightmap's colour), which Skyrim's daylight
+  clamps to white: an orange afternoon sun (0.63 0.46 0.35, from the log) never coloured the shine.
+  Now the tint is the hue of the light reaching the object (the ambient, the key past its shadow,
+  a torch), its largest part 1; its strength stays the alpha's. From the logged light: afternoon
+  (1.0 0.93 0.80), a blue dusk (0.50 0.86 1.0), a grey day near white. Offline (`fake_skyrim.py
+  --sun-color`): the MA5B's barrel white under a white sun, copper under an orange one.
 - **Matched to Skyrim's weather (Phase 5, 2026-10-08, protocol 21).** The first in-game look found
   Chief's weapon the wrong colour (none of dusk's warmth or night's blue) and too bright at night
   and in shade. Skyrim's light was there; two things weren't:

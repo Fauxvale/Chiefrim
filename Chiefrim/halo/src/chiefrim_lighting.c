@@ -194,10 +194,22 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	brightness = chiefrim_luminance(&lighting->ambient_color) +
 		0.5f * (chiefrim_luminance(&lighting->distant_lights[0].color) + chiefrim_luminance(&torch));
 	lighting->reflection_tint_color.alpha = PIN(brightness * 1.5f + 0.25f, 0.f, 1.f);
-	/* tinted by the ambient as before (daylight as it was), and the torch's colour */
-	lighting->reflection_tint_color.red = PIN((lighting->ambient_color.red + 0.5f * torch.red) * 2.f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.green = PIN((lighting->ambient_color.green + 0.5f * torch.green) * 2.f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.blue = PIN((lighting->ambient_color.blue + 0.5f * torch.blue) * 2.f + 0.25f, 0.f, 1.f);
+	/* tinted by the colour of the light that reaches it, the sun's or moon's
+	(past what shades it), the sky's and a torch's: their hue, its largest
+	part 1 (how bright is the alpha's). Halo tints by its lightmap's colour
+	too, but by its size: Skyrim's daylight (ambient 0.44 0.54 0.51, an
+	orange afternoon sun 0.63 0.46 0.35) came out white, the shine never the
+	sun's colour (the first in-game look) */
+	{
+		real red = lighting->ambient_color.red + lighting->distant_lights[0].color.red + torch.red;
+		real green = lighting->ambient_color.green + lighting->distant_lights[0].color.green + torch.green;
+		real blue = lighting->ambient_color.blue + lighting->distant_lights[0].color.blue + torch.blue;
+		real largest = MAX(MAX(red, green), MAX(blue, 0.001f));
+
+		lighting->reflection_tint_color.red = PIN(red / largest, 0.f, 1.f);
+		lighting->reflection_tint_color.green = PIN(green / largest, 0.f, 1.f);
+		lighting->reflection_tint_color.blue = PIN(blue / largest, 0.f, 1.f);
+	}
 	lighting->shadow_vector = key;
 	if (lighting->shadow_vector.k > -0.5f)
 	{
