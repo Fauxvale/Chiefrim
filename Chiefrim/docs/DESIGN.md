@@ -1087,6 +1087,12 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   controls. A new Halo in the same shared file is noticed by its process id (relinked: hello and
   the world again); Halo no longer truncates the file on start (a Skyrim still mapping it would
   fault on its pages). Checked offline: a SIGKILL, a restart, off and on, and Skyrim exiting.
+  **Where a hung Halo was (2026-10-09):** before it kills a Halo Skyrim found unresponsive, the
+  supervisor sends it SIGUSR2, and Halo's main thread writes its stack to `halo.out` (`halo.out.1`
+  once the next one starts; `addr2line -f -e halo/.work/build/linux/halo ADDRESS` names Halo's
+  frames). The game's log is kept too (`debug.txt.1`): the restarted Halo starts its own afresh.
+  Added after Halo hung (2 s without a frame) as a running Halo went into a fort's interior, twice
+  in one session, and a fresh one handled the same interior; the logs then didn't say where.
   Phase 0 has `tools/run_phase0.sh` for the test stand.
 - **Hidden window:** the port's own hidden-window mode (`HALO_HIDDEN_WINDOW`) crashes the GL
   driver within seconds in the lens-flare occlusion query (`rasterizer_lens_flares_submit_occlusion_tests`).

@@ -56,7 +56,9 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include <string.h>
 
 #ifdef __linux__
+#include <execinfo.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -982,6 +984,39 @@ boolean chiefrim_active(void)
 	return chiefrim.active;
 }
 
+#ifdef __linux__
+/* Where a hung Halo is (tools/launch_halo.sh): before it kills one that
+stopped responding, the supervisor sends SIGUSR2, and the main thread's
+stack goes to stderr (halo.out). The signal may land on another thread: it
+passes it on to the main one. */
+static pthread_t chiefrim_main_thread;
+
+static void chiefrim_hang_signal(int signal_number)
+{
+	static char const header[] = "chiefrim: asked where Halo is (it stopped responding); the main thread's stack:\n";
+	void *frames[64];
+	int count;
+
+	if (!pthread_equal(pthread_self(), chiefrim_main_thread))
+	{
+		pthread_kill(chiefrim_main_thread, signal_number);
+		return;
+	}
+	(void)!write(STDERR_FILENO, header, sizeof(header) - 1);
+	count = backtrace(frames, 64);
+	backtrace_symbols_fd(frames, count, STDERR_FILENO);
+}
+
+static void chiefrim_hang_handler_install(void)
+{
+	void *warm[1];
+
+	chiefrim_main_thread = pthread_self();
+	backtrace(warm, 1); /* loads libgcc now, not in the handler */
+	signal(SIGUSR2, chiefrim_hang_signal); /* (sigaction is hidden by -D__STRICT_ANSI__; glibc's signal restarts calls) */
+}
+#endif
+
 void chiefrim_initialize(void)
 {
 	char const *flag = getenv("CHIEFRIM");
@@ -992,6 +1027,7 @@ void chiefrim_initialize(void)
 		return;
 
 #ifdef __linux__
+	chiefrim_hang_handler_install();
 	{
 		/* not truncated: a Skyrim still mapping the file of a Halo that died
 		(the supervisor restarts it, tools/launch_halo.sh) would fault on its

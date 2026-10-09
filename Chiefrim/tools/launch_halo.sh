@@ -80,6 +80,7 @@ esac
 halo_pid=""
 start_halo() {
 	[ -f "$data/halo.out" ] && mv -f "$data/halo.out" "$data/halo.out.1"
+	[ -f "$data/debug.txt" ] && mv -f "$data/debug.txt" "$data/debug.txt.1"  # the game starts its log afresh
 	env CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 		HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \
 		HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_FULLSCREEN=0 \
@@ -133,7 +134,11 @@ while :; do
 	if [ -n "$command" ] && [ "$command" != "$last_command" ]; then
 		last_command=$command
 		case "${command#* }" in
-		restart) say "Skyrim asks for a restart"; stop_halo; wanted=run; crashes=0 ;;
+		restart)
+			say "Skyrim asks for a restart"
+			# hung, most likely: where it is goes to halo.out (halo.out.1 after the restart)
+			if [ -n "$halo_pid" ] && kill -USR2 "$halo_pid" 2>/dev/null; then sleep 0.5; fi
+			stop_halo; wanted=run; crashes=0 ;;
 		stop) say "Skyrim turned Chiefrim off"; stop_halo; wanted=stop ;;
 		start) say "Skyrim turned Chiefrim on"; wanted=run; crashes=0 ;;
 		esac
