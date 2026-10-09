@@ -807,14 +807,18 @@ using the camera Skyrim is about to use. It draws three layers:
     the effects over it). Now the compositor grades them as Skyrim's HDR shader does after its tone
     map, from `ImageSpaceManager`'s blended data: saturation, the tint (towards the tint colour
     times the luminance), brightness, contrast (about 0.5; Skyrim's own pivot is a shader constant
-    not read here), then the fade. The world layer gets Skyrim's fog first, by its distance: the
+    not read here), then the fade. Contrast is off by default (`fContrast` 0): Skyrim's (and
+    Community Shaders') is made for its HDR picture before the tone map, and in game, applied in
+    full to Halo's finished colours, the weapon came out far too contrasty. The log's `grade:`
+    lines give Skyrim's numbers. The world layer gets Skyrim's fog first, by its distance: the
     weather's (`Sky`: near and far colours, planes, power, clamp) or an interior's (the cell's
     lighting, or its template's where it inherits). The screen layer is graded only where it is
     Chief's arms and weapon, not the HUD: Halo marks, in a fourth target, how much of each pixel's
     colour came from the weapon (written 1, the HUD's draws 0, blended as the colour is), read
     back after the layers (`CR_FRAME_MASK`, a byte a pixel). Offline: the mask is exactly the
     arms and MA5B, none of the HUD; the shader compiles with Proton's `D3DCompile`.
-    `[Grade] bEnabled`, `fStrength`, `bFog`. In game: to check.
+    `[Grade] bEnabled`, `fStrength`, `fContrast`, `bFog`. In game (2026-10-08): the shadows
+    follow the shade; the grade's contrast was too much (now off); the rest to check.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo

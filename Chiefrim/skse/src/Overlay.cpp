@@ -449,12 +449,14 @@ float4 PSWorld(VSOut i) : SV_Target
 			bool  enabled = true;   // [Grade] bEnabled
 			float strength = 1.0f;  // [Grade] fStrength
 			bool  fog = true;       // [Grade] bFog
+			float contrast = 0.0f;  // [Grade] fContrast: how much of Skyrim's contrast
 		};
 
 		const GradeConfig& Grading()
 		{
 			static const GradeConfig config{ Settings::ReadBool(L"Grade", L"bEnabled", true),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fStrength", 1.0f), 0.0f, 1.0f), Settings::ReadBool(L"Grade", L"bFog", true) };
+				std::clamp(Settings::ReadFloat(L"Grade", L"fStrength", 1.0f), 0.0f, 1.0f), Settings::ReadBool(L"Grade", L"bFog", true),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fContrast", 0.0f), 0.0f, 1.0f) };
 			return config;
 		}
 
@@ -469,6 +471,27 @@ float4 PSWorld(VSOut i) : SV_Target
 		RE::NiColor FromColor(const RE::Color& a_color)
 		{
 			return { a_color.red / 255.0f, a_color.green / 255.0f, a_color.blue / 255.0f };
+		}
+
+		// Skyrim's grade, logged when it changes much (a weather, a door), every
+		// 5 s at most: the numbers to tune [Grade] by
+		void LogGrade(const RE::ImageSpaceBaseData::Cinematic& a_cinematic, const RE::ImageSpaceBaseData::Tint& a_tint, float a_fade)
+		{
+			static std::array<float, 5> last{ -1.0f };
+			static ULONGLONG            next = 0;
+			const std::array<float, 5>  now{ a_cinematic.saturation, a_cinematic.brightness, a_cinematic.contrast, a_tint.amount, a_fade };
+			const auto                  tick = ::GetTickCount64();
+			bool                        changed = false;
+			for (std::size_t i = 0; i < now.size(); ++i) {
+				changed |= std::fabs(now[i] - last[i]) > 0.05f;
+			}
+			if (!changed || tick < next) {
+				return;
+			}
+			last = now;
+			next = tick + 5000;
+			logger::info("grade: Skyrim's image space: saturation {:.2f}, brightness {:.2f}, contrast {:.2f} ({:.2f} of it on Halo's), tint ({:.2f} {:.2f} {:.2f}) {:.2f}, fade {:.2f}",
+				now[0], now[1], now[2], Grading().contrast, a_tint.color.red, a_tint.color.green, a_tint.color.blue, now[3], now[4]);
 		}
 
 		// Skyrim's grade of its picture now (its image space: the weather's or
@@ -490,13 +513,18 @@ float4 PSWorld(VSOut i) : SV_Target
 				if (cinematic.saturation > 0.0f || cinematic.brightness > 0.0f || cinematic.contrast > 0.0f) {
 					a_params.grade[0] = cinematic.saturation;
 					a_params.grade[1] = cinematic.brightness;
-					a_params.grade[2] = cinematic.contrast;
+					// Skyrim's contrast is for its HDR picture before the tone
+					// map (Community Shaders' too); on Halo's finished colours,
+					// in full, it crushed the weapon's shadows and highlights
+					// (the first in-game test)
+					a_params.grade[2] = 1.0f + (cinematic.contrast - 1.0f) * config.contrast;
 					a_params.grade[3] = config.strength;
 					PutColor(a_params.tint, data.baseData.tint.color, std::clamp(data.baseData.tint.amount, 0.0f, 1.0f));
 					a_params.fade[0] = data.modData.data[RE::ImageSpaceModData::kFadeR];
 					a_params.fade[1] = data.modData.data[RE::ImageSpaceModData::kFadeG];
 					a_params.fade[2] = data.modData.data[RE::ImageSpaceModData::kFadeB];
 					a_params.fade[3] = std::clamp(data.modData.data[RE::ImageSpaceModData::kFadeAmount], 0.0f, 1.0f);
+					LogGrade(cinematic, data.baseData.tint, a_params.fade[3]);
 				}
 			}
 			if (!config.fog) {
