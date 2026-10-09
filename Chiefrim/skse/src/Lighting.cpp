@@ -35,6 +35,7 @@ namespace chiefrim::Lighting
 		ULONGLONG next = 0;
 		float     reportedLevel = -1.0f;  // the brightness last logged
 		bool      reportedShade = false;  // and whether Chief was in shade
+		std::uint32_t reportedPoints = 0; // and how many point lights reached him
 		ULONGLONG nextReport = 0;
 
 		cr_vec3 Vec(const RE::NiPoint3& a_point) { return { a_point.x, a_point.y, a_point.z }; }
@@ -89,27 +90,37 @@ namespace chiefrim::Lighting
 
 		struct Point
 		{
-			float          distance;
+			float          share;  // how much it lights the player: its strength by its falloff there
 			cr_light_point light;
 		};
+		std::uint32_t activeCount = 0;  // the scene's point lights, the last look
 
-		// The point lights the renderer has on now, nearest the player first.
+		// The point lights the renderer has on now that reach the player, the
+		// ones that light him most first. A light's place is its node's: the
+		// BSLight's own translate is relative to the camera (Skyrim renders
+		// about it), which put every light outside far from the player.
 		void NearestPoints(RE::ShadowSceneNode::RUNTIME_DATA& a_scene, const RE::NiPoint3& a_at, cr_msg_lighting& a_message)
 		{
 			std::vector<Point> points;
+			activeCount = 0;
 			const auto take = [&](RE::BSLight* a_light) {
 				// (Chief's flashlight is Halo's own: Halo lights its objects with it already)
 				if (!a_light || !a_light->pointLight || a_light == a_scene.sunLight || !a_light->light || a_light->light.get() == flash.light.get()) {
 					return;
 				}
+				++activeCount;
 				const auto& data = a_light->light->GetLightRuntimeData();
+				const auto  position = a_light->light->world.translate;
 				const float radius = data.radius.x;
-				const float distance = a_light->worldTranslate.GetDistance(a_at);
+				const float distance = position.GetDistance(a_at);
 				const float strength = (data.diffuse.red + data.diffuse.green + data.diffuse.blue) * data.fade;
-				if (radius <= 1.0f || distance >= radius + 256.0f || strength <= 0.01f) {
+				// past its reach a little: it still lights Chief's weapon, held out
+				if (radius <= 1.0f || distance >= radius + 64.0f || strength <= 0.01f) {
 					return;
 				}
-				points.push_back({ distance, { Vec(a_light->worldTranslate), radius, Color(data.diffuse, data.fade * config.pointScale * config.scale) } });
+				const float along = std::min(distance / radius, 1.0f);
+				const float share = strength * std::max(1.0f - along * along, 0.02f);
+				points.push_back({ share, { Vec(position), radius, Color(data.diffuse, data.fade * config.pointScale * config.scale) } });
 			};
 			for (auto& light : a_scene.activeLights) {
 				take(light.get());
@@ -117,11 +128,26 @@ namespace chiefrim::Lighting
 			for (auto& light : a_scene.activeShadowLights) {
 				take(light.get());
 			}
-			std::ranges::sort(points, {}, &Point::distance);
+			std::ranges::sort(points, std::greater{}, &Point::share);
 			a_message.point_count = static_cast<std::uint32_t>(std::min<std::size_t>(points.size(), CR_LIGHTING_POINTS));
 			for (std::uint32_t i = 0; i < a_message.point_count; ++i) {
 				a_message.points[i] = points[i].light;
 			}
+		}
+	}
+
+	namespace
+	{
+		// the lights sent, for the log: how far, how far they reach, colour
+		std::string Describe(const cr_msg_lighting& a_message, const RE::NiPoint3& a_at)
+		{
+			std::string text;
+			for (std::uint32_t i = 0; i < a_message.point_count; ++i) {
+				const auto& p = a_message.points[i];
+				text += std::format("{} {:.0f} away (reach {:.0f}, {:.2f} {:.2f} {:.2f})", i ? ";" : ":", RE::NiPoint3{ p.position.x, p.position.y, p.position.z }.GetDistance(a_at),
+					p.radius, p.color.x, p.color.y, p.color.z);
+			}
+			return text;
 		}
 	}
 
@@ -198,13 +224,15 @@ namespace chiefrim::Lighting
 		// logged at first and when it changes a lot (a door, nightfall, a torch), every 5 s at most
 		const bool  shade = message.key_shadowed && message.sun_visible < 0.5f;
 		const float level = (message.ambient.x + message.ambient.y + message.ambient.z + message.key_color.x + message.key_color.y + message.key_color.z) / 3.0f;
-		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f) || shade != reportedShade)) {
+		if (now >= nextReport && (reportedLevel < 0.0f || std::fabs(level - reportedLevel) > 0.3f * std::max(reportedLevel, 0.1f) || shade != reportedShade ||
+							   message.point_count != reportedPoints)) {
 			reportedLevel = level;
+			reportedPoints = message.point_count;
 			reportedShade = shade;
 			nextReport = now + 5000;
-			logger::info("lighting: Halo's objects lit by Skyrim's: ambient ({:.2f} {:.2f} {:.2f}), key ({:.2f} {:.2f} {:.2f}) towards ({:.2f} {:.2f} {:.2f}), {} point lights near, {}",
+			logger::info("lighting: Halo's objects lit by Skyrim's: ambient ({:.2f} {:.2f} {:.2f}), key ({:.2f} {:.2f} {:.2f}) towards ({:.2f} {:.2f} {:.2f}), {} point lights near (of {} on){}, {}",
 				message.ambient.x, message.ambient.y, message.ambient.z, message.key_color.x, message.key_color.y, message.key_color.z,
-				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count,
+				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count, activeCount, Describe(message, a_player->GetPosition()),
 				!message.key_shadowed ? "no shadows (inside)" : std::format("the sun {:.0f}% seen", message.sun_visible * 100.0f));
 		}
 	}

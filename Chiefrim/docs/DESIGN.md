@@ -787,6 +787,18 @@ using the camera Skyrim is about to use. It draws three layers:
   (0.03 a tick): dark to daylight in about a second. Offline, standing still: brightness 11, then
   79 a second after the light changes. Offline: the MA5B in a 0.05 scene against a 1.0 scene, mean weapon brightness 52
   against 79 (its ammo counter glows by itself). `[Lighting] bEnabled`, `fBrightness`, `fPointLights`.
+- **Torches, braziers and other lights (Phase 5, 2026-10-08).** In game they hardly lit Chief's
+  weapon, for two reasons. The plugin placed each light by `BSLight::worldTranslate`, which is
+  relative to the camera (Skyrim renders about it): outside every light seemed far away (the log:
+  0 point lights near), inside one passed now and then. Each light is now placed by its node
+  (`NiLight::world.translate`), and the four sent are those lighting the player most (strength by
+  falloff), not the nearest. And Halo's shiny weapons (the MA5B) show mostly their reflection, which
+  the hook drove by the ambient and the key alone: offline, a torch beside Chief gave 5 where the
+  key gave 36. The strongest point light now adds to the reflection's strength and tints it (the
+  sun's tint as it was, so daylight is unchanged). Offline (`fake_skyrim.py --torch
+  dx,dy,dz,reach,r,g,b`), in the dark: the MA5B 4 alone, 17 to 28 with a torch beside it, the
+  barrel orange in its light; daylight 36 and 67 as before. The log names the lights sent when
+  their number changes (distance, reach, colour) and how many the scene has on.
 - **Matched to Skyrim's weather (Phase 5, 2026-10-08, protocol 21).** The first in-game look found
   Chief's weapon the wrong colour (none of dusk's warmth or night's blue) and too bright at night
   and in shade. Skyrim's light was there; two things weren't:
@@ -807,10 +819,12 @@ using the camera Skyrim is about to use. It draws three layers:
     the effects over it). Now the compositor grades them as Skyrim's HDR shader does after its tone
     map, from `ImageSpaceManager`'s blended data: saturation, the tint (towards the tint colour
     times the luminance), brightness, contrast (about 0.5; Skyrim's own pivot is a shader constant
-    not read here), then the fade. Contrast is off by default (`fContrast` 0): Skyrim's (and
+    not read here), then the fade. Contrast is mostly off by default (`fContrast` 0.25 of it): Skyrim's (and
     Community Shaders') is made for its HDR picture before the tone map, and in game, applied in
     full to Halo's finished colours, the weapon came out far too contrasty. The log's `grade:`
-    lines give Skyrim's numbers. The world layer gets Skyrim's fog first, by its distance: the
+    lines give Skyrim's numbers: in the first logged session (weather and Community Shaders'
+    image spaces) 1.10 inside and 1.38 to 1.50 outside, so 0.25 of it puts the strongest weather
+    at about the interiors' own (1.125). The world layer gets Skyrim's fog first, by its distance: the
     weather's (`Sky`: near and far colours, planes, power, clamp) or an interior's (the cell's
     lighting, or its template's where it inherits). The screen layer is graded only where it is
     Chief's arms and weapon, not the HUD: Halo marks, in a fourth target, how much of each pixel's
@@ -818,7 +832,7 @@ using the camera Skyrim is about to use. It draws three layers:
     back after the layers (`CR_FRAME_MASK`, a byte a pixel). Offline: the mask is exactly the
     arms and MA5B, none of the HUD; the shader compiles with Proton's `D3DCompile`.
     `[Grade] bEnabled`, `fStrength`, `fContrast`, `bFog`. In game (2026-10-08): the shadows
-    follow the shade; the grade's contrast was too much (now off); the rest to check.
+    follow the shade; the grade's contrast was too much (now 0.25 of it); the rest to check.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo

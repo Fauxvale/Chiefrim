@@ -449,14 +449,14 @@ float4 PSWorld(VSOut i) : SV_Target
 			bool  enabled = true;   // [Grade] bEnabled
 			float strength = 1.0f;  // [Grade] fStrength
 			bool  fog = true;       // [Grade] bFog
-			float contrast = 0.0f;  // [Grade] fContrast: how much of Skyrim's contrast
+			float contrast = 0.25f; // [Grade] fContrast: how much of Skyrim's contrast
 		};
 
 		const GradeConfig& Grading()
 		{
 			static const GradeConfig config{ Settings::ReadBool(L"Grade", L"bEnabled", true),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fStrength", 1.0f), 0.0f, 1.0f), Settings::ReadBool(L"Grade", L"bFog", true),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fContrast", 0.0f), 0.0f, 1.0f) };
+				std::clamp(Settings::ReadFloat(L"Grade", L"fContrast", 0.25f), 0.0f, 1.0f) };
 			return config;
 		}
 

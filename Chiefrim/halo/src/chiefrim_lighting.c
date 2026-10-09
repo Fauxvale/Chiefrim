@@ -111,6 +111,7 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	real best = 0.f, brightness;
 	long point, best_point = NONE;
 	real_vector3d key;
+	real_rgb_color torch;
 
 	if (!chiefrim_active() || !chiefrim_lighting.valid || !chiefrim_world_origin(&origin))
 		return FALSE;
@@ -182,12 +183,21 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		}
 	}
 
-	/* reflections and the shadow, as build_distant_lights makes them from a lightmap */
-	brightness = chiefrim_luminance(&lighting->ambient_color) + 0.5f * chiefrim_luminance(&lighting->distant_lights[0].color);
+	/* reflections and the shadow, as build_distant_lights makes them from a
+	lightmap: by the light that reaches the object, a torch's (the fill, when
+	it is a point light, also tinting it) as well as the sun's. Shiny weapons (the MA5B) show
+	mostly their reflection: with the key's alone a torch beside Chief added
+	a little diffuse light and no shine (offline, 5 against the key's 36) */
+	memset(&torch, 0, sizeof(torch));
+	if (best_point != NONE)
+		torch = lighting->distant_lights[1].color;
+	brightness = chiefrim_luminance(&lighting->ambient_color) +
+		0.5f * (chiefrim_luminance(&lighting->distant_lights[0].color) + chiefrim_luminance(&torch));
 	lighting->reflection_tint_color.alpha = PIN(brightness * 1.5f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.red = PIN(lighting->ambient_color.red * 2.f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.green = PIN(lighting->ambient_color.green * 2.f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.blue = PIN(lighting->ambient_color.blue * 2.f + 0.25f, 0.f, 1.f);
+	/* tinted by the ambient as before (daylight as it was), and the torch's colour */
+	lighting->reflection_tint_color.red = PIN((lighting->ambient_color.red + 0.5f * torch.red) * 2.f + 0.25f, 0.f, 1.f);
+	lighting->reflection_tint_color.green = PIN((lighting->ambient_color.green + 0.5f * torch.green) * 2.f + 0.25f, 0.f, 1.f);
+	lighting->reflection_tint_color.blue = PIN((lighting->ambient_color.blue + 0.5f * torch.blue) * 2.f + 0.25f, 0.f, 1.f);
 	lighting->shadow_vector = key;
 	if (lighting->shadow_vector.k > -0.5f)
 	{

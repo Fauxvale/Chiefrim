@@ -520,6 +520,8 @@ def main():
                         help="Skyrim's light for Halo's objects (CR_MSG_LIGHTING): ambient and a sun from above, this bright (0: dark)")
     parser.add_argument("--light-to", type=float, default=-1.0, help="with --light: this bright from --light-at seconds in")
     parser.add_argument("--light-at", type=float, default=10.0)
+    parser.add_argument("--torch", default="",
+                        help="with --light: a point light 'dx,dy,dz,reach,r,g,b' from the start (Skyrim units), as a torch on a wall")
     parser.add_argument("--sun-visible", type=float, default=-1.0,
                         help="with --light: shadows on (protocol 21), and this much of the sun reaches Chief's eye (0..1)")
     parser.add_argument("--sun-visible-to", type=float, default=-1.0, help="with --sun-visible: this from --sun-visible-at seconds in")
@@ -774,9 +776,12 @@ def main():
                 drive_state["next_light"] = time.monotonic() + 0.1
                 level = options.light_to if options.light_to >= 0.0 and t >= options.light_at else options.light
                 a, k = 0.3 * level, 1.0 * level
+                torch = [float(v) for v in options.torch.split(",")] if options.torch else []
                 seen = options.sun_visible_to if options.sun_visible_to >= 0.0 and t >= options.sun_visible_at else options.sun_visible
                 link.push(RING_TO_HALO, MSG_LIGHTING, struct.pack("<3f3f3f3fI", a, a, a, 0.0, 0.0, 0.0, k, k * 0.95, k * 0.85,
-                                                                  0.3, 0.4, -0.866, 0) + bytes(4 * 28)
+                                                                  0.3, 0.4, -0.866, 1 if options.torch else 0)
+                          + (struct.pack("<3ff3f", options.x + torch[0], options.y + torch[1], options.z + torch[2], *torch[3:7])
+                             if options.torch else b"") + bytes(4 * 28 - (28 if options.torch else 0))
                           + struct.pack("<If", 1 if seen >= 0.0 else 0, max(seen, 0.0)))
             if options.key_names and not drive_state.get("named"):
                 # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
