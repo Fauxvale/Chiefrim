@@ -596,7 +596,8 @@ and facing every tick.
   assist as before): `motion_sensor.c`'s hooks change only whether it shows and its colour.
   Offline (`fake_skyrim.py --actor-walk`, `--actor-friendly`, `--actor-sneaks`,
   `--actor-attack-at`): a hostile walker red, a friendly one yellow, a sneaking one and one
-  standing still not shown, the one standing still shown red while it attacks.
+  standing still not shown, the one standing still shown red while it attacks. Verified in game
+  (2026-10-08).
 
 ### 8.2 Chief hits an NPC
 
@@ -677,7 +678,8 @@ using the camera Skyrim is about to use. It draws three layers:
   `[Overlay] bUnderSkyrimMenus`):** the layers are drawn as the frame's first Skyrim menu draws
   (`IMenu::PostDisplay`, vtable slot 6, patched per menu class as each opens; menus draw lowest
   first), so the HUD's prompts, subtitles, compass and notifications, mods' widgets and any menu
-  are over Halo's weapon and HUD. Present draws them in a frame no menu drew in. In game: to check. The HLSL is compiled at start
+  are over Halo's weapon and HUD. Present draws them in a frame no menu drew in. Verified in game
+  (2026-10-08): a Talk prompt and subtitles over the MA5B. The HLSL is compiled at start
   (`d3dcompiler_47`): checked under Proton Experimental with DXVK, where its blend gives the
   expected pixels for opaque, half-covered, additive and empty texels.
 - **Still to come:** the zoom screen effect's tints on Skyrim's picture (night vision); checking
@@ -919,7 +921,7 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   combat bridging for a dead player. It holds through the reload's loading screen and, once that
   closes, `fDeathFadeInSeconds` (2) more while the loaded game fades in (longer while Skyrim's
   `Fader Menu` is up, up to 10 s), then hands Chief back. A player brought back without a reload
-  is Chief's again at once. In game: to check.
+  is Chief's again at once. Verified in game (2026-10-08).
 - **The console (Phase 5, protocol 19, `skse/src/Console.cpp`):** a `chiefrim` command in
   Skyrim's console. SKSE can't add one in SE/AE, so the plugin renames one of the game's developer
   commands that players don't need (the first of `TestSeenData`, `TestLocalMap`,
