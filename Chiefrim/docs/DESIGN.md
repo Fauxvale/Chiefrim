@@ -766,11 +766,12 @@ using the camera Skyrim is about to use. It draws three layers:
 **Phase 4 (started 2026-10-06): Skyrim's HUD and light.**
 
 - **Skyrim's HUD.** Halo's HUD has the crosshair, shields and health, so while Chief is linked the
-  plugin hides Skyrim's crosshair and health, magicka and stamina bars (`hudmenu.swf`'s
-  `HUDMovieBaseInstance.CrosshairInstance`, `Health`, `Magica`, `Stamina`: `_visible` false each
+  plugin hides Skyrim's crosshair and health and magicka bars (`hudmenu.swf`'s
+  `HUDMovieBaseInstance.CrosshairInstance`, `Health`, `Magica`: `_visible` false each
   frame, as Skyrim's HUD shows them again on every mode change) and puts them back when the link
-  closes. The compass, sneak eye, activate prompt, enemy health bar and notifications stay.
-  `[HUD] bHideCrosshair`, `bHideBars`.
+  closes. The stamina bar stays (Phase 5, 2026-10-08): Skyrim's sprint, which moves the player,
+  spends it. The compass, sneak eye, activate prompt, enemy health bar and notifications stay.
+  `[HUD] bHideCrosshair`, `bHideBars`, `bHideStamina` (0).
 - **Skyrim's light on Halo's objects** (protocol 13). Halo lit objects from its map's lightmap under
   them, which Chiefrim's collision BSP doesn't have: every object had the host map's default
   light. Now ~10 times a second the plugin sends `CR_MSG_LIGHTING`: Skyrim's directional ambient
@@ -940,8 +941,9 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   Offline (`fake_skyrim.py --list-weapons-at`, `--give-name`, `--shapes`): the list, a shotgun and
   a needler given by name (any case), an unknown name refused; the wolf's and the person's shapes
   drawn where they stand. Verified in game (2026-10-08).
-- **Skyrim HUD:** keep the compass, plus quest and notification messages. Hide health, magicka,
-  stamina and the crosshair, because Halo's HUD replaces them.
+- **Skyrim HUD:** keep the compass, plus quest and notification messages, and the stamina bar
+  (Skyrim's sprint spends it). Hide health, magicka and the crosshair, because Halo's HUD replaces
+  them.
 - **Skyrim inventory, magic, shouts and perks:** not available while Halo drives the player.
 - **Launching and recovery (2026-10-05):** `tools/launch_halo.sh` supervises Halo: it starts it,
   starts it again whenever it exits or crashes (after 1, 4, 9 ... up to 30 s while it keeps crashing

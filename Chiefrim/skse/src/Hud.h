@@ -4,10 +4,12 @@
 namespace chiefrim::Hud
 {
 	// Skyrim's HUD while Chief plays (docs §9): Halo's HUD has the crosshair,
-	// shields and health, so Skyrim's crosshair and its health, magicka and
-	// stamina bars are hidden ([HUD] bHideCrosshair, bHideBars). The rest stays:
-	// the compass, the sneak eye (Chief crouching is the player sneaking), the
-	// activate prompt, the enemy's health bar, notifications.
+	// shields and health, so Skyrim's crosshair and its health and magicka
+	// bars are hidden ([HUD] bHideCrosshair, bHideBars). The rest stays: the
+	// stamina bar (Skyrim's sprint, which moves the player, spends it; [HUD]
+	// bHideStamina hides it too), the compass, the sneak eye (Chief crouching is
+	// the player sneaking), the activate prompt, the enemy's health bar,
+	// notifications.
 
 	// kDataLoaded: reads Chiefrim.ini.
 	void Install();
