@@ -951,15 +951,26 @@ using the camera Skyrim is about to use. It draws three layers:
     arms and MA5B, none of the HUD; the shader compiles with Proton's `D3DCompile`.
     `[Grade] bEnabled`, `fStrength`, `fContrast`, `bFog`. In game (2026-10-08): the shadows
     follow the shade; the grade's contrast was too much (now 0.25 of it); the rest to check.
-  - **Chief's arms and weapon toned down (2026-10-09).** In game they were still too bright for
-    Skyrim's world: Halo's colours are saturated, and its chrome shines near white, where Skyrim's
-    tone map keeps its own highlights soft. Before the grade, on the weapon's pixels alone (the
-    mask above: not the HUD), the compositor takes the saturation to `fWeaponSaturation` (0.85),
-    rolls the highlights off above `fWeaponHighlights` (0.55, by luminance, keeping the hue:
-    Halo's white comes out at 0.83, an exponential shoulder), then scales by `fWeaponBrightness`
-    (0.8): Halo's whitest shine ends at about 0.67, a mid grey (0.5) at 0.4. All three at 1 is
-    Halo's own. The shader compiles with Proton's `D3DCompile` (vkd3d-shader); the look to check
-    in game.
+  - **Chief's arms and weapon matched to Skyrim's picture (2026-10-09).** The first look found
+    them too bright for Skyrim's world, and a fixed toning down (brightness 0.8, highlights rolled
+    off) made the next worse: in bright snow (two screenshots, the gun's pixels against the world's)
+    half the gun was near black (0.02) and its middle 0.08, its shine no more than 0.72, where the
+    world's middle was 0.65 to 0.75, its darkest 1% 0.04 to 0.14 (a cool haze) and its highlights
+    0.9 to 1. Halo's are lit by Skyrim's light but drawn after its tone map, without the haze and
+    bounce that lift its own shadows. So the compositor meters Skyrim's picture each frame before
+    Halo's layers go over it (copied, mipped, read from its mip of 64 texels across at most into two
+    texels blended towards each frame's over about half a second, as an eye adapts): its key (the
+    log average of its brightness), its brightest (a soft maximum) and its shadows' colour (a soft
+    minimum). On the weapon's pixels alone, before the grade: the saturation to
+    `fWeaponSaturation` (0.9); an exposure of the square root of the key over 0.3, from
+    `fWeaponExposureMin` (0.65: the dark, interiors) to `fWeaponExposureMax` (1.1: daylight), times
+    `fWeaponBrightness` (1); the highlights rolled off above `fWeaponHighlights` (0.6) of the
+    picture's brightest (0.4 to 1), so no shine is above the sky's; and the darks lifted towards
+    `fWeaponShadowLift` (0.35) of the shadows' colour. `bWeaponMatchScene` 0 keeps only the fixed
+    numbers. Simulated on the two screenshots: the gun's darks 0.07 to 0.08 in the scene's blue, its
+    middle 0.18, its shine to 0.85 to 0.88, under the sky's 0.87 to 0.9. The log's `the weapon's
+    look:` lines (every 15 s) give the meter's numbers and the exposure. The shaders compile with
+    Proton's `D3DCompile`; the look to check in game, and in the dark.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
