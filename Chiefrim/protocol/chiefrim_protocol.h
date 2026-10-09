@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 24u
+#define CR_PROTOCOL_VERSION 25u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -568,6 +568,11 @@ typedef struct cr_msg_cache_place
 	cr_vec3  position;     /* Skyrim units: above where it lies */
 	float    yaw;          /* radians from +x, counterclockwise: which way it points */
 	char     weapon[CR_WEAPON_TAG_LENGTH]; /* a tag path or its last part, NUL-terminated */
+	/* protocol 25: its ammunition, scarce: its magazine loaded, and this
+	share (0..1) of the spare rounds one in the map has; an energy weapon's
+	battery is spent by as much as it falls short */
+	float    spare;
+	uint32_t reserved;
 } cr_msg_cache_place;
 
 typedef struct cr_msg_cache_taken
@@ -934,7 +939,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
 CR_STATIC_ASSERT(sizeof(cr_msg_shot) == 40, "cr_msg_shot");
-CR_STATIC_ASSERT(sizeof(cr_msg_cache_place) == 96, "cr_msg_cache_place");
+CR_STATIC_ASSERT(sizeof(cr_msg_cache_place) == 104, "cr_msg_cache_place");
 CR_STATIC_ASSERT(sizeof(cr_msg_cache_taken) == 24, "cr_msg_cache_taken");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");

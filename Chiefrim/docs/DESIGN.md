@@ -690,7 +690,14 @@ as in Halo.
   pistol, needler, assault rifle), or in a fort a medium one by `fMediumChance` (0.3; shotgun,
   plasma rifle). A fort's boss chest (location ref type `BossContainer`, 000130F8) gets a heavy one by
   `fHeavyChance` (0.6; sniper rifle, rocket launcher, flamethrower, fuel rod), found nowhere else; a
-  fort's other chests stop one short of the limit to leave it a place. Chance is seeded by the
+  fort's other chests stop one short of the limit to leave it a place. **Dungeons** (2026-10-09:
+  heavy weapons in forts alone were too rare): a location with `LocTypeDungeon` (Nordic and Dwemer
+  ruins, caves; a camp or fort in one is that) always counts, but only its boss chest, and only for a
+  heavy weapon, by `fDungeonHeavyChance` (0.15).
+- **Scarce ammunition (protocol 25):** a cache's weapon comes with its magazine loaded and a share of
+  the spare rounds one in the map has (`cr_msg_cache_place.spare`, by its tier: `fLightSpare` 0.5,
+  `fMediumSpare` 0.25, `fHeavySpare` 0); an energy weapon's battery is spent by 0.6 of what it falls
+  short. Offline: a needler 20/20 at 0, 20/50 at 0.5, 20/80 (Halo's own) at 1. Chance is seeded by the
   playthrough (a seed in the co-save), the site and the cell.
 - **Kept:** the co-save's `CACH` record has the seed, every site seen (with or without caches), every
   cell chosen, and each cache (its chest, cell, site, weapon, taken), written as they are chosen

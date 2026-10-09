@@ -17,6 +17,8 @@ when Chief picks it up (CR_MSG_CACHE_TAKEN), so it stays taken.
 
 #include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
+#include "items/weapon_definitions.h"
+#include "items/weapons.h"
 #include "objects/objects.h"
 #include "physics/collisions.h"
 
@@ -49,6 +51,7 @@ static struct
 		uint32_t since_ms;        /* when it came */
 		cr_vec3 position;         /* Skyrim's */
 		float yaw;
+		float spare;
 		long tag_index;
 		long object_index;
 		char weapon[CR_WEAPON_TAG_LENGTH];
@@ -68,6 +71,29 @@ static void chiefrim_cache_taken(uint32_t id)
 	memset(&message, 0, sizeof(message));
 	message.id = id;
 	cr_ring_push(&shm->to_skyrim, CR_MSG_CACHE_TAKEN, &message, sizeof(message));
+}
+
+/* Scarce: its magazines loaded, and a share of the spare rounds one in the
+map has; an energy weapon (no magazines) part spent */
+static void chiefrim_cache_ammunition(long weapon_index, real spare)
+{
+	struct weapon_datum *weapon = weapon_get(weapon_index);
+	struct weapon_definition *definition = weapon_definition_get(weapon->definition_index);
+	short magazine, count = (short)MIN(definition->weapon.magazines.count, NUMBEROF(weapon->weapon.magazines));
+
+	for (magazine = 0; magazine < count; magazine++)
+	{
+		struct weapon_magazine_definition *limits =
+			TAG_BLOCK_GET_ELEMENT(&definition->weapon.magazines, magazine, struct weapon_magazine_definition);
+		struct weapon_magazine *rounds = &weapon->weapon.magazines[magazine];
+		short loaded = MIN(limits->rounds_loaded_maximum, limits->rounds_total_initial);
+		short extra = (short)MAX(limits->rounds_total_initial - loaded, 0);
+
+		rounds->rounds_loaded = loaded;
+		rounds->rounds_total = (short)(loaded + (short)(extra * spare + 0.5f));
+	}
+	if (count == 0)
+		weapon->weapon.age = PIN(0.6f * (1.f - spare), 0.f, 1.f);
 }
 
 /* ---------- public code */
@@ -100,6 +126,7 @@ void chiefrim_caches_message(cr_msg_cache_place const *message)
 	chiefrim_caches.caches[free_index].since_ms = (uint32_t)system_milliseconds();
 	chiefrim_caches.caches[free_index].position = message->position;
 	chiefrim_caches.caches[free_index].yaw = message->yaw;
+	chiefrim_caches.caches[free_index].spare = PIN(message->spare, 0.f, 1.f);
 	chiefrim_caches.caches[free_index].object_index = NONE;
 	memcpy(chiefrim_caches.caches[free_index].weapon, message->weapon, CR_WEAPON_TAG_LENGTH);
 	chiefrim_caches.caches[free_index].weapon[CR_WEAPON_TAG_LENGTH - 1] = 0;
@@ -185,6 +212,7 @@ void chiefrim_caches_update(long chief, uint32_t generation, cr_vec3 origin)
 			chiefrim_caches.caches[index].used = FALSE;
 			continue;
 		}
+		chiefrim_cache_ammunition(chiefrim_caches.caches[index].object_index, chiefrim_caches.caches[index].spare);
 		chiefrim_caches.caches[index].placed = TRUE;
 		if (chiefrim_caches.logged++ < 20)
 		{

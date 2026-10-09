@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 24
+VERSION = 25
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -505,6 +505,7 @@ def main():
     parser.add_argument("--cache", default="",
                         help="a weapon cache: this weapon laid down 150 units north of the start, sent every 2 s as the plugin does")
     parser.add_argument("--cache-at", type=float, default=2.0)
+    parser.add_argument("--cache-spare", type=float, default=1.0, help="the cache's share of spare rounds (protocol 25)")
     parser.add_argument("--cache-north", type=float, default=150.0, help="how far north of the start the cache lies")
     parser.add_argument("--action-at", default="",
                         help="seconds in (comma-separated): hold the action key (pick up, swap) for 1 s")
@@ -850,8 +851,9 @@ def main():
             if options.cache and t >= options.cache_at and t >= drive_state.get("cache_next", 0.0):
                 drive_state["cache_next"] = t + 2.0
                 # cr_msg_cache_place: id, generation, position, yaw, weapon
-                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64s", 0xCAC1, generation,
-                    options.x, options.y + options.cache_north, options.z + 120.0, math.pi / 2, options.cache.encode()[:63]))
+                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64sfI", 0xCAC1, generation,
+                    options.x, options.y + options.cache_north, options.z + 120.0, math.pi / 2, options.cache.encode()[:63],
+                    options.cache_spare, 0))
                 if not drive_state.get("cache_said"):
                     drive_state["cache_said"] = True
                     print(f"fake_skyrim: cache CAC1: {options.cache} {options.cache_north:.0f} units north, world {generation}", flush=True)
@@ -863,8 +865,8 @@ def main():
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
             if options.cache2 and t >= options.cache2_at and t >= drive_state.get("cache2_next", 0.0):
                 drive_state["cache2_next"] = t + 0.2
-                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64s", 0xCAC2, generation,
-                    options.x, options.y + 20.0, options.z + 120.0, 0.0, options.cache2.encode()[:63]))
+                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64sfI", 0xCAC2, generation,
+                    options.x, options.y + 20.0, options.z + 120.0, 0.0, options.cache2.encode()[:63], 1.0, 0))
             if options.list_weapons_at and t >= options.list_weapons_at and not drive_state.get("listed"):
                 drive_state["listed"] = True
                 link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, GIVE_LIST, b""))

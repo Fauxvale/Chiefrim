@@ -18,6 +18,7 @@ namespace chiefrim::Caches
 		constexpr RE::FormID kForswornCamp = 0x000130EE;
 		constexpr RE::FormID kMilitaryCamp = 0x000130E8;
 		constexpr RE::FormID kMilitaryFort = 0x000130E7;
+		constexpr RE::FormID kDungeon = 0x000130DB;  // Nordic and Dwemer ruins, caves, mines
 		constexpr RE::FormID kBossContainer = 0x000130F8;
 
 		enum class Kind
@@ -25,6 +26,7 @@ namespace chiefrim::Caches
 			kNone,
 			kCamp,
 			kFort,
+			kDungeon,  // only its boss's chest, and only a heavy weapon
 		};
 
 		enum class Tier
@@ -41,6 +43,8 @@ namespace chiefrim::Caches
 			float                    chestChance = 0.35f; // fChestChance: each chest (and rack) of one that has
 			float                    mediumChance = 0.3f; // fMediumChance: a fort's cache is a medium weapon
 			float                    heavyChance = 0.6f;  // fHeavyChance: a fort's boss chest has a heavy one
+			float                    dungeonHeavyChance = 0.15f;  // fDungeonHeavyChance: a dungeon's boss chest has a heavy one
+			float                    spare[3] = { 0.5f, 0.25f, 0.0f };  // fLightSpare, fMediumSpare, fHeavySpare: spare rounds
 			int                      maxPerSite = 3;      // iMaxPerSite
 			float                    sendRadius = 2500.0f; // fSendRadius: Skyrim units; Halo's collision reaches ~2500
 			std::vector<std::string> weapons[3];          // sLightWeapons, sMediumWeapons, sHeavyWeapons
@@ -100,7 +104,11 @@ namespace chiefrim::Caches
 		// The camp or fort the location is (or is in)
 		Kind SiteOf(RE::BGSLocation* a_location, RE::BGSLocation*& a_site)
 		{
+			RE::BGSLocation* dungeon = nullptr;
 			for (auto* location = a_location; location; location = location->parentLoc) {
+				if (!dungeon && Has(location, kDungeon)) {
+					dungeon = location;
+				}
 				if (Has(location, kMilitaryFort)) {
 					a_site = location;
 					return Kind::kFort;
@@ -110,7 +118,27 @@ namespace chiefrim::Caches
 					return Kind::kCamp;
 				}
 			}
-			return Kind::kNone;
+			// a camp or fort in a cave or ruin is that, not a dungeon
+			a_site = dungeon;
+			return dungeon ? Kind::kDungeon : Kind::kNone;
+		}
+
+		const char* KindName(Kind a_kind)
+		{
+			return a_kind == Kind::kFort ? "fort" : a_kind == Kind::kCamp ? "camp" : "dungeon";
+		}
+
+		// the tier a cache's weapon is of (by the lists), for its ammunition
+		float SpareOf(const std::string& a_weapon)
+		{
+			for (int tier = 2; tier >= 0; --tier) {
+				for (const auto& name : config.weapons[tier]) {
+					if (_stricmp(name.c_str(), a_weapon.c_str()) == 0) {
+						return config.spare[tier];
+					}
+				}
+			}
+			return config.spare[0];
 		}
 
 		std::string ModelOf(RE::TESBoundObject* a_base)
@@ -155,9 +183,10 @@ namespace chiefrim::Caches
 			auto [it, added] = sites.try_emplace(a_site->GetFormID());
 			if (added) {
 				auto rng = Rng(a_site->GetFormID(), 0);
-				it->second.chosen = Roll(rng) < config.siteChance;
-				logger::info("caches: {} {:08X} ({}): {}", a_kind == Kind::kFort ? "fort" : "camp", a_site->GetFormID(), a_site->GetName(),
-					it->second.chosen ? "has caches" : "none");
+				// a dungeon's rarity is its boss chest's chance alone
+				it->second.chosen = a_kind == Kind::kDungeon || Roll(rng) < config.siteChance;
+				logger::info("caches: {} {:08X} ({}): {}", KindName(a_kind), a_site->GetFormID(), a_site->GetName(),
+					a_kind == Kind::kDungeon ? "its boss's chest may have a heavy weapon" : it->second.chosen ? "has caches" : "none");
 			}
 			return it->second;
 		}
@@ -186,11 +215,13 @@ namespace chiefrim::Caches
 				}
 				const bool boss = IsBossChest(anchor);
 				Tier       tier = Tier::kLight;
-				if (boss && a_kind == Kind::kFort) {
-					if (Roll(rng) >= config.heavyChance) {
+				if (boss && (a_kind == Kind::kFort || a_kind == Kind::kDungeon)) {
+					if (Roll(rng) >= (a_kind == Kind::kFort ? config.heavyChance : config.dungeonHeavyChance)) {
 						continue;
 					}
 					tier = Tier::kHeavy;
+				} else if (a_kind == Kind::kDungeon) {
+					continue;  // a dungeon's other chests: Skyrim's own loot
 				} else {
 					// a fort keeps a place for its boss's chest (deeper in, a later cell)
 					if (a_kind == Kind::kFort && a_record.count >= config.maxPerSite - 1) {
@@ -261,6 +292,7 @@ namespace chiefrim::Caches
 				}
 				message.id = id;
 				message.generation = generation;
+				message.spare = SpareOf(cache.weapon);
 				std::strncpy(message.weapon, cache.weapon.c_str(), CR_WEAPON_TAG_LENGTH - 1);
 				if (!Link::Get().PushRaw(CR_MSG_CACHE_PLACE, &message, sizeof(message))) {
 					return;  // the ring is full: next time
@@ -284,6 +316,10 @@ namespace chiefrim::Caches
 		config.mediumChance = Settings::ReadFloat(L"Caches", L"fMediumChance", 0.3f);
 		config.heavyChance = Settings::ReadFloat(L"Caches", L"fHeavyChance", 0.6f);
 		config.maxPerSite = static_cast<int>(Settings::ReadFloat(L"Caches", L"iMaxPerSite", 3.0f));
+		config.dungeonHeavyChance = Settings::ReadFloat(L"Caches", L"fDungeonHeavyChance", 0.15f);
+		config.spare[0] = std::clamp(Settings::ReadFloat(L"Caches", L"fLightSpare", 0.5f), 0.0f, 1.0f);
+		config.spare[1] = std::clamp(Settings::ReadFloat(L"Caches", L"fMediumSpare", 0.25f), 0.0f, 1.0f);
+		config.spare[2] = std::clamp(Settings::ReadFloat(L"Caches", L"fHeavySpare", 0.0f), 0.0f, 1.0f);
 		config.sendRadius = Settings::ReadFloat(L"Caches", L"fSendRadius", 2500.0f);
 		config.weapons[0] = ReadList(L"sLightWeapons", L"pistol, plasma pistol, needler, assault rifle");
 		config.weapons[1] = ReadList(L"sMediumWeapons", L"shotgun, plasma rifle");
@@ -417,7 +453,7 @@ namespace chiefrim::Caches
 			lastLocation = id;
 			logger::info("caches: in {} {:08X}{}", location ? location->GetName() : "no location", id,
 				kind == Kind::kNone ? ": not a camp or fort" :
-				std::format(": the {} {} ({})", kind == Kind::kFort ? "fort" : "camp", site->GetName(),
+				std::format(": the {} {} ({})", KindName(kind), site->GetName(),
 					!sites.contains(site->GetFormID()) ? "first visit" : sites[site->GetFormID()].chosen ? "has caches" : "none"));
 		}
 		if (kind != Kind::kNone && cell && !cells.contains(cell->GetFormID())) {
