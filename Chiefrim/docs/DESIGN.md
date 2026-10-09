@@ -600,6 +600,17 @@ and facing every tick.
   no destruction data and are untouched. `[Combat] bShootThroughDestructibles`. Offline: the
   pistol's rounds reported as 2304-unit ways from the muzzle. In game (2026-10-08): shots go through
   webs and are found on them; the damage to check (the log gives a web's health before and after).
+- **Traps (Phase 5, 2026-10-08).** Skyrim's traps are scripts that react to a hit (Papyrus's
+  `OnHit`, from `Scripts.zip`): a hanging oil lamp (`TrapFallingOilLamp`) falls, a tripwire, a
+  rigged beam or a hinge trigger goes off, on any hit; an oil pool (`TrapOilPool`, after
+  `TrapExplosiveGas`) and trapped gas burn on a hit by a flame (a weapon in `TrapGasWeapon`, with
+  `MagicDamageFire`, or Skyrim's torch, `Torch01`, 0001D4EC). Now the first thing on a shot's way
+  (`CR_MSG_SHOT`, above), and everything in an explosion's reach, if it has a script of its own (the
+  VM's attached scripts: not every wall a bullet strikes), gets the player's hit as Skyrim raises
+  its own (`TESHitEvent` through `ScriptEventSourceHolder`), with the torch as its weapon
+  (`bShotsIgnite`): oil and gas catch fire from a bullet, plasma or a grenade. People aren't: they
+  are hit through their proxies. `[Combat] bShotsHitObjects`, `bShotsIgnite`. In game: to check
+  (the log names the first scripted objects hit).
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.

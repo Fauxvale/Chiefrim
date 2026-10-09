@@ -36,7 +36,50 @@ namespace chiefrim::Combat
 			bool          shootThrough = true;        // [Combat] bShootThroughDestructibles
 			float         objectDamage = 10.0f;       // [Combat] fObjectDamage: a shot's, to a destructible object
 			float         blastObjectDamage = 50.0f;  // [Combat] fBlastObjectDamage: an explosion's, at its centre
+			bool          hitObjects = true;          // [Combat] bShotsHitObjects: scripted objects get OnHit (traps)
+			bool          ignite = true;              // [Combat] bShotsIgnite: as by a flame (oil, gas)
 		} config;
+
+		// Skyrim's torch: the traps that burn (TrapExplosiveGas, and TrapOilPool
+		// after it) take a hit with it as a flame's (akWeapon == torch01)
+		constexpr RE::FormID kTorch = 0x0001D4EC;
+
+		// The object has a script of its own: something may listen for its hits
+		bool Scripted(RE::TESObjectREFR* a_ref)
+		{
+			auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+			auto* policy = vm ? vm->GetObjectHandlePolicy() : nullptr;
+			if (!policy) {
+				return false;
+			}
+			const auto handle = policy->GetHandleForObject(RE::FormType::Reference, a_ref);
+			if (handle == policy->EmptyHandle()) {
+				return false;
+			}
+			RE::BSSpinLockGuard lock(vm->attachedScriptsLock);
+			return vm->attachedScripts.find(handle) != vm->attachedScripts.end();
+		}
+
+		// The player's hit on a scripted object, as Skyrim's own weapons
+		// raise it (TESHitEvent: Papyrus's OnHit): hanging oil lamps fall,
+		// tripwires and rigged beams go off; with bShotsIgnite, by a flame
+		// (Skyrim's torch), so oil pools and gas burn
+		void HitObject(RE::TESObjectREFR* a_ref)
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* events = RE::ScriptEventSourceHolder::GetSingleton();
+			if (!config.hitObjects || !player || !events || !a_ref || a_ref->As<RE::Actor>() || a_ref->IsDisabled() || !Scripted(a_ref)) {
+				return;
+			}
+			RE::TESHitEvent hit{ a_ref, player, config.ignite ? kTorch : 0u, 0u, RE::TESHitEvent::Flag::kNone };
+			events->SendEvent(&hit);
+			static int logged = 0;
+			if (logged++ < 20) {
+				auto* base = a_ref->GetBaseObject();
+				logger::info("combat: Chief's hit on scripted {:08X} (base {:08X}){}", a_ref->GetFormID(), base ? base->GetFormID() : 0u,
+					config.ignite ? ", as a flame's" : "");
+			}
+		}
 
 		// A destructible object's health now (its base's until first hurt)
 		float ObjectHealth(RE::TESObjectREFR* a_ref)
@@ -761,6 +804,8 @@ namespace chiefrim::Combat
 		config.shootThrough = Settings::ReadBool(L"Combat", L"bShootThroughDestructibles", true);
 		config.objectDamage = Settings::ReadFloat(L"Combat", L"fObjectDamage", 10.0f);
 		config.blastObjectDamage = Settings::ReadFloat(L"Combat", L"fBlastObjectDamage", 50.0f);
+		config.hitObjects = Settings::ReadBool(L"Combat", L"bShotsHitObjects", true);
+		config.ignite = Settings::ReadBool(L"Combat", L"bShotsIgnite", true);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
 		config.toggleKey = ::GetPrivateProfileIntW(L"Controls", L"iToggleChiefrimKey", 0x44, path.c_str());
 		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
@@ -826,25 +871,29 @@ namespace chiefrim::Combat
 		// the destructible objects in its reach, by how near
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* tes = RE::TES::GetSingleton();
-		if (!player || !tes || !config.shootThrough || config.blastObjectDamage <= 0.0f || a_explosion.radius <= 1.0f) {
+		if (!player || !tes || a_explosion.radius <= 1.0f) {
 			return;
 		}
 		const RE::NiPoint3 center{ a_explosion.center.x, a_explosion.center.y, a_explosion.center.z };
 		const float radius = std::min(a_explosion.radius, 2048.0f);
 		std::vector<std::pair<RE::TESObjectREFR*, float>> hurt;
 		tes->ForEachReferenceInRange(player, center.GetDistance(player->GetPosition()) + radius, [&](RE::TESObjectREFR* a_ref) {
-			auto* model = a_ref ? a_ref->Get3D() : nullptr;
-			if (model && ShootThrough(a_ref)) {
+			auto* model = a_ref && !a_ref->As<RE::Actor>() ? a_ref->Get3D() : nullptr;
+			if (model) {
 				// to its nearest side, near enough: its centre less its size
 				const float distance = std::max(model->worldBound.center.GetDistance(center) - model->worldBound.radius * 0.5f, 0.0f);
 				if (distance < radius) {
-					hurt.emplace_back(a_ref, config.blastObjectDamage * (1.0f - distance / radius));
+					hurt.emplace_back(a_ref, 1.0f - distance / radius);
 				}
 			}
 			return RE::BSContainer::ForEachResult::kContinue;
 		});
-		for (const auto& [ref, damage] : hurt) {
-			DamageObject(ref, damage);
+		// (out of the loop: a hit's scripts and a destruction may change the cell's references)
+		for (const auto& [ref, closeness] : hurt) {
+			if (ShootThrough(ref)) {
+				DamageObject(ref, config.blastObjectDamage * closeness);
+			}
+			HitObject(ref);  // a lamp falls, oil and gas burn
 		}
 	}
 
@@ -853,7 +902,7 @@ namespace chiefrim::Combat
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* cell = player ? player->GetParentCell() : nullptr;
 		auto* world = cell ? cell->GetbhkWorld() : nullptr;
-		if (!world || !config.shootThrough || config.objectDamage <= 0.0f) {
+		if (!world) {
 			return;
 		}
 		// the first thing on the way, as Skyrim's own arrows would find it
@@ -871,9 +920,13 @@ namespace chiefrim::Combat
 		}
 		const auto* hit = pick.rayOutput.HasHit() ? pick.rayOutput.rootCollidable : nullptr;
 		auto*       ref = hit ? RE::TESHavokUtilities::FindCollidableRef(*hit) : nullptr;
+		if (!ref || ref->As<RE::Actor>()) {
+			return;  // people are hit through their proxies
+		}
 		if (ShootThrough(ref)) {
 			DamageObject(ref, config.objectDamage);
 		}
+		HitObject(ref);  // a lamp falls, oil and gas burn, a tripwire goes off
 	}
 
 	void OnHitActor(const cr_msg_hit_actor& a_hit)
