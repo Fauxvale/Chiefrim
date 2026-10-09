@@ -689,8 +689,9 @@ as in Halo.
   (0.35), up to `iMaxPerSite` (3) in the site: a light weapon (`sLightWeapons`: pistol, plasma
   pistol, needler, assault rifle), or in a fort a medium one by `fMediumChance` (0.3; shotgun,
   plasma rifle). A fort's boss chest (location ref type `BossContainer`, 000130F8) gets a heavy one by
-  `fHeavyChance` (0.6; sniper rifle, rocket launcher: Halo refuses Chief the fuel rod and the
-  flamethrower, which the list first had, and a ruin's fuel rod lay nowhere), found nowhere else; a
+  `fHeavyChance` (0.6; sniper rifle, rocket launcher, shotgun, plasma rifle: Halo refuses Chief the
+  fuel rod and the flamethrower, which the list first had, and a ruin's fuel rod lay nowhere; the
+  shotgun and plasma rifle are medium too, and a boss chest's counts as heavy for its ammunition); a
   fort's other chests stop one short of the limit to leave it a place. **Dungeons** (2026-10-09:
   heavy weapons in forts alone were too rare): a location with `LocTypeDungeon` (Nordic and Dwemer
   ruins, caves; a camp or fort in one is that) always counts, but only its boss chest, and only for a

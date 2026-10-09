@@ -154,10 +154,18 @@ namespace chiefrim::Caches
 			return false;
 		}
 
-		// the tier a cache's weapon is of (by the lists), for its ammunition
-		float SpareOf(const std::string& a_weapon)
+		// the tier a cache's weapon is of, for its ammunition: by the lists, and
+		// one in two of them (a shotgun: medium, and heavy in a boss's chest) by
+		// where it lies
+		float SpareOf(const std::string& a_weapon, bool a_boss)
 		{
-			for (int tier = 2; tier >= 0; --tier) {
+			const auto in = [&](int a_tier) {
+				return std::ranges::any_of(config.weapons[a_tier], [&](const auto& a_name) { return _stricmp(a_name.c_str(), a_weapon.c_str()) == 0; });
+			};
+			if (a_boss && in(2)) {
+				return config.spare[2];
+			}
+			for (int tier : { 1, 0, 2 }) {
 				for (const auto& name : config.weapons[tier]) {
 					if (_stricmp(name.c_str(), a_weapon.c_str()) == 0) {
 						return config.spare[tier];
@@ -333,7 +341,7 @@ namespace chiefrim::Caches
 				}
 				message.id = id;
 				message.generation = generation;
-				message.spare = SpareOf(cache.weapon);
+				message.spare = SpareOf(cache.weapon, IsBossChest(anchor));
 				std::strncpy(message.weapon, cache.weapon.c_str(), CR_WEAPON_TAG_LENGTH - 1);
 				if (!Link::Get().PushRaw(CR_MSG_CACHE_PLACE, &message, sizeof(message))) {
 					return;  // the ring is full: next time
@@ -366,7 +374,7 @@ namespace chiefrim::Caches
 		config.weapons[0] = ReadList(L"sLightWeapons", L"pistol, plasma pistol, needler, assault rifle");
 		config.weapons[1] = ReadList(L"sMediumWeapons", L"shotgun, plasma rifle");
 		// (not the fuel rod, the AI's, nor the flamethrower, an Xbox leftover: Halo refuses them to Chief)
-		config.weapons[2] = ReadList(L"sHeavyWeapons", L"sniper rifle, rocket launcher");
+		config.weapons[2] = ReadList(L"sHeavyWeapons", L"sniper rifle, rocket launcher, shotgun, plasma rifle");
 	}
 
 	void Save(SKSE::SerializationInterface* a_intfc)
