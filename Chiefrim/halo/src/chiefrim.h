@@ -76,6 +76,10 @@ void chiefrim_combat_reset(long chief);                /* a new world */
 void chiefrim_combat_message(long chief, int type, void const *message, cr_vec3 origin);
 void chiefrim_combat_update(long chief, cr_vec3 origin); /* each frame while linked */
 boolean chiefrim_object_is_proxy(long object_index);   /* a proxy of one of Skyrim's people */
+/* motion_sensor.c: a proxy's blip, from its actor (moving or attacking, and
+hostile or not); velocity_sensitivity: Halo's (world units a tick, squared).
+FALSE: not a proxy. Either pointer may be NULL */
+boolean chiefrim_proxy_motion_sensor(long object_index, real velocity_sensitivity, boolean *shown, boolean *hostile);
 void chiefrim_proxy_struck(long object_index, real_point3d const *point, long damage_definition_index); /* projectiles.c: a projectile hit a proxy */
 /* a proxy with its actor's hit shapes (protocol 18) is hit on those, not on its biped:
 collisions.c's object_test_vector (shots, melee): TRUE, FALSE, or NONE (not such a proxy);

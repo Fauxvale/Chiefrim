@@ -381,6 +381,14 @@ namespace chiefrim::Combat
 
 		// ---- the actors, to Halo ---------------------------------------------
 
+		// Swinging, drawing a bow or casting: Halo's motion tracker shows it,
+		// as it shows a unit firing (protocol 20).
+		bool Attacking(RE::Actor* a_actor)
+		{
+			const auto* state = a_actor->AsActorState();
+			return (state && state->GetAttackState() != RE::ATTACK_STATE_ENUM::kNone) || a_actor->WhoIsCasting() != 0;
+		}
+
 		// Halo's proxies: the living, and for a moment the newly dead (listed
 		// alive last frame), flagged so: a proxy drops its weapon and grenades.
 		// With each, where it's hit (Hitbox, protocol 18)
@@ -433,7 +441,8 @@ namespace chiefrim::Combat
 				const auto position = actor->GetPosition();
 				out.form_id = actor->GetFormID();
 				out.flags = (actor->IsHostileToActor(a_player) ? CR_ACTOR_HOSTILE : 0u) | (actor->IsEssential() ? CR_ACTOR_ESSENTIAL : 0u) |
-				            (actor->IsDead() ? CR_ACTOR_DEAD : 0u);
+				            (actor->IsDead() ? CR_ACTOR_DEAD : 0u) | (Attacking(actor) ? CR_ACTOR_ATTACKING : 0u) |
+				            (actor->IsSneaking() ? CR_ACTOR_SNEAKING : 0u);
 				out.position = { position.x, position.y, position.z };
 				out.heading = actor->GetAngleZ();
 				out.height = std::clamp(actor->GetHeight(), 20.0f, 2000.0f);
@@ -736,7 +745,9 @@ namespace chiefrim::Combat
 
 	void PerFrame(RE::PlayerCharacter* a_player, float a_delta)
 	{
-		if (s.chiefDead) {
+		// dead (Chief, or Skyrim killed its player): nothing to refund or hit
+		// until the reload's new world (Release)
+		if (s.chiefDead || a_player->IsDead()) {
 			return;
 		}
 		if (!std::exchange(s.keyChecked, true)) {

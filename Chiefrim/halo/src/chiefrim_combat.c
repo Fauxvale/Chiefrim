@@ -26,6 +26,13 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
   by name (the console's "chiefrim give"), answered on Skyrim's console. Each proxy carries one of a few
   sidearms and a type of grenade, at random, which it drops when its actor
   dies (Skyrim lists the newly dead a moment, CR_ACTOR_DEAD): Chief's loot.
+- MOTION TRACKER: a proxy shows as Halo shows a unit, while its actor moves
+  (measured from where Skyrim puts it) or attacks (CR_ACTOR_ATTACKING, as a
+  unit firing shows): red if it is hostile to the player (CR_ACTOR_HOSTILE),
+  yellow if not. Its team stays the Covenant's, so the colour is all that
+  changes. Halo's speed threshold (~90 Skyrim units a second) is above a
+  Skyrim walk, so a walk shows (CHIEFRIM_TRACKER_SPEED), and only sneaking
+  (CR_ACTOR_SNEAKING, Halo's crouch) has to beat Halo's own.
 */
 
 #include "cseries.h"
@@ -66,6 +73,8 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #define CHIEFRIM_PROXY_GRENADES   2       /* when its biped carries none of its own */
 #define CHIEFRIM_PROXY_HITBOXES   CR_HITBOXES_PER_ACTOR
 #define CHIEFRIM_HEAD_SLACK       1.25f   /* a headshot's reach, of the head shape's radius */
+#define CHIEFRIM_SPEED_TICKS      6       /* a proxy's speed is measured over this many ticks (0.2 s) */
+#define CHIEFRIM_TRACKER_SPEED    40.f    /* Skyrim units a second: faster, the motion tracker shows a proxy (unless sneaking) */
 
 /* what a proxy may carry, each as likely: the weapons a proxy drops */
 static char const *const proxy_weapon_names[] = { "pistol", "assault rifle", "plasma pistol", "needler" };
@@ -92,6 +101,11 @@ struct chiefrim_proxy
 	boolean shaped;        /* logged its shapes */
 	long hitbox_count;     /* 0: Halo hits its biped */
 	struct chiefrim_hitbox hitboxes[CHIEFRIM_PROXY_HITBOXES];
+	uint32_t flags;        /* its actor's, CR_ACTOR_*, as last listed (the motion tracker) */
+	cr_vec3 measured_at;   /* where its actor stood when its speed was last measured, Skyrim units */
+	long measured_tick;    /* the game tick then; NONE: not yet */
+	real speed;            /* its actor's, world units per tick */
+	boolean tracked;       /* on the motion tracker (for the log) */
 };
 
 static struct
@@ -530,6 +544,35 @@ static real chiefrim_proxy_take_damage(long object_index, boolean *killed)
 	return combat.proxy_vitality > 0.f && lost > 0.f ? MIN(lost / combat.proxy_vitality, 1.f) : 0.f;
 }
 
+/* how fast its actor goes in Skyrim, in Halo's terms (world units a tick),
+for the motion tracker: the proxy itself is placed, with no velocity */
+static void chiefrim_proxy_measure(struct chiefrim_proxy *proxy, cr_actor const *actor)
+{
+	long now = game_time_get();
+	long ticks = now - proxy->measured_tick;
+
+	proxy->flags = actor->flags;
+	if (proxy->measured_tick == NONE || ticks < 0)
+	{
+		proxy->measured_at = actor->position;
+		proxy->measured_tick = now;
+	}
+	else if (ticks >= CHIEFRIM_SPEED_TICKS)
+	{
+		real dx = actor->position.x - proxy->measured_at.x;
+		real dy = actor->position.y - proxy->measured_at.y;
+		real dz = actor->position.z - proxy->measured_at.z;
+
+		real speed = square_root(dx * dx + dy * dy + dz * dz) / CR_SKY_UNITS_PER_WU / (real)ticks;
+
+		/* a window Skyrim didn't move it in (its frames and Halo's ticks
+		don't keep step) halves it, rather than taking it off the tracker */
+		proxy->speed = MAX(speed, proxy->speed * 0.5f);
+		proxy->measured_at = actor->position;
+		proxy->measured_tick = now;
+	}
+}
+
 /* a proxy's loss this frame to Skyrim, with the explosion's centre if one
 did some of it */
 static void chiefrim_proxy_send_hit(struct chiefrim_proxy *proxy, real fraction, boolean killed, cr_vec3 origin)
@@ -637,9 +680,13 @@ static void chiefrim_proxies_update(cr_vec3 origin)
 			free_proxy->headshot = FALSE;
 			free_proxy->shaped = FALSE;
 			free_proxy->hitbox_count = 0;
+			free_proxy->measured_tick = NONE;
+			free_proxy->speed = 0.f;
+			free_proxy->tracked = FALSE;
 			proxy = free_proxy;
 		}
 		proxy->seen = TRUE;
+		chiefrim_proxy_measure(proxy, actor);
 		/* where it's hit now, before it's moved (its bounds hold them) */
 		chiefrim_proxy_take_hitboxes(proxy, &actors, actor, origin);
 
@@ -966,6 +1013,40 @@ void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real ac
 boolean chiefrim_object_is_proxy(long object_index)
 {
 	return chiefrim_proxy_of(object_index) != NULL;
+}
+
+/* motion_sensor.c: whether a proxy shows on the motion tracker (its actor
+moves, or attacks) and its colour (hostile: an enemy's). FALSE: not a
+proxy, Halo's own rules */
+boolean chiefrim_proxy_motion_sensor(long object_index, real velocity_sensitivity, boolean *shown, boolean *hostile)
+{
+	struct chiefrim_proxy *proxy = chiefrim_proxy_of(object_index);
+	static long logged;
+
+	if (!proxy)
+		return FALSE;
+	if (shown)
+	{
+		/* a walk, in world units a tick; sneaking, Halo's own (its crouch) */
+		real threshold = CHIEFRIM_TRACKER_SPEED / CR_SKY_UNITS_PER_WU / TICKS_PER_SECOND;
+
+		threshold *= threshold;
+		if ((proxy->flags & CR_ACTOR_SNEAKING) || threshold > velocity_sensitivity)
+			threshold = velocity_sensitivity;
+		*shown = (proxy->flags & CR_ACTOR_ATTACKING) || proxy->speed * proxy->speed >= threshold;
+		if (*shown && !proxy->tracked && logged < 8)
+		{
+			logged++;
+			error(_error_silent, "chiefrim: the motion tracker shows %08lX (%s, %s at %.0f units a second; it shows from %.0f)",
+				(unsigned long)proxy->form_id, (proxy->flags & CR_ACTOR_HOSTILE) ? "hostile: red" : "not hostile: yellow",
+				(proxy->flags & CR_ACTOR_ATTACKING) ? "attacking" : (proxy->flags & CR_ACTOR_SNEAKING) ? "sneaking" : "moving",
+				proxy->speed * CR_SKY_UNITS_PER_WU * TICKS_PER_SECOND, square_root(threshold) * CR_SKY_UNITS_PER_WU * TICKS_PER_SECOND);
+		}
+		proxy->tracked = *shown;
+	}
+	if (hostile)
+		*hostile = (proxy->flags & CR_ACTOR_HOSTILE) != 0;
+	return TRUE;
 }
 
 /* collisions.c's hook (shots, melee, explosions' line of sight): a proxy

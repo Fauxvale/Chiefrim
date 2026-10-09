@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 19u
+#define CR_PROTOCOL_VERSION 20u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -254,6 +254,8 @@ typedef struct cr_actor
 #define CR_ACTOR_HOSTILE   0x0001u /* hostile to the player */
 #define CR_ACTOR_DEAD      0x0002u
 #define CR_ACTOR_ESSENTIAL 0x0004u
+#define CR_ACTOR_ATTACKING 0x0008u /* swinging, drawing a bow, casting: the motion tracker shows it (protocol 20) */
+#define CR_ACTOR_SNEAKING  0x0010u /* as a unit crouching: only Halo's own speed shows it on the tracker (protocol 20) */
 
 typedef struct cr_actors
 {

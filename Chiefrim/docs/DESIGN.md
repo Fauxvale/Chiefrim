@@ -584,7 +584,19 @@ and facing every tick.
   (`hitbox: <name>: N shapes from M of its bodies`, or `from its bounds`).
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
-- Each proxy carries the actor's FormID and hostile, essential and dead flags.
+- Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.
+- **Motion tracker (Phase 5, protocol 20):** a proxy is a blip as Halo makes one: red if its actor
+  is hostile to the player (`IsHostileToActor`), yellow if not (friends, followers, townsfolk),
+  while it moves or attacks (`CR_ACTOR_ATTACKING`: a swing, a drawn bow, a spell being cast, as a
+  unit firing shows standing still). The proxy is placed, with no velocity of its own, so Halo
+  measures its actor's speed from where Skyrim puts it (over 0.2 s, halving through a window
+  Skyrim didn't move it in). Halo's threshold (~90 Skyrim units a second) is above a Skyrim walk
+  (~80), so a proxy shows from 40 units a second; only a sneaking actor (`CR_ACTOR_SNEAKING`,
+  Halo's crouch) has to beat Halo's own. The proxy's team stays the Covenant's (damage and aim
+  assist as before): `motion_sensor.c`'s hooks change only whether it shows and its colour.
+  Offline (`fake_skyrim.py --actor-walk`, `--actor-friendly`, `--actor-sneaks`,
+  `--actor-attack-at`): a hostile walker red, a friendly one yellow, a sneaking one and one
+  standing still not shown, the one standing still shown red while it attacks.
 
 ### 8.2 Chief hits an NPC
 
@@ -898,6 +910,12 @@ Message type IDs 0x80–0xFF are reserved for the stretch goals (Covenant, vehic
   and (2026-10-07) a werewolf and a vampire lord, linked in that form, kept by Skyrim, and Chief back
   when the werewolf form ended. Unlinking puts back the third person if Chief found the player in it
   (a beast form has no first person, and its scripts turn the POV switch off).
+  **Death (Phase 5, `[Handoff] bDeath`):** when the player dies (Chief's death in Halo kills him,
+  or Skyrim kills him), Skyrim has him too: its death camera, no Chief's weapon or HUD, and no
+  combat bridging for a dead player. It holds through the reload's loading screen and, once that
+  closes, `fDeathFadeInSeconds` (2) more while the loaded game fades in (longer while Skyrim's
+  `Fader Menu` is up, up to 10 s), then hands Chief back. A player brought back without a reload
+  is Chief's again at once. In game: to check.
 - **The console (Phase 5, protocol 19, `skse/src/Console.cpp`):** a `chiefrim` command in
   Skyrim's console. SKSE can't add one in SE/AE, so the plugin renames one of the game's developer
   commands that players don't need (the first of `TestSeenData`, `TestLocalMap`,

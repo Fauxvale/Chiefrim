@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 19
+VERSION = 20
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -514,6 +514,14 @@ def main():
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
+    parser.add_argument("--actor-friendly", action="store_true",
+                        help="with --actor: not hostile to the player (a yellow blip on the motion tracker, not red)")
+    parser.add_argument("--actor-walk", type=float, default=0.0,
+                        help="with --actor: Skyrim units a second it walks east and west, 400 units each way (the motion tracker)")
+    parser.add_argument("--actor-sneaks", action="store_true",
+                        help="with --actor: sneaking (CR_ACTOR_SNEAKING: only Halo's own speed shows it on the tracker)")
+    parser.add_argument("--actor-attack-at", type=float, default=0.0,
+                        help="with --actor: seconds in, it attacks for 3 s (CR_ACTOR_ATTACKING: the tracker shows it standing)")
     parser.add_argument("--actor-dies-at", type=float, default=0.0,
                         help="with --actor: seconds in, it dies (listed dead for 3 s, then gone): its proxy drops its kit")
     parser.add_argument("--flashlight-at", type=float, default=0.0,
@@ -721,7 +729,11 @@ def main():
                     drive_state["actor dead"] = True
                     print("fake_skyrim: the actor dies", flush=True)
                 listed = not (dead and t >= options.actor_dies_at + 3.0)
-                link.slot_write(OFF_ACTORS, actors_payload(frame, (0x0001A2B3, 0x1 | (0x2 if dead else 0), options.x,
+                attacking = options.actor_attack_at and options.actor_attack_at <= t < options.actor_attack_at + 3.0
+                flags = (0 if options.actor_friendly else 0x1) | (0x2 if dead else 0) | (0x8 if attacking else 0) | (0x10 if options.actor_sneaks else 0)
+                walked = options.actor_walk * t % 1600.0 if options.actor_walk and not dead else 0.0
+                walked = walked if walked < 800.0 else 1600.0 - walked  # 0..800 and back
+                link.slot_write(OFF_ACTORS, actors_payload(frame, (0x0001A2B3, flags, options.x - 400.0 + walked if options.actor_walk else options.x,
                     options.y + options.actor, options.z, math.pi) if listed else None, options.actor_shape))
             if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
                 drive_state["hurts"] = drive_state.get("hurts", 0) + 1
