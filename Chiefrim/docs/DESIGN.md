@@ -590,13 +590,16 @@ and facing every tick.
   (`TESHavokUtilities::FindCollidableRef`, the base's `BGSDestructibleObjectForm` with health),
   so Halo's bullets, plasma and grenades go through, and Halo reports each projectile's way each
   tick (`CR_MSG_SHOT`, from `projectile_collision_test_line`). Skyrim casts it through its own
-  world (projectile layer) and, if the first thing on it is a destructible, damages it as Papyrus's
-  `ObjectReference.DamageObject` does (its stages and effects; destroyed at no health):
+  world (projectile layer) and, if the first thing on it is a destructible, damages it with
+  `TESObjectREFR::DamageObject`, which Papyrus's `ObjectReference.DamageObject` ends in (its stages
+  and effects; destroyed at no health). Not through Papyrus: the first in-game test dispatched the
+  method for each hit on a web and nothing happened, as a web has no script and so no VM object to
+  call it on:
   `fObjectDamage` (10, a web's whole health) a shot. An explosion damages those in its reach,
   `fBlastObjectDamage` (50) at its centre to nothing at its edge. Decorative cobwebs (statics) have
   no destruction data and are untouched. `[Combat] bShootThroughDestructibles`. Offline: the
-  pistol's rounds reported as 2304-unit ways from the muzzle. In game: to check (the log names the
-  destructibles left out and damaged).
+  pistol's rounds reported as 2304-unit ways from the muzzle. In game (2026-10-08): shots go through
+  webs and are found on them; the damage to check (the log gives a web's health before and after).
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.

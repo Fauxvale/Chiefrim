@@ -38,25 +38,32 @@ namespace chiefrim::Combat
 			float         blastObjectDamage = 50.0f;  // [Combat] fBlastObjectDamage: an explosion's, at its centre
 		} config;
 
-		// Skyrim's own damage to a destructible object (ObjectReference.
-		// DamageObject: its stages, their effects, destroyed at no health)
+		// A destructible object's health now (its base's until first hurt)
+		float ObjectHealth(RE::TESObjectREFR* a_ref)
+		{
+			if (auto* extra = a_ref->extraList.GetByType<RE::ExtraObjectHealth>()) {
+				return extra->health;
+			}
+			auto* base = a_ref->GetBaseObject();
+			auto* destructible = base ? skyrim_cast<RE::BGSDestructibleObjectForm*>(base) : nullptr;
+			return destructible && destructible->data ? static_cast<float>(destructible->data->health) : 0.0f;
+		}
+
+		// Skyrim's own damage to a destructible object, as ObjectReference.
+		// DamageObject does (its stages, their effects, destroyed at no
+		// health). Not through Papyrus: a web has no script, so the VM had no
+		// object of it to call the method on, and nothing happened (in game)
 		void DamageObject(RE::TESObjectREFR* a_ref, float a_damage)
 		{
-			auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-			auto* policy = vm ? vm->GetObjectHandlePolicy() : nullptr;
-			if (!policy || a_damage <= 0.0f) {
+			if (a_damage <= 0.0f) {
 				return;
 			}
-			const auto handle = policy->GetHandleForObject(RE::FormType::Reference, a_ref);
-			if (handle == policy->EmptyHandle()) {
-				return;
-			}
-			RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result;
-			auto* arguments = RE::MakeFunctionArguments(static_cast<float>(a_damage));
-			vm->DispatchMethodCall(handle, "ObjectReference", "DamageObject", arguments, result);
+			const float before = ObjectHealth(a_ref);
+			a_ref->DamageObject(a_damage, false);
 			static int logged = 0;
 			if (logged++ < 20) {
-				logger::info("combat: Chief's {:.0f} damage to destructible {:08X}", a_damage, a_ref->GetFormID());
+				logger::info("combat: Chief's {:.0f} damage to destructible {:08X}: health {:.0f} -> {:.0f}{}", a_damage, a_ref->GetFormID(), before,
+					ObjectHealth(a_ref), a_ref->IsDisabled() ? " (gone)" : "");
 			}
 		}
 
