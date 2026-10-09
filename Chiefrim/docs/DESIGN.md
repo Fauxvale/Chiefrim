@@ -583,6 +583,20 @@ and facing every tick.
   draws the biped; the console's `chiefrim shapes` draws the shapes (§11). The plugin's log names the first actors' shapes
   (`hitbox: <name>: N shapes from M of its bodies`, or `from its bounds`). Verified in game
   (2026-10-08): people, a giant, a horse, a mammoth and a dragon.
+- **Destructible objects (Phase 5, 2026-10-08, protocol 23).** Skyrim's spider webs that close
+  passages are activators with destruction data (`FXspiderWebKitDestructible` and its kin in
+  `Skyrim.esm`: 10 health); in Halo's collision they stopped shots like walls, unharmed. Now the
+  plugin leaves a destructible object not yet destroyed out of the collision it sends
+  (`TESHavokUtilities::FindCollidableRef`, the base's `BGSDestructibleObjectForm` with health),
+  so Halo's bullets, plasma and grenades go through, and Halo reports each projectile's way each
+  tick (`CR_MSG_SHOT`, from `projectile_collision_test_line`). Skyrim casts it through its own
+  world (projectile layer) and, if the first thing on it is a destructible, damages it as Papyrus's
+  `ObjectReference.DamageObject` does (its stages and effects; destroyed at no health):
+  `fObjectDamage` (10, a web's whole health) a shot. An explosion damages those in its reach,
+  `fBlastObjectDamage` (50) at its centre to nothing at its edge. Decorative cobwebs (statics) have
+  no destruction data and are untouched. `[Combat] bShootThroughDestructibles`. Offline: the
+  pistol's rounds reported as 2304-unit ways from the muzzle. In game: to check (the log names the
+  destructibles left out and damaged).
 - Because proxies are real Halo objects, **Halo's own code** handles bullets, plasma, needler
   supercombines, grenade splash, melee, headshots and knockback impulses.
 - Each proxy carries the actor's FormID and hostile, essential, dead, attacking and sneaking flags.

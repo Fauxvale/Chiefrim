@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 22u
+#define CR_PROTOCOL_VERSION 23u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -314,6 +314,7 @@ vehicles); docs §10. */
 #define CR_MSG_FLASHLIGHT    0x10u /* H->S: Chief's flashlight as it shines now, when it changes: Skyrim's world is lit (protocol 17) */
 #define CR_MSG_CONSOLE       0x11u /* H->S: a line for Skyrim's console, answering a console command (cr_msg_log; protocol 19) */
 #define CR_MSG_DEBUG         0x12u /* S->H: debug drawing on or off (protocol 19) */
+#define CR_MSG_SHOT          0x13u /* H->S: a projectile's way this tick: Skyrim's destructible objects on it are hurt (protocol 23) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -404,6 +405,18 @@ typedef struct cr_msg_explosion
 	float    acceleration; /* Halo's push on objects in the middle (world units per tick), as a guide to its power */
 	uint32_t reserved;
 } cr_msg_explosion;
+
+/* A projectile's way this tick (protocol 23): Halo's bullets, plasma and
+grenades go through Skyrim's destructible objects (spider webs, barricades:
+Skyrim leaves them out of the collision it sends), so Skyrim looks along
+the way itself and hurts the first thing on it, if it is one. */
+typedef struct cr_msg_shot
+{
+	cr_msg_header header;
+	cr_vec3  from;         /* Skyrim units */
+	cr_vec3  to;
+	uint32_t reserved[2];
+} cr_msg_shot;
 
 /* Chief's flashlight (protocol 17): his biped's light as Halo would shine
 it now. Halo's light has no world of Halo's to fall on, so Skyrim lights its
@@ -894,6 +907,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
+CR_STATIC_ASSERT(sizeof(cr_msg_shot) == 40, "cr_msg_shot");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");

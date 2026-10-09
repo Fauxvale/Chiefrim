@@ -4,6 +4,7 @@
 // adapted from SkyCraft's Collision.cpp (MIT; THIRD-PARTY-NOTICES.md). Chiefrim
 // sends triangles in Skyrim units where SkyCraft voxelizes for Minecraft.
 #include "Collision.h"
+#include "Combat.h"
 
 #include "Link.h"
 #include "Settings.h"
@@ -599,6 +600,15 @@ namespace chiefrim::Collision
 					const auto& collidable = entity->collidable;
 					const bool  clutter = Clutter(collidable.GetCollisionLayer());
 					if (!Included(collidable.GetCollisionLayer()) && !(clutter && a_atRest)) {
+						continue;
+					}
+					// destructible ones aren't (spider webs): Halo's shots go
+					// through, and Skyrim hurts them (Combat::OnShot)
+					if (auto* ref = RE::TESHavokUtilities::FindCollidableRef(collidable); Combat::ShootThrough(ref)) {
+						static int logged = 0;
+						if (logged++ < 10) {
+							logger::info("collision: destructible {:08X} left out: Halo's shots go through it", ref->GetFormID());
+						}
 						continue;
 					}
 					const auto* shape = collidable.shape;

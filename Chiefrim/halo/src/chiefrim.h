@@ -118,6 +118,7 @@ boolean chiefrim_object_flashlight(long object_index, real_rgb_color *color, rea
 boolean chiefrim_world_origin(cr_vec3 *origin);         /* Skyrim's world origin, if one is set */
 void chiefrim_note_area_damage(long object_index, real_point3d const *epicenter); /* damage.c: an explosion reached it */
 void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real acceleration); /* damage.c: an explosion's area damage starts */
+void chiefrim_note_projectile_way(real_point3d const *from, real_point3d const *to); /* projectiles.c: a projectile's way this tick */
 
 /* chiefrim_world.c (docs §5): Skyrim's collision as Halo's. */
 void chiefrim_world_initialize(void);

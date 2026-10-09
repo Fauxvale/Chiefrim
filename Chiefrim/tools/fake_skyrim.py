@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 22
+VERSION = 23
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -51,6 +51,8 @@ SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
 MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION, MSG_FLASHLIGHT = 12, 13, 14, 15, 16
+MSG_SHOT = 0x13
+SHOTS = [0]
 MSG_CONSOLE, MSG_DEBUG = 17, 18
 GIVE_LIST, DEBUG_HITBOXES = 1, 1
 KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
@@ -672,6 +674,12 @@ def main():
                 elif msg_type == MSG_EXPLOSION:
                     cx, cy, cz, radius, acceleration = struct.unpack_from("<3fff", body)
                     print(f"fake_skyrim: explosion at ({cx:.0f} {cy:.0f} {cz:.0f}), radius {radius:.0f}, acceleration {acceleration:.3f}", flush=True)
+                elif msg_type == MSG_SHOT:
+                    fx, fy, fz, tx, ty, tz = struct.unpack_from("<3f3f", body)
+                    SHOTS[0] += 1
+                    if SHOTS[0] <= 3 or SHOTS[0] % 50 == 0:
+                        print(f"fake_skyrim: shot #{SHOTS[0]}: a projectile's way ({fx:.0f} {fy:.0f} {fz:.0f}) -> ({tx:.0f} {ty:.0f} {tz:.0f}), "
+                              f"{math.dist((fx, fy, fz), (tx, ty, tz)):.0f} units", flush=True)
                 elif msg_type == MSG_FLASHLIGHT:
                     r, g, b, radius, cutoff, falloff = struct.unpack_from("<3ffff", body)
                     state = f"on, colour ({r:.2f} {g:.2f} {b:.2f})" if r + g + b > 0 else "off"

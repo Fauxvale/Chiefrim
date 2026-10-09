@@ -200,6 +200,9 @@ namespace chiefrim
 			case CR_MSG_EXPLOSION:
 				Combat::OnExplosion(*reinterpret_cast<const cr_msg_explosion*>(buffer));
 				break;
+			case CR_MSG_SHOT:
+				Combat::OnShot(*reinterpret_cast<const cr_msg_shot*>(buffer));
+				break;
 			case CR_MSG_CHIEF_STATE:
 				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));
 				break;

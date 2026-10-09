@@ -33,7 +33,32 @@ namespace chiefrim::Combat
 			float         burnDamage = 0.15f;         // [Combat] fBurnDamage
 			float         propSpeed = 5.0f;           // [Combat] fPropLaunchSpeed: m/s at an explosion's centre
 			float         propMinRadius = 64.0f;      // [Combat] fPropMinRadius: smaller splashes (a plasma bolt's) push nothing
+			bool          shootThrough = true;        // [Combat] bShootThroughDestructibles
+			float         objectDamage = 10.0f;       // [Combat] fObjectDamage: a shot's, to a destructible object
+			float         blastObjectDamage = 50.0f;  // [Combat] fBlastObjectDamage: an explosion's, at its centre
 		} config;
+
+		// Skyrim's own damage to a destructible object (ObjectReference.
+		// DamageObject: its stages, their effects, destroyed at no health)
+		void DamageObject(RE::TESObjectREFR* a_ref, float a_damage)
+		{
+			auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+			auto* policy = vm ? vm->GetObjectHandlePolicy() : nullptr;
+			if (!policy || a_damage <= 0.0f) {
+				return;
+			}
+			const auto handle = policy->GetHandleForObject(RE::FormType::Reference, a_ref);
+			if (handle == policy->EmptyHandle()) {
+				return;
+			}
+			RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> result;
+			auto* arguments = RE::MakeFunctionArguments(static_cast<float>(a_damage));
+			vm->DispatchMethodCall(handle, "ObjectReference", "DamageObject", arguments, result);
+			static int logged = 0;
+			if (logged++ < 20) {
+				logger::info("combat: Chief's {:.0f} damage to destructible {:08X}", a_damage, a_ref->GetFormID());
+			}
+		}
 
 		// The people an explosion set alight (docs §8.2): burning for a while,
 		// hurt a little each frame.
@@ -726,6 +751,9 @@ namespace chiefrim::Combat
 		config.burnDamage = Settings::ReadFloat(L"Combat", L"fBurnDamage", 0.15f);
 		config.propSpeed = Settings::ReadFloat(L"Combat", L"fPropLaunchSpeed", 5.0f);
 		config.propMinRadius = Settings::ReadFloat(L"Combat", L"fPropMinRadius", 64.0f);
+		config.shootThrough = Settings::ReadBool(L"Combat", L"bShootThroughDestructibles", true);
+		config.objectDamage = Settings::ReadFloat(L"Combat", L"fObjectDamage", 10.0f);
+		config.blastObjectDamage = Settings::ReadFloat(L"Combat", L"fBlastObjectDamage", 50.0f);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
 		config.toggleKey = ::GetPrivateProfileIntW(L"Controls", L"iToggleChiefrimKey", 0x44, path.c_str());
 		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
@@ -775,9 +803,70 @@ namespace chiefrim::Combat
 		}
 	}
 
+	bool ShootThrough(RE::TESObjectREFR* a_ref)
+	{
+		if (!config.shootThrough || !a_ref || a_ref->IsDisabled() || a_ref->IsDeleted() || a_ref->As<RE::Actor>()) {
+			return false;
+		}
+		auto* base = a_ref->GetBaseObject();
+		auto* destructible = base ? skyrim_cast<RE::BGSDestructibleObjectForm*>(base) : nullptr;
+		return destructible && destructible->data && destructible->data->health > 0;
+	}
+
 	void OnExplosion(const cr_msg_explosion& a_explosion)
 	{
 		Launch(a_explosion);
+		// the destructible objects in its reach, by how near
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* tes = RE::TES::GetSingleton();
+		if (!player || !tes || !config.shootThrough || config.blastObjectDamage <= 0.0f || a_explosion.radius <= 1.0f) {
+			return;
+		}
+		const RE::NiPoint3 center{ a_explosion.center.x, a_explosion.center.y, a_explosion.center.z };
+		const float radius = std::min(a_explosion.radius, 2048.0f);
+		std::vector<std::pair<RE::TESObjectREFR*, float>> hurt;
+		tes->ForEachReferenceInRange(player, center.GetDistance(player->GetPosition()) + radius, [&](RE::TESObjectREFR* a_ref) {
+			auto* model = a_ref ? a_ref->Get3D() : nullptr;
+			if (model && ShootThrough(a_ref)) {
+				// to its nearest side, near enough: its centre less its size
+				const float distance = std::max(model->worldBound.center.GetDistance(center) - model->worldBound.radius * 0.5f, 0.0f);
+				if (distance < radius) {
+					hurt.emplace_back(a_ref, config.blastObjectDamage * (1.0f - distance / radius));
+				}
+			}
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		for (const auto& [ref, damage] : hurt) {
+			DamageObject(ref, damage);
+		}
+	}
+
+	void OnShot(const cr_msg_shot& a_shot)
+	{
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* cell = player ? player->GetParentCell() : nullptr;
+		auto* world = cell ? cell->GetbhkWorld() : nullptr;
+		if (!world || !config.shootThrough || config.objectDamage <= 0.0f) {
+			return;
+		}
+		// the first thing on the way, as Skyrim's own arrows would find it
+		const float scale = RE::bhkWorld::GetWorldScale();
+		RE::bhkPickData pick{};
+		pick.rayInput.from = RE::hkVector4(a_shot.from.x * scale, a_shot.from.y * scale, a_shot.from.z * scale, 0.0f);
+		pick.rayInput.to = RE::hkVector4(a_shot.to.x * scale, a_shot.to.y * scale, a_shot.to.z * scale, 0.0f);
+		RE::CFilter filter{};
+		player->GetCollisionFilterInfo(filter);  // its group: the player's own capsule isn't hit
+		filter.SetCollisionLayer(RE::COL_LAYER::kProjectile);
+		pick.rayInput.filterInfo = filter;
+		{
+			RE::BSReadLockGuard lock(world->worldLock);
+			world->PickObject(pick);
+		}
+		const auto* hit = pick.rayOutput.HasHit() ? pick.rayOutput.rootCollidable : nullptr;
+		auto*       ref = hit ? RE::TESHavokUtilities::FindCollidableRef(*hit) : nullptr;
+		if (ShootThrough(ref)) {
+			DamageObject(ref, config.objectDamage);
+		}
 	}
 
 	void OnHitActor(const cr_msg_hit_actor& a_hit)

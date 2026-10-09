@@ -460,7 +460,7 @@ index 3e2c7c0c..e4cc47f6 100644
  						item->item.rested_surface_index =
  							(short)collision.surface_index;
 diff --git a/source/items/projectiles.c b/source/items/projectiles.c
-index 86100135..8091be85 100644
+index 86100135..42d030ce 100644
 --- a/source/items/projectiles.c
 +++ b/source/items/projectiles.c
 @@ -142,6 +142,8 @@ symbols in this file:
@@ -472,7 +472,16 @@ index 86100135..8091be85 100644
  /* ---------- constants */
  
  enum projectile_datum_flags
-@@ -1579,6 +1581,13 @@ static void projectile_collision(
+@@ -1285,6 +1287,8 @@ static boolean projectile_collision_test_line(
+ 	struct projectile_datum *projectile = projectile_get(projectile_index);
+ 	struct projectile_definition const *definition = projectile_definition_get(projectile->definition_index);
+ 
++	if (chiefrim_active()) /* CHIEFRIM: Skyrim hurts the destructible objects on the way (spider webs) */
++		chiefrim_note_projectile_way(&projectile->object.position, new_position);
+ 	if (collision_test_line(
+ 		_collision_test_for_projectiles_flags,
+ 		&projectile->object.position,
+@@ -1579,6 +1583,13 @@ static void projectile_collision(
  		if (damage.material_type != NONE)
  			material_type = damage.material_type;
  		material_effect_scale = damage.material_effect_scale;

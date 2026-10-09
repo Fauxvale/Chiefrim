@@ -1010,6 +1010,25 @@ void chiefrim_note_explosion(real_point3d const *epicenter, real radius, real ac
 	chiefrim_push(CR_MSG_EXPLOSION, &explosion, sizeof(explosion));
 }
 
+/* projectiles.c's hook: a projectile's way this tick, before Halo tests it
+against its collision. Skyrim's destructible objects aren't in that (shots
+go through spider webs), so Skyrim tests the way itself and hurts the
+first destructible on it. A full ring drops it (a needler's swarm). */
+void chiefrim_note_projectile_way(real_point3d const *from, real_point3d const *to)
+{
+	cr_vec3 origin, a, b;
+	cr_msg_shot shot;
+
+	if (!chiefrim_world_origin(&origin))
+		return;
+	a.x = from->x, a.y = from->y, a.z = from->z;
+	b.x = to->x, b.y = to->y, b.z = to->z;
+	memset(&shot, 0, sizeof(shot));
+	shot.from = cr_halo_to_sky(a, origin);
+	shot.to = cr_halo_to_sky(b, origin);
+	chiefrim_push(CR_MSG_SHOT, &shot, sizeof(shot));
+}
+
 boolean chiefrim_object_is_proxy(long object_index)
 {
 	return chiefrim_proxy_of(object_index) != NULL;
