@@ -206,7 +206,14 @@ def render(directory, obj, armature, show_bones, prefix, front):
 	sun.data.energy = 4.0
 	sun.rotation_euler = (math.radians(50), 0, math.radians(-30))
 	scene.collection.objects.link(sun)
+	# the ground (z 0 in both games): feet that sink or float show against it
+	bpy.ops.mesh.primitive_plane_add(size=6, location=(0, 0, 0))
+	ground = bpy.context.active_object
+	ground.data.materials.append(bpy.data.materials.new("ground"))
+	ground.data.materials[0].diffuse_color = (0.2, 0.2, 0.2, 1)
+	ground.data.materials[0].node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.12, 0.12, 0.12, 1)
 	low, high = (Vector([f(v[i] for v in [obj.matrix_world @ Vector(c) for c in obj.bound_box]) for i in range(3)]) for f in (min, max))
+	low.z = min(low.z, 0)
 	centre = (low + high) / 2
 	height = high.z - low.z
 	camera = bpy.data.objects.new("camera", bpy.data.cameras.new("camera"))
@@ -220,8 +227,9 @@ def render(directory, obj, armature, show_bones, prefix, front):
 		armature.data.display_type = "STICK"
 	for name, angle in (("front", 0), ("side", 90), ("back", 180)):
 		direction = Vector((math.cos(math.radians(angle + front)), math.sin(math.radians(angle + front)), 0))
-		camera.location = centre + direction * 10
-		camera.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
+		# looking down a little, so the ground shows as a strip
+		camera.location = centre + direction * 10 + Vector((0, 0, 1.5))
+		camera.rotation_euler = (centre - camera.location).to_track_quat("-Z", "Y").to_euler()
 		scene.render.filepath = str(directory / f"{prefix}_{name}.png")
 		bpy.ops.render.render(write_still=True)
 		print(f"wrote {scene.render.filepath}")

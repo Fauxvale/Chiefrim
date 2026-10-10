@@ -139,13 +139,30 @@ def fit(model, bones, shoulders=1.0):
 		width = abs(halo[f"bip01 {side} upperarm"][0]) * across
 		joint[0] = numpy.sign(joint[0]) * (abs(joint[0]) + shoulders * (width - abs(joint[0])))
 		skyrim[bone] = joint
+	# Chief's knee-to-sole is longer than Skyrim's knee-to-ground (Halo's
+	# ankle is 20 cm up his boot, Skyrim's 9): his lower legs are squashed
+	# upright by Skyrim's knee height over his, to an ankle as far up as his
+	# boot puts it, so his soles meet the ground. The boot's shaft above
+	# Skyrim's ankle is then weighted to the calf, as Skyrim's boots are, so
+	# only the foot turns at the ankle.
+	ankles, squash = {}, {}
+	for side in "lr":
+		foot, calf = f"bip01 {side} foot", f"bip01 {side} calf"
+		k = skyrim[BONES[calf][0]][2] / (halo[calf][2] * across)
+		bone = BONES[foot][0]
+		ankles[bone] = skyrim[bone][2]
+		joint = skyrim[bone].copy()
+		joint[2] = halo[foot][2] * across * k
+		skyrim[bone] = joint
+		squash[foot] = k
 	transforms, rotations = {}, {}
 	for index, name in enumerate(names):
 		bone, segment = BONES[name]
 		parent = model["nodes"][index]["parent"]
 		if segment is None:
 			rotation = rotations[names[parent]] if parent >= 0 else numpy.eye(3)
-			linear = rotation * across
+			upright = numpy.diag([1, 1, squash.get(name, 1)])
+			linear = rotation @ upright * across
 		elif segment == "axes":
 			# Halo's bones run down their x, Skyrim's down their z
 			rotation = least_rotation(HALO_TO_SKYRIM @ halo_matrices[name][:3, 0], bones[bone][1][:3, 2])
@@ -179,6 +196,16 @@ def fit(model, bones, shoulders=1.0):
 				if n >= 0 and w > 0:
 					bone = BONES[names[n]][0]
 					weights[bone] = weights.get(bone, 0) + w
+			for foot, ankle in ankles.items():
+				if foot in weights:
+					# 2 cm either side of the ankle, from the foot to the calf
+					t = numpy.clip((moved[2] - ankle) / (0.04 / SKYRIM_UNIT) + 0.5, 0, 1)
+					t = t * t * (3 - 2 * t)
+					calf = bones[foot][0]
+					weights[calf] = weights.get(calf, 0) + weights[foot] * t
+					weights[foot] *= 1 - t
+					if weights[foot] == 0:
+						del weights[foot]
 			vertices.append({"position": moved.tolist(), "normal": normal.tolist(), "uv": vertex["uv"],
 				"bones": list(weights), "weights": list(weights.values())})
 		parts.append({"shader": part["shader"], "vertices": vertices, "triangles": part["triangles"]})
