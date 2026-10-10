@@ -411,7 +411,8 @@ again.
 
 Chief's Mjolnir armor is also a Skyrim armor set, for any humanoid race, built by
 `tools/mjolnir/build.sh HALO_MAP` from the user's own Halo map and Skyrim (nothing of either
-is in the repo; `build/mjolnir/Data/` is installed as a mod). Its stages:
+is in the repo): `build/mjolnir/Data/`, and the same packed for a mod manager as
+`build/dist/ChiefrimMjolnir-local.zip` (for the user's own game only). Its stages:
 
 - `halo_model.py` reads Chief's model and bitmaps from the map and bakes his shader as the
   Xbox draws it (his campaign colour exactly: change colour C, 87, 103, 37), and his
