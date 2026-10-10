@@ -7,8 +7,12 @@ back, so the port can be checked without opening Blender.
 Usage: blender -b --factory-startup -P tools/mjolnir/blender_preview.py -- [--dir build/mjolnir]
          [--fitted] [--pose] [--bones] [--blend]
   --fitted  the model fitted to Skyrim's skeleton (preview_fitted_*.png)
-  --pose    bend an arm, a knee and the head first (preview_*pose_*.png): the
-            skeleton and the skin weights are right if the armor follows
+  --pose NAME  pose the skeleton first (preview_*_NAME_*.png): bend (an arm,
+            a knee and the head, in their bones' axes: the skeleton and the
+            weights are right if the armor follows), or on Skyrim's skeleton
+            idle (arms at the sides), raise (the left arm raised sideways),
+            twist (the left upper arm turned about itself), forward (both arms
+            raised forward)
   --bones   draw the skeleton over the model
   --blend   also save the scene there
 
@@ -153,13 +157,30 @@ POSE_TEST = {
 }
 # per skeleton, the model's front
 FRONT = {"halo": 0, "skyrim": 90}
+# Skyrim's: bone, the world axis it turns about (+x right, +y forward, +z
+# up), degrees; parents first
+WORLD_POSES = {
+	"idle": [("NPC L UpperArm [LUar]", (0, 1, 0), -18), ("NPC R UpperArm [RUar]", (0, 1, 0), 18)],
+	"raise": [("NPC L UpperArm [LUar]", (0, 1, 0), 80)],
+	"twist": [("NPC L UpperArm [LUar]", "bone", 60)],
+	"forward": [("NPC L UpperArm [LUar]", (1, 0, 0), 80), ("NPC R UpperArm [RUar]", (1, 0, 0), 80)],
+}
 
 
-def pose(armature, frame):
-	for name, (axis, degrees) in POSE_TEST[frame].items():
-		bone = armature.pose.bones[name]
-		bone.rotation_mode = "XYZ"
-		setattr(bone.rotation_euler, axis.lower(), math.radians(degrees))
+def pose(armature, frame, name):
+	if name == "bend":
+		for bone_name, (axis, degrees) in POSE_TEST[frame].items():
+			bone = armature.pose.bones[bone_name]
+			bone.rotation_mode = "XYZ"
+			setattr(bone.rotation_euler, axis.lower(), math.radians(degrees))
+		return
+	for bone_name, axis, degrees in WORLD_POSES[name]:
+		bone = armature.pose.bones[bone_name]
+		head = bone.matrix.translation.copy()
+		axis = (bone.matrix.to_3x3() @ Vector((0, 1, 0))) if axis == "bone" else Vector(axis)
+		turn = Matrix.Translation(head) @ Matrix.Rotation(math.radians(degrees), 4, axis) @ Matrix.Translation(-head)
+		bone.matrix = turn @ bone.matrix
+		bpy.context.view_layer.update()
 
 
 def render(directory, obj, armature, show_bones, prefix, front):
@@ -212,7 +233,7 @@ def main():
 	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
 	parser.add_argument("--bones", action="store_true")
 	parser.add_argument("--blend", action="store_true")
-	parser.add_argument("--pose", action="store_true")
+	parser.add_argument("--pose", choices=["bend", *WORLD_POSES])
 	parser.add_argument("--fitted", action="store_true")
 	args = parser.parse_args(argv)
 	directory = Path(args.dir).resolve()
@@ -223,8 +244,8 @@ def main():
 	armature = build_armature(model, node_matrices(model))
 	obj = build_mesh(model, build_materials(directory, model["shaders"]), armature)
 	if args.pose:
-		pose(armature, frame)
-	prefix = "preview" + ("_fitted" if args.fitted else "") + ("_pose" if args.pose else "")
+		pose(armature, frame, args.pose)
+	prefix = "preview" + ("_fitted" if args.fitted else "") + (f"_{args.pose}" if args.pose else "")
 	render(directory, obj, armature, args.bones, prefix, FRONT[frame])
 	if args.blend:
 		bpy.ops.wm.save_as_mainfile(filepath=str(directory / f"{prefix}.blend"))

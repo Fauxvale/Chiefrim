@@ -20,7 +20,7 @@ weights, as a skinned mesh is; the weights then name the Skyrim bones.
 Halo is +x forward, +y left, +z up, in units of 10 feet; Skyrim is +y
 forward, +x right, +z up, 70 units to the metre.
 
-Usage: tools/mjolnir/fit.py [--skyrim DATA_DIR] [--dir build/mjolnir]
+Usage: tools/mjolnir/fit.py [--skyrim DATA_DIR] [--dir build/mjolnir] [--shoulders 1]
 """
 import argparse
 import json
@@ -118,7 +118,7 @@ def least_rotation(a, b):
 	return numpy.eye(3) + s * k + (1 - c) * k @ k
 
 
-def fit(model, bones):
+def fit(model, bones, shoulders=1.0):
 	names = [node["name"] for node in model["nodes"]]
 	halo_matrices = dict(zip(names, halo_world(model["nodes"])))
 	halo = {name: HALO_TO_SKYRIM @ matrix[:3, 3] for name, matrix in halo_matrices.items()}
@@ -127,6 +127,18 @@ def fit(model, bones):
 		return skyrim[JOINTS.get(name, BONES[name][0])]
 	# one scale across: the head's height over Halo's
 	across = skyrim_joint("bip01 head")[2] / halo["bip01 head"][2]
+	# Skyrim's shoulders are narrower than Chief's: the arms are fitted to
+	# virtual shoulder joints out at his width (shoulders 1) and bound to
+	# Skyrim's, so his chest keeps its width and his upper arms don't sink
+	# into it. The elbows and hands stay Skyrim's (a weapon is held at the
+	# hand bone), and the upper arms hang as steeply as Halo's do.
+	skyrim = dict(skyrim)
+	for side in "lr":
+		bone = BONES[f"bip01 {side} upperarm"][0]
+		joint = skyrim[bone].copy()
+		width = abs(halo[f"bip01 {side} upperarm"][0]) * across
+		joint[0] = numpy.sign(joint[0]) * (abs(joint[0]) + shoulders * (width - abs(joint[0])))
+		skyrim[bone] = joint
 	transforms, rotations = {}, {}
 	for index, name in enumerate(names):
 		bone, segment = BONES[name]
@@ -181,7 +193,7 @@ def fit(model, bones):
 	for name in order:
 		parent, matrix = bones[name]
 		nodes.append({"name": name, "parent": order.index(parent) if parent in used else -1, "matrix": matrix.tolist()})
-	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across,
+	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders,
 		"nodes": nodes, "shaders": model["shaders"], "parts": parts}
 
 
@@ -189,12 +201,15 @@ def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
 	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--shoulders", type=float, default=1.0,
+		help="how far the arms are fitted out from Skyrim's shoulders (0) to Chief's (1)")
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	model = json.loads((directory / "model.json").read_text())
-	fitted = fit(model, skyrim_skeleton(args.skyrim))
+	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders)
 	(directory / "fitted.json").write_text(json.dumps(fitted))
-	print(f"fitted to Skyrim's skeleton (scaled {fitted['across']:.3f} across) -> {directory / 'fitted.json'}")
+	print(f"fitted to Skyrim's skeleton (scaled {fitted['across']:.3f} across, shoulders {args.shoulders:g})"
+		f" -> {directory / 'fitted.json'}")
 
 
 if __name__ == "__main__":
