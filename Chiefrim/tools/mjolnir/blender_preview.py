@@ -5,8 +5,11 @@ skeleton and skin weights, and renders it from the front, the side and the
 back, so the port can be checked without opening Blender.
 
 Usage: blender -b --factory-startup -P tools/mjolnir/blender_preview.py -- [--dir build/mjolnir]
-         [--fitted] [--pose] [--bones] [--blend]
+         [--fitted | --nif FILE...] [--pieces] [--pose] [--bones] [--blend]
   --fitted  the model fitted to Skyrim's skeleton (preview_fitted_*.png)
+  --nif FILE...  the NIFs armor.py wrote, read back, worn together on
+            Skyrim's skeleton (preview_nif_*.png)
+  --pieces  each NIF in its own colour, the body's skin in another
   --pose NAME  pose the skeleton first (preview_*_NAME_*.png): bend (an arm,
             a knee and the head, in their bones' axes: the skeleton and the
             weights are right if the armor follows), or on Skyrim's skeleton
@@ -31,6 +34,9 @@ from pathlib import Path
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nif import Nif  # noqa: E402
+
 HALO_UNIT = 3.048
 AXES = {"x": Vector((1, 0, 0)), "z": Vector((0, 0, 1))}
 
@@ -48,6 +54,51 @@ def node_matrices(model):
 		local = Matrix.Translation(Vector(node["translation"]) * unit) @ Quaternion((w, i, j, k)).conjugated().to_matrix().to_4x4()
 		matrices.append(local if node["parent"] < 0 else matrices[node["parent"]] @ local)
 	return matrices
+
+
+PIECE_COLOURS = [(0.8, 0.2, 0.15), (0.2, 0.55, 0.85), (0.9, 0.75, 0.15), (0.3, 0.7, 0.3), (0.65, 0.35, 0.8), (0.9, 0.5, 0.2)]
+SKIN = (0.8, 0.6, 0.5)
+
+
+def nif_model(directory, paths, pieces):
+	"""The NIFs' skinned shapes as one model, as fitted.json gives one: its
+	nodes Skyrim's skeleton's (build/mjolnir/skyrim/skeleton.nif, fit.py's
+	copy), its vertices the NIFs' own, weighted to their bones by name.
+	Chief's textures are the PNGs halo_model.py baked them from."""
+	skeleton = Nif(directory / "skyrim" / "skeleton.nif")
+	nodes, world, order = [], {}, {}
+	for _, index, block, parent in skeleton.walk():
+		local = Matrix([list(row) for row in block["rotation"]]).to_4x4() * block["scale"]
+		local[3][3] = 1
+		local.translation = Vector(block["translation"])
+		world[index] = (world[parent] if parent is not None else Matrix.Identity(4)) @ local
+		order[index] = len(nodes)
+		nodes.append({"name": block["name"], "parent": order[parent] if parent is not None else -1, "matrix": [list(row) for row in world[index]]})
+	shaders, parts = [], []
+	for number, path in enumerate(paths):
+		nif = Nif(path)
+		for shape in (b for b in nif.blocks if b["type"] == "BSTriShape"):
+			skin = nif.blocks[shape["skin"]]
+			partition = nif.blocks[skin["partition"]]
+			bones = [nif.blocks[b]["name"] for b in skin["bones"]]
+			textures = nif.blocks[nif.blocks[shape["shader_property"]]["texture_set"]]["textures"]
+			stem = Path(textures[0].replace("\\", "/")).stem
+			if pieces:
+				shader = {"name": f"{Path(path).stem} {shape['name']}", "solid": SKIN if stem.lower().startswith("malebody") else PIECE_COLOURS[number % len(PIECE_COLOURS)]}
+			elif (directory / f"{stem}_color.png").exists():
+				shader = {"name": stem, "baked": {key: f"{stem}_{key}.png" for key in ("color", "glow", "reflection")}}
+			else:
+				shader = {"name": stem, "solid": SKIN}
+			shaders.append(shader)
+			offset = Vector(shape["translation"])
+			vertices = []
+			for vertex in partition["vertices"]:
+				vertices.append({"position": list(Vector(vertex["position"]) + offset), "normal": vertex.get("normal", (0, 0, 0)),
+					"uv": vertex["uv"], "bones": [bones[b] for b, w in zip(vertex["bones"], vertex["weights"]) if w > 0],
+					"weights": [w for w in vertex["weights"] if w > 0]})
+			triangles = [face for p in partition["partitions"] for face in p["triangles_copy"]]
+			parts.append({"shader": len(shaders) - 1, "vertices": vertices, "triangles": triangles})
+	return {"name": "nif", "frame": "skyrim", "unit": 1 / 70, "bone_axis": "z", "nodes": nodes, "shaders": shaders, "parts": parts}
 
 
 def build_armature(model, matrices):
@@ -86,6 +137,11 @@ def build_materials(directory, shaders):
 		material = bpy.data.materials.new(Path(shader["name"].replace("\\", "/")).name)
 		tree = material.node_tree
 		bsdf = tree.nodes["Principled BSDF"]
+		if "solid" in shader:
+			bsdf.inputs["Base Color"].default_value = (*shader["solid"], 1)
+			bsdf.inputs["Roughness"].default_value = 0.6
+			materials.append(material)
+			continue
 		baked = shader.get("baked")
 		if not baked:
 			bsdf.inputs["Alpha"].default_value = 0.0
@@ -243,9 +299,14 @@ def main():
 	parser.add_argument("--blend", action="store_true")
 	parser.add_argument("--pose", choices=["bend", *WORLD_POSES])
 	parser.add_argument("--fitted", action="store_true")
+	parser.add_argument("--nif", nargs="+")
+	parser.add_argument("--pieces", action="store_true")
 	args = parser.parse_args(argv)
 	directory = Path(args.dir).resolve()
-	model = json.loads((directory / ("fitted.json" if args.fitted else "model.json")).read_text())
+	if args.nif:
+		model = nif_model(directory, args.nif, args.pieces)
+	else:
+		model = json.loads((directory / ("fitted.json" if args.fitted else "model.json")).read_text())
 	frame = model.get("frame", "halo")
 	for obj in list(bpy.data.objects):
 		bpy.data.objects.remove(obj)
@@ -253,7 +314,7 @@ def main():
 	obj = build_mesh(model, build_materials(directory, model["shaders"]), armature)
 	if args.pose:
 		pose(armature, frame, args.pose)
-	prefix = "preview" + ("_fitted" if args.fitted else "") + (f"_{args.pose}" if args.pose else "")
+	prefix = "preview" + ("_nif" if args.nif else "_fitted" if args.fitted else "") + ("_pieces" if args.pieces else "") + (f"_{args.pose}" if args.pose else "")
 	render(directory, obj, armature, args.bones, prefix, FRONT[frame])
 	if args.blend:
 		bpy.ops.wm.save_as_mainfile(filepath=str(directory / f"{prefix}.blend"))
