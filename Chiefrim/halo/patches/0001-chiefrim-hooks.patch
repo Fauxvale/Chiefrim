@@ -1,16 +1,16 @@
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
-index 912e3f1a..8b82a8e4 100644
+index d78df080..47d517d9 100644
 --- a/port/linux/src/d3d8_gl.c
 +++ b/port/linux/src/d3d8_gl.c
-@@ -25,6 +25,7 @@ Conventions carried over from the Xbox:
- #include "sdl_platform.h"
- #include "halo_ui_pointer.h"
- #include "port_config.h"
+@@ -28,6 +28,7 @@ Conventions carried over from the Xbox:
+ #include "main/console.h"
+ 
+ #include <SDL3/SDL.h>
 +#include "chiefrim_overlay_gl.h" /* CHIEFRIM */
  
  #include <math.h>
  #include <stdio.h>
-@@ -142,7 +143,9 @@ static void anti_aliasing_prepare(void);
+@@ -145,7 +146,9 @@ static void anti_aliasing_prepare(void);
  /* display.anti_aliasing's value (none of them: the first, off) */
  static void anti_aliasing_read(void)
  {
@@ -21,7 +21,7 @@ index 912e3f1a..8b82a8e4 100644
  	int value;
  
  	for (value = NUMBER_OF_ANTI_ALIASING_VALUES - 1;
-@@ -186,6 +189,8 @@ static void screen_mode_choose(long *width, float scale[2])
+@@ -189,6 +192,8 @@ static void screen_mode_choose(long *width, float scale[2])
  #else
  	long display_width, display_height;
  
@@ -30,7 +30,7 @@ index 912e3f1a..8b82a8e4 100644
  	*width = 640;
  	scale[0] = scale[1] = 1.0f;
  	if (platform_screen_mode(&display_width, &display_height) && display_width > 0 && display_height > 0)
-@@ -1387,6 +1392,8 @@ static unsigned long render_target_write_serial;
+@@ -1443,6 +1448,8 @@ static unsigned long render_target_write_serial;
  
  /* the pixels per unit of the bound targets (render_target_get) */
  static float target_scale[2] = { 1.0f, 1.0f };
@@ -39,7 +39,7 @@ index 912e3f1a..8b82a8e4 100644
  
  /* the pixel edge of a coordinate in a target's units, at its scale:
  floorf's, without its call (on 32-bit x86 it saves and restores the FPU's
-@@ -1429,6 +1436,22 @@ static BOOL bind_targets(BOOL *has_depth)
+@@ -1485,6 +1492,22 @@ static BOOL bind_targets(BOOL *has_depth)
  	/* viewports and clears are in the targets' units (render_target_get) */
  	target_scale[0] = color ? color->target.scale[0] : depth->target.scale[0];
  	target_scale[1] = color ? color->target.scale[1] : depth->target.scale[1];
@@ -62,7 +62,7 @@ index 912e3f1a..8b82a8e4 100644
  	/* with multisampling, multisampled where either is a screen buffer or
  	is multisampled already */
  	samples = anti_aliasing() == _anti_aliasing_msaa ? anti_aliasing_samples : 0;
-@@ -3206,6 +3229,9 @@ static void apply_raster_state(BOOL has_depth)
+@@ -3413,6 +3436,9 @@ static void apply_raster_state(BOOL has_depth)
  		gl_state.color_mask = color_mask;
  		glColorMask((color_mask & 1) != 0, (color_mask & 2) != 0, (color_mask & 4) != 0, (color_mask & 8) != 0);
  	}
@@ -72,7 +72,7 @@ index 912e3f1a..8b82a8e4 100644
  
  	/* the cull mode names the winding to discard; FRONTFACE names the
  	front winding */
-@@ -4531,6 +4557,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -4762,6 +4788,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  			device.depth_stencil ? (unsigned long)device.depth_stencil->Data : 0);
  	stats.clears++;
  	color_to_vec4(color, rgba);
@@ -81,7 +81,7 @@ index 912e3f1a..8b82a8e4 100644
  	if (flags & D3DCLEAR_TARGET)
  	{
  		/* the Xbox clears the channels named (D3DCLEAR_TARGET_R, _G, _B, _A):
-@@ -4565,6 +4593,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -4796,6 +4824,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  		glScissor(x0, y0, target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0,
  			target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
  		glClear(mask);
@@ -90,7 +90,7 @@ index 912e3f1a..8b82a8e4 100644
  		glDisable(GL_SCISSOR_TEST);
  		xgpu_gl_state_invalidate();
  		return;
-@@ -4688,6 +4718,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5042,6 +5072,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  	{
  		struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
  		int window_width, window_height, width, height, x, y;
@@ -98,9 +98,9 @@ index 912e3f1a..8b82a8e4 100644
  
  		if (trace_frame())
  			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
-@@ -4696,6 +4727,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
- 		if (screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0)
- 			write_screenshot(back_buffer);
+@@ -5057,6 +5088,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+ 			write_key_screenshot(back_buffer);
+ #endif
  
 +		/* CHIEFRIM: published for Skyrim, Halo's window isn't swapped (its vsync would hold up the lockstep) */
 +		chiefrim_published = chiefrim_overlay_present(back_buffer->target.texture, back_buffer->target.gl_width,
@@ -108,7 +108,7 @@ index 912e3f1a..8b82a8e4 100644
  		platform_video_drawable_size(&window_width, &window_height);
  		/* letterbox to the back buffer's aspect ratio */
  		width = window_width;
-@@ -4716,7 +4750,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5077,7 +5111,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		/* row 0 of the render target is the top of the picture */
  		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
  			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -116,8 +116,8 @@ index 912e3f1a..8b82a8e4 100644
 +		if (!chiefrim_published)
 +			platform_video_swap();
  		xgpu_gl_state_invalidate();
+ 		memory_watch_begin_frame();
  		xgpu_texture_cache_begin_frame();
- #ifdef HALO_ANDROID
 diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
 index 211146d1..0a8bf1d5 100644
 --- a/port/linux/src/nv2a_psh.c
@@ -244,10 +244,10 @@ index 83742035..9b50472c 100644
  	recorded_animations_update();
  	objects_update();
 diff --git a/source/game/player_control.c b/source/game/player_control.c
-index ffb2d925..d43d2364 100644
+index 429fd821..b269faa6 100644
 --- a/source/game/player_control.c
 +++ b/source/game/player_control.c
-@@ -210,6 +210,7 @@ symbols in this file:
+@@ -211,6 +211,7 @@ symbols in this file:
  
  #include "real_math.h"
  #include "network_coop.h" /* port: port/linux/game/network_coop.c */
@@ -255,17 +255,17 @@ index ffb2d925..d43d2364 100644
  
  /* ---------- constants */
  
-@@ -1236,7 +1237,8 @@ static void get_local_player_input_blob(
- 							/* no magnetism for the mouse (port/linux/src/xinput_sdl.c) */
+@@ -1286,7 +1287,8 @@ static void get_local_player_input_blob(
  							extern int halo_linux_mouse_aiming(short gamepad_index);
+ 							extern int halo_linux_touch_aiming(short gamepad_index);
  
--							if (halo_linux_mouse_aiming(gamepad_index))
-+							if (halo_linux_mouse_aiming(gamepad_index) ||
+-							if (halo_linux_mouse_aiming(gamepad_index) || halo_linux_touch_aiming(gamepad_index))
++							if (halo_linux_mouse_aiming(gamepad_index) || halo_linux_touch_aiming(gamepad_index) ||
 +								chiefrim_input_driving(gamepad_index)) /* CHIEFRIM: aims like the mouse */
  							{
  								control->magnetism_level = 0.f;
  							}
-@@ -1300,6 +1302,21 @@ static void get_local_player_input_blob(
+@@ -1351,6 +1353,21 @@ static void get_local_player_input_blob(
  							input->facing_delta.yaw += mouse_yaw;
  							input->facing_delta.pitch += mouse_pitch;
  						}
@@ -288,7 +288,7 @@ index ffb2d925..d43d2364 100644
  				}
  				else
 diff --git a/source/game/players.c b/source/game/players.c
-index ea7fdcd5..698f20bd 100644
+index 51dbc730..9893eb2c 100644
 --- a/source/game/players.c
 +++ b/source/game/players.c
 @@ -279,6 +279,7 @@ symbols in this file:
@@ -299,7 +299,7 @@ index ea7fdcd5..698f20bd 100644
  
  /* network_game_globals.c's */
  boolean network_game_distributed_client(void);
-@@ -4785,7 +4786,10 @@ void players_update_after_game(
+@@ -4781,7 +4782,10 @@ void players_update_after_game(
  				else if (player->unit_index != NONE)
  				{
  					unit = unit_get(player->unit_index);
@@ -311,7 +311,7 @@ index ea7fdcd5..698f20bd 100644
  					{
  						players_show_telefragged(iterator.datum_index);
  						player_telefrag_effect_stop(iterator.datum_index);
-@@ -4824,7 +4828,8 @@ void players_update_after_game(
+@@ -4820,7 +4824,8 @@ void players_update_after_game(
  						&scenario->bsp_switch_trigger_volumes,
  						bsp_switch_trigger_volume_index,
  						struct scenario_bsp_switch_trigger_volume);
@@ -322,7 +322,7 @@ index ea7fdcd5..698f20bd 100644
  						scenario_trigger_volume_test_object(
  							bsp_switch_trigger_volume->trigger_volume_index,
 diff --git a/source/input/input_abstraction.c b/source/input/input_abstraction.c
-index 137a9845..41fb9e8f 100644
+index 5caa4942..ccf1b0e1 100644
 --- a/source/input/input_abstraction.c
 +++ b/source/input/input_abstraction.c
 @@ -69,6 +69,7 @@ symbols in this file:
@@ -342,16 +342,16 @@ index 137a9845..41fb9e8f 100644
  	for (control_index = 0; control_index < NUMBER_OF_GAME_CONTROLS; control_index++)
  	{
  		if (keyboard_game_controls[control_index] < 0)
-@@ -268,6 +271,7 @@ static void keyboard_controls_update(
- 		state->forward_movement = y * length;
- 		state->strafe = -x * length;
+@@ -286,6 +289,7 @@ static void keyboard_controls_update(
+ 			state->strafe = strafe;
+ 		}
  	}
 +	chiefrim_input_movement((short)controller_index, &state->forward_movement, &state->strafe); /* CHIEFRIM */
  	return;
  }
  
 diff --git a/source/interface/hud_messaging.c b/source/interface/hud_messaging.c
-index 5eb0af3e..643d1e44 100644
+index 29248cc4..67bc1df0 100644
 --- a/source/interface/hud_messaging.c
 +++ b/source/interface/hud_messaging.c
 @@ -146,6 +146,7 @@ symbols in this file:
@@ -404,7 +404,7 @@ index e0d616f8..3562ba88 100644
  		else
  		{
 diff --git a/source/interface/motion_sensor.c b/source/interface/motion_sensor.c
-index 9607f857..9ea8e212 100644
+index be07f7fe..9e6891a0 100644
 --- a/source/interface/motion_sensor.c
 +++ b/source/interface/motion_sensor.c
 @@ -94,6 +94,7 @@ symbols in this file:
@@ -415,7 +415,7 @@ index 9607f857..9ea8e212 100644
  #include "camera/director.h"
  #include "game/game.h"
  #include "game/game_allegiance.h"
-@@ -844,6 +845,13 @@ static char blip_type_get(
+@@ -851,6 +852,13 @@ static char blip_type_get(
  	if (!unit_try_and_get(object_index))
  		return _blip_type_enemy;
  
@@ -429,7 +429,7 @@ index 9607f857..9ea8e212 100644
  	unit = unit_get(object_index);
  	if (vehicle_try_and_get(object_index))
  	{
-@@ -1011,7 +1019,12 @@ static boolean should_draw_object(
+@@ -1018,7 +1026,12 @@ static boolean should_draw_object(
  	{
  		struct unit_datum *unit = unit_get(object_index);
  
@@ -444,7 +444,7 @@ index 9607f857..9ea8e212 100644
  			_unit_control_weapon_primary_trigger_bit) ||
  			(unit->unit.grenade_throw_state != _unit_grenade_throw_idle &&
 diff --git a/source/items/items.c b/source/items/items.c
-index 3e2c7c0c..a6bc5435 100644
+index 942008ac..4f7809cb 100644
 --- a/source/items/items.c
 +++ b/source/items/items.c
 @@ -76,6 +76,7 @@ symbols in this file:
@@ -455,7 +455,7 @@ index 3e2c7c0c..a6bc5435 100644
  
  /* ---------- constants */
  
-@@ -347,7 +348,8 @@ void item_accelerate(
+@@ -387,7 +388,8 @@ void item_accelerate(
  		{
  			struct object_marker marker;
  
@@ -465,7 +465,7 @@ index 3e2c7c0c..a6bc5435 100644
  			{
  				struct collision_bsp *collision_bsp;
  				struct collision_surface const *surface;
-@@ -678,6 +680,11 @@ boolean item_update(
+@@ -718,6 +720,11 @@ boolean item_update(
  					switch (collision.type)
  					{
  					case _collision_result_structure:
@@ -475,20 +475,20 @@ index 3e2c7c0c..a6bc5435 100644
 +						if (collision.surface_index > 0x7fff)
 +							break;
  						SET_FLAG(item->item.flags, _item_on_structure_bit, TRUE);
- 						item->item.rested_surface_index =
- 							(short)collision.surface_index;
-@@ -767,7 +774,8 @@ boolean item_update(
+ 						item_set_rested_surface(item, collision.surface_index);
+ 						item->item.bsp_index =
+@@ -806,7 +813,8 @@ boolean item_update(
  
  			if (TEST_FLAG(item->item.flags, _item_on_structure_bit) &&
- 				item->item.rested_surface_index != NONE &&
+ 				item_rested_surface_index(item) != NONE &&
 -				item->item.bsp_index == global_structure_bsp_index_get())
 +				item->item.bsp_index == global_structure_bsp_index_get() &&
 +				chiefrim_item_rest_valid(item)) /* CHIEFRIM: a surface of the collision installed now */
  			{
- 				struct collision_bsp *collision_bsp;
  				struct collision_surface const *surface;
+ 
 diff --git a/source/items/projectiles.c b/source/items/projectiles.c
-index 86100135..42d030ce 100644
+index 77783077..d6a8a33f 100644
 --- a/source/items/projectiles.c
 +++ b/source/items/projectiles.c
 @@ -142,6 +142,8 @@ symbols in this file:
@@ -500,7 +500,7 @@ index 86100135..42d030ce 100644
  /* ---------- constants */
  
  enum projectile_datum_flags
-@@ -1285,6 +1287,8 @@ static boolean projectile_collision_test_line(
+@@ -1279,6 +1281,8 @@ static boolean projectile_collision_test_line(
  	struct projectile_datum *projectile = projectile_get(projectile_index);
  	struct projectile_definition const *definition = projectile_definition_get(projectile->definition_index);
  
@@ -509,7 +509,7 @@ index 86100135..42d030ce 100644
  	if (collision_test_line(
  		_collision_test_for_projectiles_flags,
  		&projectile->object.position,
-@@ -1579,6 +1583,13 @@ static void projectile_collision(
+@@ -1573,6 +1577,13 @@ static void projectile_collision(
  		if (damage.material_type != NONE)
  			material_type = damage.material_type;
  		material_effect_scale = damage.material_effect_scale;
@@ -524,10 +524,10 @@ index 86100135..42d030ce 100644
  
  	projectile->projectile.hit_material_type = material_type;
 diff --git a/source/main/main.c b/source/main/main.c
-index 31a23036..64bc1540 100644
+index 3d70fbb8..bc01c798 100644
 --- a/source/main/main.c
 +++ b/source/main/main.c
-@@ -402,6 +402,7 @@ symbols in this file:
+@@ -403,6 +403,7 @@ symbols in this file:
  #define HALO_BUILD_FLAVOR "local"
  #endif
  #endif
@@ -535,7 +535,7 @@ index 31a23036..64bc1540 100644
  
  /* ---------- constants */
  
-@@ -1157,6 +1158,7 @@ void set_window_camera_values(
+@@ -1158,6 +1159,7 @@ void set_window_camera_values(
  				1.0f);
  
  		if (window->local_player_index != NONE &&
@@ -543,7 +543,7 @@ index 31a23036..64bc1540 100644
  			!console_is_active() &&
  			!game_time_get_paused() &&
  			director_get_perspective(window->local_player_index) !=
-@@ -3271,6 +3273,7 @@ static void main_game_render(
+@@ -3273,6 +3275,7 @@ static void main_game_render(
  			window->local_player_index = last_local_player_index;
  			observer = observer_get_camera(window->local_player_index);
  			observer = render_interpolation_camera(window->local_player_index, observer);
@@ -551,7 +551,7 @@ index 31a23036..64bc1540 100644
  		}
  		else
  		{
-@@ -3327,6 +3330,7 @@ void main_loop(
+@@ -3329,6 +3332,7 @@ void main_loop(
  	main_globals.switch_to_structure_bsp_index = NONE;
  	main_globals.halt_time_scale = TRUE;
  
@@ -559,7 +559,7 @@ index 31a23036..64bc1540 100644
  	console_initialize();
  	debug_keys_initialize();
  	game_initialize();
-@@ -3511,6 +3515,7 @@ void main_loop(
+@@ -3519,6 +3523,7 @@ void main_loop(
  					collision_log_continue_period(1);
  					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
@@ -696,7 +696,7 @@ index 8c996afd..b7fa3834 100644
 +	return TRUE;
 +}
 diff --git a/source/objects/objects.c b/source/objects/objects.c
-index c88154ff..2f73f105 100644
+index 4c9f6a1d..f4995b12 100644
 --- a/source/objects/objects.c
 +++ b/source/objects/objects.c
 @@ -55,6 +55,7 @@ OBJECTS.C
@@ -707,7 +707,7 @@ index c88154ff..2f73f105 100644
  
  /* ---------- constants */
  
-@@ -2939,6 +2940,8 @@ void object_compute_node_matrices(
+@@ -2940,6 +2941,8 @@ void object_compute_node_matrices(
  	{
  		object->object.bounding_sphere_radius *= object->object.scale;
  	}
@@ -746,19 +746,19 @@ index 42775183..ab3ca026 100644
  			{
  				struct physics_instance instance;
 diff --git a/source/render/render.c b/source/render/render.c
-index d9109fc5..35745d1d 100644
+index dc251459..cd512776 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
-@@ -87,6 +87,8 @@ symbols in this file:
- #include "effects/weather_particle_systems.h"
- #include "main/main.h"
+@@ -89,6 +89,8 @@ symbols in this file:
  #include "structures/structures.h"
+ /* port: static transparent part links for the newly loaded model tags. */
+ #include "models/models.h"
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
 +void render_frustum_get_projection_bounds(struct render_frustum const *frustum, real_rectangle2d *bounds); /* CHIEFRIM: render_cameras.c's */
  
  /* ---------- constants */
  
-@@ -310,6 +312,9 @@ static void render_window(
+@@ -314,6 +316,9 @@ static void render_window(
  {
  	struct rasterizer_window_begin_parameters parameters;
  	short rendered_cluster_index;
@@ -768,7 +768,7 @@ index d9109fc5..35745d1d 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -323,13 +328,69 @@ static void render_window(
+@@ -327,13 +332,69 @@ static void render_window(
  	parameters.rasterizer_target = rasterizer_target;
  	parameters.has_mirror = has_mirror;
  	parameters.window_index = render.window_index;
@@ -839,7 +839,7 @@ index d9109fc5..35745d1d 100644
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -538,7 +599,7 @@ static void render_player_frame(
+@@ -542,7 +603,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  

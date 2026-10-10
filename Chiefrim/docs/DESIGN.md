@@ -1300,6 +1300,19 @@ the fake Skyrim, the overlay frames match the old build's pixel for pixel, at th
 hits on the hit shapes, the console's commands and the link as before. Two new third-party
 folders, SMAA (MIT) and zlib (Zlib), are in `licenses.toml`.
 
+**Pin moved to b5a4870d (2026-10-10).** 225 commits, mostly Android, touch controls, voice chat,
+votes to kick and netcode (unused here); for Chiefrim: sound fixes (a stream that ran dry plays
+again, retired and looping voices stopped), the decompiled code's latent bugs fixed (unset
+locals given values), render targets freed when the screen's scale changes, bounded formats and
+copies of map strings and tag names, and an item's resting surface kept past 32767 (to 65535:
+Skyrim's collision runs past 400,000, so the `items.c` hook that skips those stays). Five hooks
+conflicted, each beside an upstream line (the touch controls' aiming and movement, an include,
+the resting surface's helper) and kept with it. Upstream's voice chat brings Opus
+(`port/third_party/opus`, BSD-3-Clause) into `licenses.toml`. Offline, as before: combat and a
+proxy's drop, the overlay's layers and brightness, a cache laid down, the scripted player.
+Upstream's enhanced animations (`game.enhanced_animations`, on) are third-person bipeds'
+grenade throws and riders: never seen in Chiefrim.
+
 The decomp repo contains no game data. Its own `.gitignore` already excludes `assets/` and
 extracted maps. The test data root (`build/halo-data`) holds only a link to the user's `maps/`.
 
