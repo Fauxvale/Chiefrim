@@ -24,8 +24,6 @@ import bpy
 from mathutils import Matrix, Quaternion, Vector
 
 HALO_UNIT = 3.048
-# the cyborg's change colour (the campaign's olive drab), linear RGB
-CHANGE_COLOR = (0.18, 0.22, 0.10)
 
 
 def node_matrices(nodes):
@@ -61,51 +59,33 @@ def build_armature(nodes, matrices):
 	return armature
 
 
-def image(directory, file):
-	result = bpy.data.images.load(str(directory / file))
-	return result
-
-
 def build_materials(directory, shaders):
+	"""The baked colour (halo_model.py's bake()) as the base colour, its glow
+	as emission; the shield's effect shaders are not drawn."""
 	materials = []
 	for shader in shaders:
-		material = bpy.data.materials.new(Path(shader["name"]).name)
-		material.use_nodes = True
+		material = bpy.data.materials.new(Path(shader["name"].replace("\\", "/")).name)
 		tree = material.node_tree
 		bsdf = tree.nodes["Principled BSDF"]
-		files = {Path(b["name"].replace("\\", "/")).name: b["file"] for b in shader["bitmaps"]}
-		if shader["class"] != "soso" or "cyborg" not in files:
-			# the shield's effect shaders: not drawn
+		baked = shader.get("baked")
+		if not baked:
 			bsdf.inputs["Alpha"].default_value = 0.0
-			material.blend_method = "BLEND" if hasattr(material, "blend_method") else None
 			materials.append(material)
 			continue
-		base = tree.nodes.new("ShaderNodeTexImage")
-		base.image = image(directory, files["cyborg"])
-		multi = tree.nodes.new("ShaderNodeTexImage")
-		multi.image = image(directory, files["cyborg multipurpose"])
-		multi.image.colorspace_settings.name = "Non-Color"
-		split = tree.nodes.new("ShaderNodeSeparateColor")
-		tree.links.new(multi.outputs["Color"], split.inputs["Color"])
-		# the base map times the change colour where the multipurpose map's
-		# blue says so
-		tint = tree.nodes.new("ShaderNodeMix")
-		tint.data_type = "RGBA"
-		tint.blend_type = "MULTIPLY"
-		tint.inputs["B"].default_value = (*CHANGE_COLOR, 1)
-		tree.links.new(split.outputs["Blue"], tint.inputs["Factor"])
-		tree.links.new(base.outputs["Color"], tint.inputs["A"])
-		tree.links.new(tint.outputs["Result"], bsdf.inputs["Base Color"])
-		bsdf.inputs["Metallic"].default_value = 0.6
-		bsdf.inputs["Roughness"].default_value = 0.45
-		# the multipurpose map's green is self-illumination (the lights)
-		emission = tree.nodes.new("ShaderNodeMix")
-		emission.data_type = "RGBA"
-		emission.inputs["A"].default_value = (0, 0, 0, 1)
-		tree.links.new(split.outputs["Green"], emission.inputs["Factor"])
-		tree.links.new(base.outputs["Color"], emission.inputs["B"])
-		tree.links.new(emission.outputs["Result"], bsdf.inputs["Emission Color"])
+		color = tree.nodes.new("ShaderNodeTexImage")
+		color.image = bpy.data.images.load(str(directory / baked["color"]))
+		tree.links.new(color.outputs["Color"], bsdf.inputs["Base Color"])
+		glow = tree.nodes.new("ShaderNodeTexImage")
+		glow.image = bpy.data.images.load(str(directory / baked["glow"]))
+		tree.links.new(glow.outputs["Color"], bsdf.inputs["Emission Color"])
 		bsdf.inputs["Emission Strength"].default_value = 2.0
+		reflection = tree.nodes.new("ShaderNodeTexImage")
+		reflection.image = bpy.data.images.load(str(directory / baked["reflection"]))
+		reflection.image.colorspace_settings.name = "Non-Color"
+		# Halo adds its reflection over the colour: specular, not metal
+		bsdf.inputs["Metallic"].default_value = 0.0
+		tree.links.new(reflection.outputs["Color"], bsdf.inputs["Specular IOR Level"])
+		bsdf.inputs["Roughness"].default_value = 0.45
 		materials.append(material)
 	return materials
 
@@ -169,6 +149,8 @@ def render(directory, obj, armature, show_bones, prefix="preview"):
 		scene.cycles.samples = 32
 	scene.render.resolution_x, scene.render.resolution_y = 768, 1024
 	scene.render.film_transparent = False
+	# no tone mapping: the baked colours as they are
+	scene.view_settings.view_transform = "Standard"
 	world = bpy.data.worlds.new("preview")
 	world.use_nodes = True
 	world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.35, 0.37, 0.40, 1)
