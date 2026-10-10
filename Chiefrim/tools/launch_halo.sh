@@ -48,6 +48,8 @@ control=/dev/shm/chiefrim_control
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
 [ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$root/build/collision-dumps"
+# slow builds' dumps to the newest 20; Chief's falls are all kept
+python3 "$root/tools/prune_dumps.py" || true
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
 map=${CHIEFRIM_MAP:-d20}
 printf 'map_name levels\\%s\\%s\n' "$map" "$map" > "$data/init.txt"

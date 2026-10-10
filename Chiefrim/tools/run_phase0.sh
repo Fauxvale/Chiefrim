@@ -43,6 +43,7 @@ else
 fi
 
 mkdir -p "$root/build/collision-dumps"
+python3 "$root/tools/prune_dumps.py" || true
 (
 	CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 	HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \

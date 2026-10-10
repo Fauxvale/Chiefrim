@@ -277,7 +277,10 @@ collision code.
     harness's `PROBE_AHEAD=x,y` casts rays that way from heights above his feet;
   - builds slower than 1 s (3 at most), failing ones, and the one Chief fell through are dumped to
     `build/collision-dumps/` (`CHIEFRIM_DUMP_DIR`, set by `tools/launch_halo.sh`; git-ignored,
-    since they are Skyrim's shapes), and `tools/test_bsp.sh` replays them, probing under Chief;
+    since they are Skyrim's shapes), and `tools/test_bsp.sh` replays them, probing under Chief.
+    Each start keeps every dump of a fall and the newest 20 of slow builds (`tools/prune_dumps.py`,
+    from `launch_halo.sh` and `run_phase0.sh`: by 2026-10-10 398 had piled up, 728 MB, 352 of them
+    slow builds, many of the same place);
     `tools/fake_skyrim.py` has `--recenter-every`, `--start-below` and `--hole` for these cases;
   - the map's clusters are copied without fog planes (b30's sea made Chief "underwater").
 
