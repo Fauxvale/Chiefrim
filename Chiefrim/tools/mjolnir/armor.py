@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Splits the model fit.py fitted to Skyrim's skeleton (build/mjolnir/
 fitted.json) into Skyrim's armor pieces, and writes their NIFs under
-build/mjolnir/Data/meshes/armor/chiefrim/mjolnir/male/, for the Mjolnir
-armor port.
+build/mjolnir/Data/meshes/armor/chiefrim/mjolnir/, for the Mjolnir armor
+port.
 
 Each of Chief's triangles goes to the piece of the bone weighted most over
 its corners: his helmet (the head, and his visor), his gauntlets (forearms
@@ -16,7 +16,9 @@ hands and feet Skyrim draws; his gauntlets and boots cover them. The cuirass,
 gauntlets and boots are written for both ends of the weight slider (_0,
 _1: his armor alike, the body's arms and legs each end's); the helmet once.
 The first-person cuirass is his upper arms and the first-person body's
-forearms.
+forearms. Only the cuirasses differ by sex (male/, f/: the male or female
+body's skin; his armor is bound to the same bones either way, and follows a
+woman's skeleton as it does a man's); the rest are male/'s for both.
 
 Partitions are the body parts Skyrim's dismemberment knows them by: 32 the
 body, 33 hands, 34 forearms, 37 feet, 38 calves, 131 the helmet's.
@@ -37,7 +39,8 @@ from fit import DEFAULT_SKYRIM, skyrim_skeleton  # noqa: E402
 from nif import VF_NORMAL, VF_SKINNED, VF_TANGENT, VF_UV, VF_VERTEX, Nif, vertex_desc  # noqa: E402
 
 BODY = "meshes\\actors\\character\\character assets\\{}.nif"
-MESHES = "meshes\\armor\\chiefrim\\mjolnir\\male"
+MESHES = "meshes\\armor\\chiefrim\\mjolnir"
+SEXES = {"male": "male", "f": "female"}
 TEXTURES = "textures\\chiefrim\\mjolnir"
 CHIEF_VERTEX = vertex_desc(VF_VERTEX | VF_UV | VF_NORMAL | VF_TANGENT | VF_SKINNED)
 
@@ -295,11 +298,12 @@ def add_chief(builder, shapes):
 		builder.shape(f"Mjolnir{name.title()}", vertices, bones, partitions, shader, textures)
 
 
-def add_body(builder, body, regions, name="MaleUnderwearBodyArmor"):
+def add_body(builder, body, regions):
 	"""The body's own skin where its triangles are weighted most to these
 	bones (by their names' brackets), as it is: its frame, shading,
 	bones' transforms, and partitions."""
-	shape = next(b for b in body.blocks if b["type"] == "BSTriShape" and b["name"].startswith("MaleUnderwearBody"))
+	shape = next(b for b in body.blocks if b["type"] == "BSTriShape" and "UnderwearBody" in b["name"])
+	name = shape["name"].split(":")[0] + "Armor"
 	skin = body.blocks[shape["skin"]]
 	data, partition = body.blocks[skin["data"]], body.blocks[skin["partition"]]
 	brackets = [bracket(body.blocks[b]["name"]) for b in skin["bones"]]
@@ -342,20 +346,21 @@ def shader_texture_set(nif, shape):
 def build(fitted, skeleton, bodies, out):
 	pieces, first_person = split(fitted)
 	written = []
-	for piece in PIECES:
-		for weight in ([None] if piece == "helmet" else ["0", "1"]):
-			name = piece if weight is None else f"{piece}_{weight}"
-			builder = Builder(f"{name.title()}.nif", skeleton)
-			add_chief(builder, pieces[piece])
-			if piece == "cuirass":
-				add_body(builder, bodies[f"malebody_{weight}"], FOREARM_BONES + CALF_BONES)
-			written.append(builder.write(out / f"{name}.nif"))
-			if piece == "cuirass":
-				name = f"1stperson{name}"
-				builder = Builder(f"{name}.nif", skeleton)
-				add_chief(builder, first_person)
-				add_body(builder, bodies[f"1stpersonmalebody_{weight}"], FOREARM_BONES)
-				written.append(builder.write(out / f"{name}.nif"))
+	for folder, sex in SEXES.items():
+		for piece in PIECES if folder == "male" else ["cuirass"]:
+			for weight in ([None] if piece == "helmet" else ["0", "1"]):
+				name = piece if weight is None else f"{piece}_{weight}"
+				builder = Builder(f"{name.title()}.nif", skeleton)
+				add_chief(builder, pieces[piece])
+				if piece == "cuirass":
+					add_body(builder, bodies[f"{sex}body_{weight}"], FOREARM_BONES + CALF_BONES)
+				written.append(builder.write(out / folder / f"{name}.nif"))
+				if piece == "cuirass":
+					name = f"1stperson{name}"
+					builder = Builder(f"{name}.nif", skeleton)
+					add_chief(builder, first_person)
+					add_body(builder, bodies[f"1stperson{sex}body_{weight}"], FOREARM_BONES)
+					written.append(builder.write(out / folder / f"{name}.nif"))
 	return pieces, written
 
 
@@ -368,7 +373,7 @@ def main():
 	fitted = json.loads((directory / "fitted.json").read_text())
 	skeleton = skyrim_skeleton(args.skyrim)
 	bodies = {name: body_nif(args.skyrim, name, directory / "skyrim")
-		for name in ("malebody_0", "malebody_1", "1stpersonmalebody_0", "1stpersonmalebody_1")}
+		for sex in SEXES.values() for name in (f"{sex}body_0", f"{sex}body_1", f"1stperson{sex}body_0", f"1stperson{sex}body_1")}
 	pieces, written = build(fitted, skeleton, bodies, directory / "Data" / Path(MESHES.replace("\\", "/")))
 	for piece, shapes in pieces.items():
 		print(f"{piece}: " + ", ".join(f"{name} " + " + ".join(f"{len(faces)} ({part})" for part, faces in partitions)

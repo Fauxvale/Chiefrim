@@ -93,7 +93,7 @@ class Nif:
 		self.header_string = HEADER
 		self.version, self.user_version, self.bs_version = 0x14020007, 12, 100
 		self.export_info = ["", "", ""]
-		self.strings, self.blocks, self.roots = [], [], [0]
+		self.types, self.strings, self.blocks, self.roots = [], [], [], [0]
 		if path is not None:
 			self.read(Path(path).read_bytes(), path)
 
@@ -105,8 +105,8 @@ class Nif:
 		if self.version != 0x14020007 or self.user_version != 12 or self.bs_version != 100:
 			raise ValueError(f"{path}: version {self.version:#x}/{self.user_version}/{self.bs_version}, not Skyrim SE's 20.2.0.7/12/100")
 		self.export_info = [reader.string("B") for _ in range(3)]
-		types = [reader.string("I") for _ in range(reader.one("H"))]
-		self.block_types = [types[reader.one("H") & 0x7FFF] for _ in range(block_count)]
+		self.types = [reader.string("I") for _ in range(reader.one("H"))]
+		self.block_types = [self.types[reader.one("H") & 0x7FFF] for _ in range(block_count)]
 		sizes = reader.unpack(f"{block_count}I")
 		string_count, _ = reader.unpack("II")
 		self.strings = [reader.string("I") for _ in range(string_count)]
@@ -126,8 +126,8 @@ class Nif:
 		return self.strings[index] if 0 <= index < len(self.strings) else None
 
 	def write(self, path=None):
-		"""The NIF's bytes (written to path, if given). Strings are the
-		ones read, in their order, then any new ones."""
+		"""The NIF's bytes (written to path, if given). Block types and
+		strings are the ones read, in their order, then any new ones."""
 		strings = list(self.strings)
 		def string_index(value):
 			if value is None:
@@ -145,7 +145,7 @@ class Nif:
 			else:
 				writer.data += block["raw"]
 			bodies.append(bytes(writer.data))
-		types = list(dict.fromkeys(block["type"] for block in self.blocks))
+		types = list(dict.fromkeys(self.types + [block["type"] for block in self.blocks]))
 		writer = Writer()
 		writer.data += self.header_string.encode("latin-1") + b"\n"
 		writer.pack("IBIII", self.version, 1, self.user_version, len(self.blocks), self.bs_version)

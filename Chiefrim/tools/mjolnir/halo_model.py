@@ -18,7 +18,8 @@ Usage: tools/mjolnir/halo_model.py MAP.map [--model characters\\cyborg\\cyborg]
          [--lod 0] [--out build/mjolnir]
 Writes model.json (nodes, shaders, then per part its vertices and
 triangles) and, per model shader, its colour, glow and reflection mask
-baked as the Xbox draws them (bake()), as PNGs.
+baked as the Xbox draws them (bake()), and its reflection cube map's faces
+side by side (+x, -x, +y, -y, +z, -z), as PNGs.
 """
 import argparse
 import json
@@ -239,6 +240,20 @@ def decode_bitmap(cache, name, index=0):
 	return width, height, pixels
 
 
+def decode_cube(cache, name, index=0):
+	"""A cube map's six faces (+x, -x, +y, -y, +z, -z, in Halo's frame), as
+	RGBA rows. On Xbox each face is its mip chain, padded to 128 bytes."""
+	group = cache.tag("bitm", name)
+	bitmap = cache.block(group, 96, 0x30)[index]
+	_, width, height, _, type, format, flags, _, _, mipmaps, _, start = cache.unpack("<I5hH2h2hi", bitmap)
+	if type != 2 or format not in (14, 15, 16):
+		raise ValueError(f"{name}: not a DXT cube map (type {type}, format {format})")
+	block = 8 if format == 14 else 16
+	levels = [max(1, (width >> n) // 4) * max(1, (height >> n) // 4) * block for n in range(mipmaps + 1)]
+	face = (sum(levels) + 127) // 128 * 128
+	return width, height, [decode_dxt(cache.data[start + f * face:start + f * face + levels[0]], width, height, format) for f in range(6)]
+
+
 def write_png(path, width, height, rgba):
 	def chunk(kind, body):
 		return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
@@ -403,6 +418,12 @@ def main():
 		for kind, rgba in zip(("color", "glow", "reflection"), bake(shader, bitmaps, model["change_colors"], args.size)):
 			shader["baked"][kind] = f"{stem}_{kind}.png"
 			write_png(out / shader["baked"][kind], args.size, args.size, rgba)
+		if shader["reflection_cube_map"]:
+			# its faces side by side
+			width, height, faces = decode_cube(cache, shader["reflection_cube_map"])
+			strip = b"".join(face[4 * width * y:4 * width * (y + 1)] for y in range(height) for face in faces)
+			shader["baked"]["cube"] = f"{stem}_cube.png"
+			write_png(out / shader["baked"]["cube"], 6 * width, height, strip)
 	(out / "model.json").write_text(json.dumps(model))
 	vertices = sum(len(part["vertices"]) for part in model["parts"])
 	triangles = sum(len(part["triangles"]) for part in model["parts"])
