@@ -221,7 +221,9 @@ float4 Look(float4 c, float a_share)
 		float4 m = meter.Load(int3(0, 0, 0));
 		key = m.x;
 		ceiling = clamp(m.y, 0.4, 1);
-		shadow = saturate(m.z) * lookScene.x;
+		// no more than a snowy forest's shadows (0.21): a picture of sky
+		// alone has its shadows at the sky's brightness
+		shadow = clamp(m.z, 0, 0.25) * lookScene.x;
 	}
 	float  exposure = lookScene.w > 0 ? clamp(sqrt(key / 0.3), lookScene.y, lookScene.z) : 1;
 	float3 u = c.rgb / c.a;

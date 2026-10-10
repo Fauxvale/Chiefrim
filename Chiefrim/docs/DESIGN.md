@@ -1008,7 +1008,8 @@ using the camera Skyrim is about to use. It draws three layers:
     reaches Halo from Skyrim's lights (the sun's, the ambient, torches). So the meter is brightness
     only (one texel: key, brightest, the shadows' soft minimum), the darks are lifted in grey by
     `fWeaponShadowLift` of the shadows' brightness, `fWeaponSceneTint` is gone, and protocol 28
-    drops `surround_hue`: the reflection cap stays.
+    drops `surround_hue`: the reflection cap stays, and the shadows' brightness the lift takes is at most 0.25
+    (looking up, a picture of sky alone has its shadows at the sky's 0.57).
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
