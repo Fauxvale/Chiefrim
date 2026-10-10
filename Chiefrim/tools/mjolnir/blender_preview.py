@@ -98,7 +98,7 @@ def nif_model(directory, paths, pieces):
 					"weights": [w for w in vertex["weights"] if w > 0]})
 			triangles = [face for p in partition["partitions"] for face in p["triangles_copy"]]
 			parts.append({"shader": len(shaders) - 1, "vertices": vertices, "triangles": triangles})
-	return {"name": "nif", "frame": "skyrim", "unit": 1 / 70, "bone_axis": "z", "nodes": nodes, "shaders": shaders, "parts": parts}
+	return {"name": "nif", "frame": "skyrim", "unit": 1 / 70, "bone_axis": "z", "winding": "ccw", "nodes": nodes, "shaders": shaders, "parts": parts}
 
 
 def build_armature(model, matrices):
@@ -137,6 +137,8 @@ def build_materials(directory, shaders):
 		material = bpy.data.materials.new(Path(shader["name"].replace("\\", "/")).name)
 		tree = material.node_tree
 		bsdf = tree.nodes["Principled BSDF"]
+		# faces are drawn from the front only, as the games draw them
+		material.use_backface_culling = True
 		if "solid" in shader:
 			bsdf.inputs["Base Color"].default_value = (*shader["solid"], 1)
 			bsdf.inputs["Roughness"].default_value = 0.6
@@ -178,6 +180,10 @@ def build_mesh(model, materials, armature):
 			bones = vertex.get("bones") or [names[n] if n >= 0 else None for n in vertex["nodes"]]
 			weights.append(list(zip(bones, vertex["weights"])))
 		for triangle in part["triangles"]:
+			# Halo's wind clockwise from the front, Skyrim's (and Blender's)
+			# counter-clockwise
+			if model.get("winding") != "ccw":
+				triangle = triangle[::-1]
 			triangles.append([first + i for i in triangle])
 			uvs.append([part["vertices"][i]["uv"] for i in triangle])
 			material_indices.append(part["shader"])

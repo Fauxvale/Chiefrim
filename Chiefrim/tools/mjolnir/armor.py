@@ -57,12 +57,11 @@ PIECES = {
 }
 PART_ORDER = (BODY_PART, CALVES, FEET, HANDS, FOREARMS, HELMET)
 FIRST_PERSON = ("LUar", "RUar")
-# the body's skin the cuirass carries: its forearms (with their twist bones)
-# and calves, by the bones their triangles are weighted most to (Skyrim's
-# forearm and calf partitions are only the caps where they meet the hands
-# and feet; the rest of them is the body's)
-FOREARM_BONES = ("LLar", "RLar", "LLt1", "RLt1", "LLt2", "RLt2")
-CALF_BONES = ("LClf", "RClf")
+# the body's skin the cuirass carries, by the bones its triangles are
+# weighted most to: its forearms (with their twist bones) and calves, as
+# the forearm and calf partitions
+FOREARM_SKIN = {bone: FOREARMS for bone in ("LLar", "RLar", "LLt1", "RLt1", "LLt2", "RLt2")}
+CALF_SKIN = {bone: CALVES for bone in ("LClf", "RClf")}
 # Halo's shaders Skyrim draws (the shield's effects aren't): their textures
 SHADERS = {"armor": "armor", "visor": "visor"}
 
@@ -243,7 +242,10 @@ class Builder:
 		texture_set = self.add({"type": "BSShaderTextureSet", "textures": textures})
 		shader = self.add(dict(shader, texture_set=texture_set))
 		self.nif.blocks[skin].update(data=data, partition=partition)
-		self.nif.blocks[shape].update(skin=skin, shader_property=shader, bound=bound(positions + numpy.array(translation)))
+		# a skinned shape's own bound is 0, as Skyrim's are: the game bounds
+		# it by its bones' (a real one is taken where the shape isn't, and
+		# culls it)
+		self.nif.blocks[shape].update(skin=skin, shader_property=shader, bound=(0.0, 0.0, 0.0, 0.0))
 		self.nif.blocks[0]["children"].append(shape)
 
 	def write(self, path):
@@ -292,16 +294,72 @@ def chief_vertices(source, faces):
 
 
 def add_chief(builder, shapes):
+	"""Chief's shapes. Halo's triangles wind clockwise seen from the front
+	(Direct3D's default); Skyrim's counter-clockwise, so each is reversed."""
 	for name, (source, partitions) in shapes.items():
+		partitions = [(part, [(a, c, b) for a, b, c in faces]) for part, faces in partitions]
 		vertices, bones = chief_vertices(source, [face for _, faces in partitions for face in faces])
 		shader, textures = chief_shader(name)
 		builder.shape(f"Mjolnir{name.title()}", vertices, bones, partitions, shader, textures)
 
 
-def add_body(builder, body, regions):
+def closest_points(point, triangles):
+	"""The point of each triangle (n x 3 x 3) closest to point (Ericson's
+	Real-Time Collision Detection, 5.1.5), vectorized."""
+	a, b, c = triangles[:, 0], triangles[:, 1], triangles[:, 2]
+	ab, ac, ap = b - a, c - a, point - a
+	d1, d2 = (ab * ap).sum(1), (ac * ap).sum(1)
+	bp, cp = point - b, point - c
+	d3, d4 = (ab * bp).sum(1), (ac * bp).sum(1)
+	d5, d6 = (ab * cp).sum(1), (ac * cp).sum(1)
+	va, vb, vc = d3 * d6 - d5 * d4, d5 * d2 - d1 * d6, d1 * d4 - d3 * d2
+	with numpy.errstate(divide="ignore", invalid="ignore"):
+		denominator = va + vb + vc
+		v, w = vb / denominator, vc / denominator
+		result = a + ab * v[:, None] + ac * w[:, None]  # inside
+		edge_bc = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+		cases = [
+			((va <= 0) & (d4 - d3 >= 0) & (d5 - d6 >= 0), b + (c - b) * edge_bc[:, None]),
+			((vb <= 0) & (d2 >= 0) & (d6 <= 0), a + ac * (d2 / (d2 - d6))[:, None]),
+			((vc <= 0) & (d1 >= 0) & (d3 <= 0), a + ab * (d1 / (d1 - d3))[:, None]),
+			((d6 >= 0) & (d5 <= d6), c),
+			((d3 >= 0) & (d4 <= d3), b),
+			((d1 <= 0) & (d2 <= 0), a),
+		]
+	for mask, value in cases:  # the last applied wins: vertices, then edges
+		result = numpy.where(mask[:, None], value, result)
+	return result
+
+
+def tuck(points, triangles, margin):
+	"""points moved inside the surface triangles make (counter-clockwise
+	from outside), at least margin under it: each that isn't, to under the
+	point of the surface closest to it."""
+	normals = numpy.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+	normals /= numpy.maximum(numpy.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
+	moved = 0
+	result = points.copy()
+	for index, point in enumerate(points):
+		closest = closest_points(point, triangles)
+		nearest = numpy.linalg.norm(closest - point, axis=1).argmin()
+		depth = numpy.dot(point - closest[nearest], normals[nearest])
+		if depth > -margin:
+			result[index] = closest[nearest] - normals[nearest] * margin
+			moved += 1
+	return result, moved
+
+
+def add_body(builder, body, regions, inside=None, margin=0.3):
 	"""The body's own skin where its triangles are weighted most to these
-	bones (by their names' brackets), as it is: its frame, shading,
-	bones' transforms, and partitions."""
+	bones (regions: bracket -> body part), as it is: its frame, shading,
+	bones' transforms; each region its body part's partition. Skyrim hides
+	a worn addon's partition of a body part another worn addon covers with
+	a higher priority: so the gauntlets hide these forearms, the boots
+	these calves (Skyrim's own forearm and calf partitions are only the
+	caps at the hands and feet; the body's partition has the rest, which
+	would show through the gap Halo leaves at Chief's elbows). Any of it
+	outside the surface inside makes (Chief's) is tucked under it, so that
+	without them, none shows through his armor."""
 	shape = next(b for b in body.blocks if b["type"] == "BSTriShape" and "UnderwearBody" in b["name"])
 	name = shape["name"].split(":")[0] + "Armor"
 	skin = body.blocks[shape["skin"]]
@@ -314,11 +372,13 @@ def add_body(builder, body, regions):
 			for b, w in zip(vertex["bones"], vertex["weights"]):
 				totals[brackets[b]] = totals.get(brackets[b], 0) + w
 		return max(totals, key=totals.get)
-	chosen = []
-	for (_, part), p in zip(skin["partitions"], partition["partitions"]):
-		faces = [face for face in p["triangles_copy"] if dominant(face) in regions]
-		if faces:
-			chosen.append((part, {"triangles_copy": faces}))
+	by_part = {}
+	for p in partition["partitions"]:
+		for face in p["triangles_copy"]:
+			part = regions.get(dominant(face))
+			if part is not None:
+				by_part.setdefault(part, []).append(face)
+	chosen = [(part, {"triangles_copy": by_part[part]}) for part in PART_ORDER if part in by_part]
 	used = sorted({i for _, p in chosen for face in p["triangles_copy"] for i in face})
 	remap = {old: new for new, old in enumerate(used)}
 	bones_used = sorted({b for i in used for b, w in zip(partition["vertices"][i]["bones"], partition["vertices"][i]["weights"]) if w > 0})
@@ -328,6 +388,13 @@ def add_body(builder, body, regions):
 		vertex = dict(partition["vertices"][i])
 		vertex["bones"] = tuple(bone_remap[b] if w > 0 else 0 for b, w in zip(vertex["bones"], vertex["weights"]))
 		vertices.append(vertex)
+	if inside is not None:
+		offset = numpy.array(shape["translation"])
+		points = numpy.array([v["position"] for v in vertices]) + offset
+		points, moved = tuck(points, inside, margin)
+		for vertex, point in zip(vertices, points - offset):
+			vertex["position"] = point.tolist()
+		print(f"  {name}: {moved} of {len(vertices)} vertices tucked under Chief's armor")
 	partitions = [(part, [tuple(remap[i] for i in face) for face in p["triangles_copy"]]) for part, p in chosen]
 	shader = copy.deepcopy(body.blocks[shape["shader_property"]])
 	for key in ("raw", "texture_set"):
@@ -343,8 +410,19 @@ def shader_texture_set(nif, shape):
 	return nif.blocks[shape["shader_property"]]["texture_set"]
 
 
+def chief_surface(fitted):
+	"""All of Chief's triangles (counter-clockwise), as n x 3 x 3."""
+	triangles = []
+	for part in fitted["parts"]:
+		if Path(fitted["shaders"][part["shader"]]["name"].replace("\\", "/")).name in SHADERS:
+			positions = numpy.array([v["position"] for v in part["vertices"]])
+			triangles += [positions[[a, c, b]] for a, b, c in part["triangles"]]
+	return numpy.array(triangles)
+
+
 def build(fitted, skeleton, bodies, out):
 	pieces, first_person = split(fitted)
+	surface = chief_surface(fitted)
 	written = []
 	for folder, sex in SEXES.items():
 		for piece in PIECES if folder == "male" else ["cuirass"]:
@@ -353,13 +431,13 @@ def build(fitted, skeleton, bodies, out):
 				builder = Builder(f"{name.title()}.nif", skeleton)
 				add_chief(builder, pieces[piece])
 				if piece == "cuirass":
-					add_body(builder, bodies[f"{sex}body_{weight}"], FOREARM_BONES + CALF_BONES)
+					add_body(builder, bodies[f"{sex}body_{weight}"], {**FOREARM_SKIN, **CALF_SKIN}, surface)
 				written.append(builder.write(out / folder / f"{name}.nif"))
 				if piece == "cuirass":
 					name = f"1stperson{name}"
 					builder = Builder(f"{name}.nif", skeleton)
 					add_chief(builder, first_person)
-					add_body(builder, bodies[f"1stperson{sex}body_{weight}"], FOREARM_BONES)
+					add_body(builder, bodies[f"1stperson{sex}body_{weight}"], FOREARM_SKIN, surface)
 					written.append(builder.write(out / folder / f"{name}.nif"))
 	return pieces, written
 
