@@ -174,8 +174,10 @@ float4 Grade(float4 c, float a_share)
 static const float3 kLuma = float3(0.2125, 0.7154, 0.0721);
 // Skyrim's picture, before Halo's layers, metered from a small mip of it:
 // texel 0 its key (the log average of its brightness) and its brightest (a
-// soft maximum), texel 1 its shadows' colour (a soft minimum), texel 2 its
-// mean colour
+// soft maximum), texel 1 its shadows' colour (a soft minimum), texel 2 the
+// colour of its light: its mean, weighted to its unsaturated parts (rock,
+// bark, snow, a grey sky), as a mean of all of it is the colour of what's
+// in view (autumn leaves made the light yellow)
 float4 PSMeter(VSOut i) : SV_Target
 {
 	uint level = 0, w, h, levels;
@@ -185,7 +187,7 @@ float4 PSMeter(VSOut i) : SV_Target
 	scene.GetDimensions(level, w, h, levels);
 	w = min(w, 64u);
 	h = min(h, 64u);
-	float  logSum = 0, lowWeight = 0, high = 0, highWeight = 0;
+	float  logSum = 0, lowWeight = 0, high = 0, highWeight = 0, greyWeight = 0;
 	float3 low = 0, sum = 0;
 	[loop] for (uint y = 0; y < h; y++)
 	{
@@ -196,7 +198,10 @@ float4 PSMeter(VSOut i) : SV_Target
 			logSum += log(l + 0.001);
 			float dark = exp(-16 * l), bright = exp(16 * (l - 1));
 			low += c * dark;
-			sum += c;
+			float most = max(c.r, max(c.g, c.b));
+			float grey = l > 0.03 ? exp(-8 * (most - min(c.r, min(c.g, c.b))) / max(most, 0.001)) : 0;
+			sum += c * grey;
+			greyWeight += grey;
 			lowWeight += dark;
 			high += l * bright;
 			highWeight += bright;
@@ -206,15 +211,15 @@ float4 PSMeter(VSOut i) : SV_Target
 		return float4(exp(logSum / max(w * h, 1u)), high / max(highWeight, 1e-20), 0, 1);
 	if (i.pos.x < 2)
 		return float4(low / max(lowWeight, 1e-20), 1);
-	return float4(sum / max(w * h, 1u), 1);
+	return float4(greyWeight > 1e-4 ? sum / greyWeight : float3(0.5, 0.5, 0.5), 1);
 }
 // Chief's arms and weapon toned to Skyrim's world before its grade. Halo's
 // are lit by Skyrim's light, but drawn after Skyrim's tone map and without
 // the haze that lifts its shadows: in bright snow they were near black and
 // dull, in the dark too bright. So, by the meter of Skyrim's picture: the
 // saturation; an exposure that follows the picture's key (as an eye adapts);
-// a shift towards the picture's mean hue (as an eye takes a room's light for
-// white: a cabin's warm, a snowy day's cool); the highlights rolled off
+// a shift towards the hue of the picture's light (as an eye takes a room's
+// light for white: a cabin's warm, a snowy day's cool); the highlights rolled off
 // towards the picture's brightest (no shine above the sky's); and the
 // shadows lifted towards the picture's own shadows' colour (the cool haze of
 // a snowy day, nothing at night). By the amount a_share of the pixel that is
@@ -818,7 +823,7 @@ float4 PSWorld(VSOut i) : SV_Target
 						const float exposure = std::clamp(std::sqrt(std::max(texels[0], 0.0f) / 0.3f),
 							std::min(config.exposureMin, config.exposureMax), config.exposureMax);
 						logger::info("overlay: the weapon's look: Skyrim's picture's key {:.3f}, brightest {:.3f}, shadows ({:.3f} {:.3f} {:.3f}),"
-									 " mean ({:.3f} {:.3f} {:.3f}); exposure {:.2f}, highlights to {:.2f}",
+									 " light ({:.3f} {:.3f} {:.3f}); exposure {:.2f}, highlights to {:.2f}",
 							texels[0], texels[1], texels[4], texels[5], texels[6], texels[8], texels[9], texels[10],
 							exposure * config.weaponBrightness, std::clamp(texels[1], 0.4f, 1.0f));
 					}

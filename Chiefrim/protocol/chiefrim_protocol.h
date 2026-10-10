@@ -507,8 +507,9 @@ typedef struct cr_msg_lighting
 	compositor's meter of it). A shiny weapon shows mostly its reflection,
 	which is of its surroundings: a dim cabin's, not the light's. reflection_cap:
 	the most a reflection's strength goes (0..1; 0: not metered, no cap).
-	surround_hue: the picture's mean colour, its largest part 1, which tints
-	reflections (0 0 0: none). */
+	surround_hue: the colour of the picture's light (its mean, weighted to
+	its unsaturated parts: autumn leaves aren't the light's colour), its
+	largest part 1, which tints reflections (0 0 0: none). */
 	float    reflection_cap;
 	cr_vec3  surround_hue;
 } cr_msg_lighting;

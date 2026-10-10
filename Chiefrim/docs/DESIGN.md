@@ -993,6 +993,13 @@ using the camera Skyrim is about to use. It draws three layers:
     (`fWeaponExposureMin`; the key wanted 0.57), and the look shifts the weapon towards the
     picture's mean hue by `fWeaponSceneTint` (0.35; the hue the mean over its luminance, 0.5 to
     1.5), as an eye takes a room's light for white. On the screenshot: the silver about 0.35.
+    In game (an autumn forest: key 0.369, mean 0.404 0.425 0.375) the MA5B came out yellow: the
+    mean is the colour of what's in view, the leaves', not of the light, and Halo's reflection
+    tint multiplied it with the sun's own warmth. The meter's colour is now the light's: the
+    picture's mean weighted to its unsaturated parts (exp(-8 x saturation), where saturation is
+    (max - min) / max; none under 0.03 bright). Its hue on the three screenshots (64 x 36 blocks):
+    the cabin 1.13 0.98 0.86 (warm, 1.25 0.96 0.69 by the mean), the snow 0.90 1.02 1.07, the
+    forest 0.93 1.02 0.96 (1.00 1.02 0.85 by the mean).
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
