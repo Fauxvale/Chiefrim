@@ -88,12 +88,15 @@ namespace chiefrim::Overlay
 			ID3D11Texture2D*          meter = nullptr;
 			ID3D11RenderTargetView*   meterRtv = nullptr;
 			ID3D11ShaderResourceView* meterSrv = nullptr;
-			ID3D11Texture2D*          meterStaging = nullptr;  // for the log
+			ID3D11Texture2D*          meterStaging = nullptr;  // read back: the lighting's surroundings, and the log
 			bool                      meterFailed = false;
 			bool                      metered = false;         // this frame
 			bool                      stagingPending = false;
 			double                    meterAt = 0.0;           // ms, the last meter
-			ULONGLONG                 nextMeterLog = 0;
+			ULONGLONG                 nextReadback = 0, nextMeterLog = 0;
+			float                     readKey = 0.0f;          // as last read back
+			RE::NiColor               readMean;
+			ULONGLONG                 readAt = 0;
 
 			// Skyrim's depth, copied as its world rendering finishes
 			ID3D11Texture2D*          depthCopy = nullptr;
@@ -170,7 +173,8 @@ float4 Grade(float4 c, float a_share)
 static const float3 kLuma = float3(0.2125, 0.7154, 0.0721);
 // Skyrim's picture, before Halo's layers, metered from a small mip of it:
 // texel 0 its key (the log average of its brightness) and its brightest (a
-// soft maximum), texel 1 its shadows' colour (a soft minimum)
+// soft maximum), texel 1 its shadows' colour (a soft minimum), texel 2 its
+// mean colour
 float4 PSMeter(VSOut i) : SV_Target
 {
 	uint level = 0, w, h, levels;
@@ -181,7 +185,7 @@ float4 PSMeter(VSOut i) : SV_Target
 	w = min(w, 64u);
 	h = min(h, 64u);
 	float  logSum = 0, lowWeight = 0, high = 0, highWeight = 0;
-	float3 low = 0;
+	float3 low = 0, sum = 0;
 	[loop] for (uint y = 0; y < h; y++)
 	{
 		[loop] for (uint x = 0; x < w; x++)
@@ -191,6 +195,7 @@ float4 PSMeter(VSOut i) : SV_Target
 			logSum += log(l + 0.001);
 			float dark = exp(-16 * l), bright = exp(16 * (l - 1));
 			low += c * dark;
+			sum += c;
 			lowWeight += dark;
 			high += l * bright;
 			highWeight += bright;
@@ -198,7 +203,9 @@ float4 PSMeter(VSOut i) : SV_Target
 	}
 	if (i.pos.x < 1)
 		return float4(exp(logSum / max(w * h, 1u)), high / max(highWeight, 1e-20), 0, 1);
-	return float4(low / max(lowWeight, 1e-20), 1);
+	if (i.pos.x < 2)
+		return float4(low / max(lowWeight, 1e-20), 1);
+	return float4(sum / max(w * h, 1u), 1);
 }
 // Chief's arms and weapon toned to Skyrim's world before its grade. Halo's
 // are lit by Skyrim's light, but drawn after Skyrim's tone map and without
@@ -767,7 +774,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			}
 			if (!s.meter) {
 				D3D11_TEXTURE2D_DESC md{};
-				md.Width = 2;
+				md.Width = 3;
 				md.Height = 1;
 				md.MipLevels = 1;
 				md.ArraySize = 1;
@@ -787,18 +794,26 @@ float4 PSWorld(VSOut i) : SV_Target
 			}
 
 			auto* context = s.context;
-			// the numbers, now and then (the copy asked for a few frames ago)
+			// the numbers, ten times a second (the copy asked for a frame or
+			// more ago): the lighting's surroundings (Surroundings), and the log
+			const auto tick = ::GetTickCount64();
 			if (s.stagingPending && s.meterStaging) {
 				D3D11_MAPPED_SUBRESOURCE mapped{};
 				if (SUCCEEDED(context->Map(s.meterStaging, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped))) {
 					const auto* texels = static_cast<const float*>(mapped.pData);
-					const auto& config = Grading();
-					const float exposure = std::clamp(std::sqrt(std::max(texels[0], 0.0f) / 0.3f),
-						std::min(config.exposureMin, config.exposureMax), config.exposureMax);
-					logger::info("overlay: the weapon's look: Skyrim's picture's key {:.3f}, brightest {:.3f}, shadows ({:.3f} {:.3f} {:.3f});"
-								 " exposure {:.2f}, highlights to {:.2f}",
-						texels[0], texels[1], texels[4], texels[5], texels[6], exposure * config.weaponBrightness,
-						std::clamp(texels[1], 0.4f, 1.0f));
+					s.readKey = texels[0];
+					s.readMean = { texels[8], texels[9], texels[10] };
+					s.readAt = tick;
+					if (tick >= s.nextMeterLog) {
+						s.nextMeterLog = tick + 15000;
+						const auto& config = Grading();
+						const float exposure = std::clamp(std::sqrt(std::max(texels[0], 0.0f) / 0.3f),
+							std::min(config.exposureMin, config.exposureMax), config.exposureMax);
+						logger::info("overlay: the weapon's look: Skyrim's picture's key {:.3f}, brightest {:.3f}, shadows ({:.3f} {:.3f} {:.3f}),"
+									 " mean ({:.3f} {:.3f} {:.3f}); exposure {:.2f}, highlights to {:.2f}",
+							texels[0], texels[1], texels[4], texels[5], texels[6], texels[8], texels[9], texels[10],
+							exposure * config.weaponBrightness, std::clamp(texels[1], 0.4f, 1.0f));
+					}
 					context->Unmap(s.meterStaging, 0);
 					s.stagingPending = false;
 				}
@@ -812,7 +827,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			const float  weight = s.meterAt <= 0.0 || gap <= 0.0 || gap >= 2000.0 ? 1.0f : float(1.0 - std::exp(-gap / 500.0));
 			s.meterAt = now;
 			const float           factor[4]{ weight, weight, weight, weight };
-			const D3D11_VIEWPORT  viewport{ 0.0f, 0.0f, 2.0f, 1.0f, 0.0f, 1.0f };
+			const D3D11_VIEWPORT  viewport{ 0.0f, 0.0f, 3.0f, 1.0f, 0.0f, 1.0f };
 			ID3D11ShaderResourceView* none[6]{};
 			ID3D11ShaderResourceView* sceneSrvs[6]{ nullptr, nullptr, nullptr, nullptr, s.sceneSrv, nullptr };
 			context->PSSetShaderResources(0, 6, none);  // the meter isn't bound while it's drawn to
@@ -824,11 +839,10 @@ float4 PSWorld(VSOut i) : SV_Target
 			context->Draw(3, 0);
 			context->PSSetShaderResources(0, 6, none);
 
-			const auto tick = ::GetTickCount64();
-			if (s.meterStaging && !s.stagingPending && tick >= s.nextMeterLog) {
+			if (s.meterStaging && !s.stagingPending && tick >= s.nextReadback) {
 				context->CopyResource(s.meterStaging, s.meter);
 				s.stagingPending = true;
-				s.nextMeterLog = tick + 15000;
+				s.nextReadback = tick + 100;
 			}
 			return true;
 		}
@@ -1339,6 +1353,16 @@ float4 PSWorld(VSOut i) : SV_Target
 			RenderWorldHook::func = SKSE::GetTrampoline().write_call<5>(sites[0], RenderWorldHook::thunk);
 			logger::info("overlay: hooked Skyrim's world rendering (camera to Halo, depth for the world layer)");
 		}
+	}
+
+	bool Surroundings(float& a_key, RE::NiColor& a_mean)
+	{
+		if (!s.readAt || ::GetTickCount64() - s.readAt > 2000) {
+			return false;
+		}
+		a_key = s.readKey;
+		a_mean = s.readMean;
+		return true;
 	}
 
 	void Install()

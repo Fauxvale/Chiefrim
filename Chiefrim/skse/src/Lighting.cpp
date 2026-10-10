@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Lighting.h"
 #include "Link.h"
+#include "Overlay.h"
 #include "Settings.h"
 
 namespace chiefrim::Lighting
@@ -19,6 +20,8 @@ namespace chiefrim::Lighting
 			float shadowReach = 16384.0f;  // how far towards the sun a shadow's caster is looked for
 			float shadowSpread = 12.0f;    // the rays around the eye, apart
 			float skyReach = 3000.0f;      // how far up a roof over the eye is looked for
+			float reflectionMatch = 2.5f;  // [Lighting] fReflectionMatch: a reflection's most, of the picture's key (0: no cap)
+			float reflectionMin = 0.15f;   // [Lighting] fReflectionMin: the least that cap goes
 		} config;
 
 		// Chief's flashlight: a point light of Skyrim's (its renderer has no
@@ -176,6 +179,8 @@ namespace chiefrim::Lighting
 		config.flashlight = Settings::ReadBool(L"Flashlight", L"bEnabled", true);
 		config.flashBrightness = Settings::ReadFloat(L"Flashlight", L"fBrightness", 1.5f);
 		config.flashReach = Settings::ReadFloat(L"Flashlight", L"fReach", 1.0f);
+		config.reflectionMatch = std::max(Settings::ReadFloat(L"Lighting", L"fReflectionMatch", 2.5f), 0.0f);
+		config.reflectionMin = std::clamp(Settings::ReadFloat(L"Lighting", L"fReflectionMin", 0.15f), 0.0f, 1.0f);
 	}
 
 	void Reset()
@@ -240,6 +245,20 @@ namespace chiefrim::Lighting
 		}
 		NearestPoints(runtime, a_player->GetPosition() + RE::NiPoint3{ 0.0f, 0.0f, 100.0f }, message);
 
+		// What a shiny weapon reflects is its surroundings, as Skyrim's picture
+		// shows them: in a dim cabin the MA5B shone near white by the fire's
+		// light (the reflection's strength is the light's, at its most from
+		// about half of Skyrim's daylight), where the room's brightest were 0.3
+		float       key = 0.0f;
+		RE::NiColor mean;
+		if (config.reflectionMatch > 0.0f && Overlay::Surroundings(key, mean)) {
+			message.reflection_cap = std::clamp(key * config.reflectionMatch, std::max(config.reflectionMin, 0.01f), 1.0f);
+			const float largest = std::max({ mean.red, mean.green, mean.blue });
+			if (largest > 0.01f) {
+				message.surround_hue = { mean.red / largest, mean.green / largest, mean.blue / largest };
+			}
+		}
+
 		if (!Link::Get().PushRaw(CR_MSG_LIGHTING, &message, sizeof(message))) {
 			return;
 		}
@@ -258,6 +277,8 @@ namespace chiefrim::Lighting
 				message.ambient.x, message.ambient.y, message.ambient.z, message.key_color.x, message.key_color.y, message.key_color.z,
 				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count, activeCount, Describe(message, a_player->GetPosition()),
 				!message.key_shadowed ? "no shadows (inside)" : std::format("the sun {:.0f}% seen, the sky {:.0f}% open", message.sun_visible * 100.0f, message.sky_visible * 100.0f));
+			logger::info("lighting: reflections at most {:.2f} (0: no cap), tinted ({:.2f} {:.2f} {:.2f}) by what surrounds Chief",
+				message.reflection_cap, message.surround_hue.x, message.surround_hue.y, message.surround_hue.z);
 		}
 	}
 }

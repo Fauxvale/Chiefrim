@@ -971,6 +971,21 @@ using the camera Skyrim is about to use. It draws three layers:
     middle 0.18, its shine to 0.85 to 0.88, under the sky's 0.87 to 0.9. The log's `the weapon's
     look:` lines (every 15 s) give the meter's numbers and the exposure. The shaders compile with
     Proton's `D3DCompile`; the look to check in game, and in the dark.
+  - **Reflections no brighter than the surroundings (2026-10-09, protocol 27).** In game, in a
+    dim cabin (the meter's key 0.100, brightest 0.91: a sunbeam on the floor; exposure 0.65), the
+    MA5B's silver still came out flat at 0.78, where the room's 95th percentile was 0.27 to 0.29:
+    Halo's picture was already white there, past what the compositor can tone. A shiny weapon
+    shows mostly its reflection, and the reflection's strength was the direct light's (the fire's
+    and the window's, times 1.5 plus 0.25: at its most from about half of Skyrim's daylight). But a
+    reflection is of what surrounds it. Now the plugin reads the meter back ten times a second
+    (`Overlay::Surroundings`; the meter's third texel is the picture's mean colour) and sends with
+    the lighting `cr_msg_lighting.reflection_cap`, the key times `[Lighting] fReflectionMatch` (2.5)
+    from `fReflectionMin` (0.15) to 1, and `surround_hue`, the mean colour, its largest part 1.
+    Halo caps each object's reflection strength by it and tints the reflection by the hue: the
+    cabin 0.25, warm (1 0.77 0.57); a snowy day (keys 0.49 to 0.63) uncapped, cool (0.75 0.92 1).
+    Offline (`fake_skyrim.py --light 0.5 --torch ... --reflection-cap 0.25 --surround-hue
+    1,0.77,0.57`): the MA5B's screen-layer brightness 44 uncapped, 29 capped, its barrel's top 1%
+    from 0.74 to 0.59. The log's `lighting: reflections at most` line gives the cap and hue.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo

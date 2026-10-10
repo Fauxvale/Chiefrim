@@ -14,4 +14,9 @@ namespace chiefrim::Overlay
 
 	// kDataLoaded: hooks the swap chain's Present.
 	void Install();
+
+	// Skyrim's picture, as the weapon's look meters it (before Halo's layers):
+	// its key (the log average of its brightness) and its mean colour, at
+	// most a few frames old. False: not metered (yet, or for 2 s).
+	bool Surroundings(float& a_key, RE::NiColor& a_mean);
 }

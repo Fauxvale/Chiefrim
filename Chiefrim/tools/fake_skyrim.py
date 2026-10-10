@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 26
+VERSION = 27
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -572,6 +572,10 @@ def main():
     parser.add_argument("--actor-dies-at", type=float, default=0.0,
                         help="with --actor: seconds in, it dies (listed dead for 3 s, then gone): its proxy drops its kit"
                              " (a person's gun and grenades; with --actor-shape wolf, 1 or 2 grenades)")
+    parser.add_argument("--reflection-cap", type=float, default=0.0,
+                        help="with --light: reflections no stronger than this (0..1; 0: no cap), as the plugin's meter of Skyrim's picture sends")
+    parser.add_argument("--surround-hue", default="0,0,0",
+                        help="with --light: r,g,b the reflections are tinted by (what surrounds Chief; 0,0,0: none)")
     parser.add_argument("--flashlight-at", type=float, default=0.0,
                         help="seconds in: switch Chief's flashlight on, and off again 4 s later")
     options = parser.parse_args()
@@ -808,7 +812,8 @@ def main():
                                                                   0.3, 0.4, -0.866, 1 if options.torch else 0)
                           + (struct.pack("<3ff3f", options.x + torch[0], options.y + torch[1], options.z + torch[2], *torch[3:7])
                              if options.torch else b"") + bytes(4 * 28 - (28 if options.torch else 0))
-                          + struct.pack("<Iff", 1 if seen >= 0.0 else 0, max(seen, 0.0), options.sky_visible if seen >= 0.0 else 1.0))
+                          + struct.pack("<Iff", 1 if seen >= 0.0 else 0, max(seen, 0.0), options.sky_visible if seen >= 0.0 else 1.0)
+                          + struct.pack("<f3f", options.reflection_cap, *(float(v) for v in options.surround_hue.split(","))))
             if options.key_names and not drive_state.get("named"):
                 # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
                 names = options.key_names.split(",") + [""] * 12

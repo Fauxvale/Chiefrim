@@ -234,6 +234,11 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	brightness = chiefrim_luminance(&lighting->distant_lights[0].color) + chiefrim_luminance(&torch) +
 		0.35f * chiefrim_luminance(&lighting->ambient_color);
 	lighting->reflection_tint_color.alpha = PIN(brightness * 1.5f + 0.25f, 0.f, 1.f);
+	/* but no more than its surroundings, as Skyrim's picture shows them
+	(protocol 27), give: a reflection is of them. In a dim cabin the MA5B
+	shone near white by a fire's light (the room's brightest 0.3) */
+	if (light->reflection_cap > 0.f)
+		lighting->reflection_tint_color.alpha = MIN(lighting->reflection_tint_color.alpha, PIN(light->reflection_cap, 0.f, 1.f));
 	/* tinted by the colour of the light that reaches it, the sun's or moon's
 	(past what shades it), the sky's and a torch's: their hue, its largest
 	part 1 (how bright is the alpha's). Halo tints by its lightmap's colour
@@ -249,6 +254,14 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		lighting->reflection_tint_color.red = PIN(red / largest, 0.f, 1.f);
 		lighting->reflection_tint_color.green = PIN(green / largest, 0.f, 1.f);
 		lighting->reflection_tint_color.blue = PIN(blue / largest, 0.f, 1.f);
+		/* and by the colour of what's around it (the room's wood, the snow's
+		blue), its largest part 1 */
+		if (light->surround_hue.x > 0.f || light->surround_hue.y > 0.f || light->surround_hue.z > 0.f)
+		{
+			lighting->reflection_tint_color.red *= PIN(light->surround_hue.x, 0.f, 1.f);
+			lighting->reflection_tint_color.green *= PIN(light->surround_hue.y, 0.f, 1.f);
+			lighting->reflection_tint_color.blue *= PIN(light->surround_hue.z, 0.f, 1.f);
+		}
 	}
 	lighting->shadow_vector = key;
 	if (lighting->shadow_vector.k > -0.5f)
