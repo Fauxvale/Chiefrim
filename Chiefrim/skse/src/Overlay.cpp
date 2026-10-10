@@ -48,6 +48,7 @@ namespace chiefrim::Overlay
 			float fogPlanes[4];   // where it starts and is full (Skyrim units), 1 if on
 			float look[4];        // Chief's arms and weapon: brightness, saturation, highlights' knee, 1 if on
 			float lookScene[4];   // matched to Skyrim's picture: shadow lift, exposure's least and most, 1 if metered
+			float lookTint[4];    // how far towards the picture's mean hue
 		};
 
 		// A camera Skyrim published, for mapping Halo's frame onto the camera
@@ -135,7 +136,7 @@ cbuffer Params : register(b0)
 {
 	float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4];
 	float4 grade; float4 tint; float4 fade; float4 fogNear; float4 fogFar; float4 fogPlanes;
-	float4 look; float4 lookScene;
+	float4 look; float4 lookScene; float4 lookTint;
 };
 Texture2D picture : register(t0);
 Texture2D<float> haloDepth : register(t1);
@@ -212,18 +213,22 @@ float4 PSMeter(VSOut i) : SV_Target
 // the haze that lifts its shadows: in bright snow they were near black and
 // dull, in the dark too bright. So, by the meter of Skyrim's picture: the
 // saturation; an exposure that follows the picture's key (as an eye adapts);
-// the highlights rolled off towards the picture's brightest (no shine above
-// the sky's); and the shadows lifted towards the picture's own shadows'
-// colour (the cool haze of a snowy day, nothing at night). By the amount
-// a_share of the pixel that is the weapon.
+// a shift towards the picture's mean hue (as an eye takes a room's light for
+// white: a cabin's warm, a snowy day's cool); the highlights rolled off
+// towards the picture's brightest (no shine above the sky's); and the
+// shadows lifted towards the picture's own shadows' colour (the cool haze of
+// a snowy day, nothing at night). By the amount a_share of the pixel that is
+// the weapon.
 float4 Look(float4 c, float a_share)
 {
 	if (look.w <= 0 || a_share <= 0 || c.a <= 0.002)
 		return c;
 	float  key = 0.3, ceiling = 1;
-	float3 shadow = 0;
+	float3 shadow = 0, hue = 1;
 	if (lookScene.w > 0)
 	{
+		float3 mean = meter.Load(int3(2, 0, 0)).rgb;
+		hue = lerp(1, clamp(mean / max(dot(mean, kLuma), 0.02), 0.5, 1.5), lookTint.x);
 		float4 m = meter.Load(int3(0, 0, 0));
 		key = m.x;
 		ceiling = clamp(m.y, 0.4, 1);
@@ -231,7 +236,7 @@ float4 Look(float4 c, float a_share)
 	}
 	float  exposure = lookScene.w > 0 ? clamp(sqrt(key / 0.3), lookScene.y, lookScene.z) : 1;
 	float3 u = c.rgb / c.a;
-	float3 g = max(lerp(dot(u, kLuma).xxx, u, look.y), 0) * exposure * look.x;
+	float3 g = max(lerp(dot(u, kLuma).xxx, u, look.y), 0) * exposure * look.x * hue;
 	float  l = dot(g, kLuma);
 	float  k = look.z * ceiling, room = max(ceiling - k, 1e-3);
 	if (l > k)
@@ -559,8 +564,9 @@ float4 PSWorld(VSOut i) : SV_Target
 			float weaponHighlights = 0.6f;   // [Grade] fWeaponHighlights: the knee, of the picture's brightest (1: none)
 			bool  matchScene = true;         // [Grade] bWeaponMatchScene: metered from Skyrim's picture
 			float shadowLift = 0.35f;        // [Grade] fWeaponShadowLift: of the picture's shadows' colour
-			float exposureMin = 0.65f;       // [Grade] fWeaponExposureMin: in the dark
+			float exposureMin = 0.5f;        // [Grade] fWeaponExposureMin: in the dark
 			float exposureMax = 1.1f;        // [Grade] fWeaponExposureMax: in daylight
+			float sceneTint = 0.35f;         // [Grade] fWeaponSceneTint: towards the picture's mean hue
 		};
 
 		const GradeConfig& Grading()
@@ -573,8 +579,9 @@ float4 PSWorld(VSOut i) : SV_Target
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponHighlights", 0.6f), 0.0f, 1.0f),
 				Settings::ReadBool(L"Grade", L"bWeaponMatchScene", true),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponShadowLift", 0.35f), 0.0f, 1.0f),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMin", 0.65f), 0.1f, 4.0f),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMax", 1.1f), 0.1f, 4.0f) };
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMin", 0.5f), 0.1f, 4.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMax", 1.1f), 0.1f, 4.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponSceneTint", 0.35f), 0.0f, 1.0f) };
 			return config;
 		}
 
@@ -632,6 +639,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			a_params.lookScene[1] = std::min(config.exposureMin, config.exposureMax);
 			a_params.lookScene[2] = config.exposureMax;
 			a_params.lookScene[3] = s.metered ? 1.0f : 0.0f;
+			a_params.lookTint[0] = config.sceneTint;
 			if (!config.enabled) {
 				return;
 			}

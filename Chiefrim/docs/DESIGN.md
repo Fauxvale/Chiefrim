@@ -986,6 +986,13 @@ using the camera Skyrim is about to use. It draws three layers:
     Offline (`fake_skyrim.py --light 0.5 --torch ... --reflection-cap 0.25 --surround-hue
     1,0.77,0.57`): the MA5B's screen-layer brightness 44 uncapped, 29 capped, its barrel's top 1%
     from 0.74 to 0.59. The log's `lighting: reflections at most` line gives the cap and hue.
+    In game (2026-10-09, the same cabin: key 0.098, mean 0.175 0.143 0.106): the MA5B's silver
+    from 0.70 to 0.45 (median), shaded again, but still over the room's 95th percentile (0.30) and
+    near neutral (1 0.96 0.92) in a warm room (1 0.82 0.61): what's left is its light grey paint
+    under Skyrim's neutral interior light. So the exposure goes down to 0.5 in the dark
+    (`fWeaponExposureMin`; the key wanted 0.57), and the look shifts the weapon towards the
+    picture's mean hue by `fWeaponSceneTint` (0.35; the hue the mean over its luminance, 0.5 to
+    1.5), as an eye takes a room's light for white. On the screenshot: the silver about 0.35.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo
