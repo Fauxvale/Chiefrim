@@ -20,8 +20,11 @@ forearms. Only the cuirasses differ by sex (male/, f/: the male or female
 body's skin; his armor is bound to the same bones either way, and follows a
 woman's skeleton as it does a man's); the rest are male/'s for both.
 
-Partitions are the body parts Skyrim's dismemberment knows them by: 32 the
-body, 33 hands, 34 forearms, 37 feet, 38 calves, 131 the helmet's.
+Partitions are the body parts the biped slots name: 30 the head, 32 the
+body, 33 hands, 34 forearms, 37 feet, 38 calves. Skyrim draws a worn
+addon's partitions only of the slots it covers (and wins): the helmet's
+addon covers the head (30), as Skyrim's full helmets' do, which hides the
+face inside it.
 
 Usage: tools/mjolnir/armor.py [--skyrim DATA_DIR] [--dir build/mjolnir]
 """
@@ -44,8 +47,8 @@ SEXES = {"male": "male", "f": "female"}
 TEXTURES = "textures\\chiefrim\\mjolnir"
 CHIEF_VERTEX = vertex_desc(VF_VERTEX | VF_UV | VF_NORMAL | VF_TANGENT | VF_SKINNED)
 
-# Skyrim's dismemberment body parts
-BODY_PART, HANDS, FOREARMS, FEET, CALVES, HELMET = 32, 33, 34, 37, 38, 131
+# body parts (biped slots), as partitions
+HELMET, BODY_PART, HANDS, FOREARMS, FEET, CALVES = 30, 32, 33, 34, 37, 38
 # per piece, its bones (by their names' brackets) and the body part each's
 # triangles are a partition of (in Skyrim's order); the cuirass takes the
 # rest
