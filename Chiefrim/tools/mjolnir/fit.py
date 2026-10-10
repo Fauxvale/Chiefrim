@@ -21,7 +21,7 @@ Halo is +x forward, +y left, +z up, in units of 10 feet; Skyrim is +y
 forward, +x right, +z up, 70 units to the metre.
 
 Usage: tools/mjolnir/fit.py [--skyrim DATA_DIR] [--dir build/mjolnir] [--shoulders 1]
-         [--torso 1] [--head T] [--arms T]
+         [--torso 1] [--head T] [--arms T] [--boots B]
 """
 import argparse
 import json
@@ -119,7 +119,7 @@ def least_rotation(a, b):
 	return numpy.eye(3) + s * k + (1 - c) * k @ k
 
 
-def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0):
+def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None):
 	names = [node["name"] for node in model["nodes"]]
 	halo_matrices = dict(zip(names, halo_world(model["nodes"])))
 	halo = {name: HALO_TO_SKYRIM @ matrix[:3, 3] for name, matrix in halo_matrices.items()}
@@ -158,16 +158,19 @@ def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0):
 		joint[1] += fraction * (forward - joint[1])
 		skyrim[bone] = joint
 	# Chief's knee-to-sole is longer than Skyrim's knee-to-ground (Halo's
-	# ankle is 20 cm up his boot, Skyrim's 9): his lower legs are squashed
-	# upright by Skyrim's knee height over his, to an ankle as far up as his
-	# boot puts it, so his soles meet the ground. The boot's shaft above
+	# ankle is 20 cm up his boot, Skyrim's 9). His boots are squashed upright
+	# by boots, to an ankle as far up as his boot then puts it, so his soles
+	# meet the ground, and his shins take the rest. By default, and at most,
+	# his boots squash to Skyrim's ankle (about 0.45): his shins are as long
+	# as they can be, and his ankle is Skyrim's. The boot's shaft above
 	# Skyrim's ankle is then weighted to the calf, as Skyrim's boots are, so
 	# only the foot turns at the ankle.
 	ankles, squash = {}, {}
 	for side in "lr":
-		foot, calf = f"bip01 {side} foot", f"bip01 {side} calf"
-		k = skyrim[BONES[calf][0]][2] / (halo[calf][2] * across)
+		foot = f"bip01 {side} foot"
 		bone = BONES[foot][0]
+		lowest = skyrim[bone][2] / (halo[foot][2] * across)
+		k = lowest if boots is None else max(boots, lowest)
 		ankles[bone] = skyrim[bone][2]
 		joint = skyrim[bone].copy()
 		joint[2] = halo[foot][2] * across * k
@@ -238,7 +241,7 @@ def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0):
 	for name in order:
 		parent, matrix = bones[name]
 		nodes.append({"name": name, "parent": order.index(parent) if parent in used else -1, "matrix": matrix.tolist()})
-	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders, "torso": torso, "head": head, "arms": arms,
+	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders, "torso": torso, "head": head, "arms": arms, "boots": squash["bip01 l foot"],
 		"nodes": nodes, "shaders": model["shaders"], "parts": parts}
 
 
@@ -252,15 +255,17 @@ def main():
 		help="how far the torso is fitted forward, from Skyrim's spine (0) to over his hips as in Halo (1)")
 	parser.add_argument("--head", type=float, help="the same for the head (default: --torso)")
 	parser.add_argument("--arms", type=float, help="the same for the shoulder joints (default: --torso)")
+	parser.add_argument("--boots", type=float,
+		help="how much of their height his boots keep (default and least: down to Skyrim's ankle, about 0.45)")
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	model = json.loads((directory / "model.json").read_text())
 	head = args.torso if args.head is None else args.head
 	arms = args.torso if args.arms is None else args.arms
-	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders, args.torso, head, arms)
+	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders, args.torso, head, arms, args.boots)
 	(directory / "fitted.json").write_text(json.dumps(fitted))
 	print(f"fitted to Skyrim's skeleton (scaled {fitted['across']:.3f} across, shoulders {args.shoulders:g},"
-		f" torso {args.torso:g}, head {head:g}, arms {arms:g})"
+		f" torso {args.torso:g}, head {head:g}, arms {arms:g}, boots {fitted['boots']:.2f})"
 		f" -> {directory / 'fitted.json'}")
 
 
