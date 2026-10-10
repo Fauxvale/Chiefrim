@@ -160,17 +160,19 @@ def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None):
 	# Chief's knee-to-sole is longer than Skyrim's knee-to-ground (Halo's
 	# ankle is 20 cm up his boot, Skyrim's 9). His boots are squashed upright
 	# by boots, to an ankle as far up as his boot then puts it, so his soles
-	# meet the ground, and his shins take the rest. By default, and at most,
-	# his boots squash to Skyrim's ankle (about 0.45): his shins are as long
-	# as they can be, and his ankle is Skyrim's. The boot's shaft above
+	# meet the ground, and his shins take the rest. By default his shins and
+	# boots are squashed alike (Skyrim's knee height over his, about 0.76);
+	# at most his boots squash to Skyrim's ankle (about 0.45), where his
+	# shins are longest and his ankle is Skyrim's. The boot's shaft above
 	# Skyrim's ankle is then weighted to the calf, as Skyrim's boots are, so
 	# only the foot turns at the ankle.
 	ankles, squash = {}, {}
 	for side in "lr":
-		foot = f"bip01 {side} foot"
+		foot, calf = f"bip01 {side} foot", f"bip01 {side} calf"
 		bone = BONES[foot][0]
 		lowest = skyrim[bone][2] / (halo[foot][2] * across)
-		k = lowest if boots is None else max(boots, lowest)
+		even = skyrim[BONES[calf][0]][2] / (halo[calf][2] * across)
+		k = even if boots is None else max(boots, lowest)
 		ankles[bone] = skyrim[bone][2]
 		joint = skyrim[bone].copy()
 		joint[2] = halo[foot][2] * across * k
@@ -256,7 +258,7 @@ def main():
 	parser.add_argument("--head", type=float, help="the same for the head (default: --torso)")
 	parser.add_argument("--arms", type=float, help="the same for the shoulder joints (default: --torso)")
 	parser.add_argument("--boots", type=float,
-		help="how much of their height his boots keep (default and least: down to Skyrim's ankle, about 0.45)")
+		help="how much of their height his boots keep (default: as much as his shins, about 0.76; least: down to Skyrim's ankle, about 0.45)")
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	model = json.loads((directory / "model.json").read_text())
