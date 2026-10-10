@@ -407,6 +407,31 @@ player is handed off to Skyrim (§11): Skyrim's own controls, camera and arms sw
 follows where he is and gets no input, and Chief's weapon and HUD are put away until he stands
 again.
 
+### 6.1 Chief's armor in Skyrim (Mjolnir port)
+
+Chief's Mjolnir armor is also a Skyrim armor set, for any humanoid race, built by
+`tools/mjolnir/build.sh HALO_MAP` from the user's own Halo map and Skyrim (nothing of either
+is in the repo; `build/mjolnir/Data/` is installed as a mod). Its stages:
+
+- `halo_model.py` reads Chief's model and bitmaps from the map and bakes his shader as the
+  Xbox draws it (his campaign colour exactly: change colour C, 87, 103, 37), and his
+  reflection cube maps (his visor's is gold);
+- `fit.py` fits him to Skyrim's skeleton: joints onto Skyrim's, segments turned and stretched
+  onto its bones, his shoulders and torso where Halo has them (bound to Skyrim's joints), his
+  boots squashed so his soles meet the ground;
+- `armor.py` splits him by the bone each triangle is weighted most to, as Skyrim's armor
+  divides a body: helmet (head, visor), gauntlets (forearms, hands), boots (calves, feet),
+  cuirass (the rest, with the body's own forearms and calves, as Skyrim's cuirasses carry
+  them, so nothing is missing without gauntlets or boots); and writes skinned SE NIFs
+  (`nif.py`, which writes vanilla NIFs back byte for byte) for both ends of the weight slider,
+  male and female cuirasses, and first person;
+- `textures.py` writes them as uncompressed DDS (the colours exactly the bake's);
+- `plugin.py` writes `ChiefrimMjolnir.esp` (`esp.py`): an armor and addon per piece, made from
+  the user's Skyrim.esm's Daedric ones (races, keywords, stats). The cuirass also covers the
+  tail slot (40).
+
+`blender_preview.py` renders each stage headless (`--nif` reads the written NIFs back).
+
 ## 7. Input
 
 **Movement (2026-10-05): Skyrim moves, Halo follows.** After two days of making Halo's biped
