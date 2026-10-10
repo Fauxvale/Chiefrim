@@ -249,14 +249,9 @@ namespace chiefrim::Lighting
 		// shows them: in a dim cabin the MA5B shone near white by the fire's
 		// light (the reflection's strength is the light's, at its most from
 		// about half of Skyrim's daylight), where the room's brightest were 0.3
-		float       key = 0.0f;
-		RE::NiColor mean;
-		if (config.reflectionMatch > 0.0f && Overlay::Surroundings(key, mean)) {
+		float key = 0.0f;
+		if (config.reflectionMatch > 0.0f && Overlay::Surroundings(key)) {
 			message.reflection_cap = std::clamp(key * config.reflectionMatch, std::max(config.reflectionMin, 0.01f), 1.0f);
-			const float largest = std::max({ mean.red, mean.green, mean.blue });
-			if (largest > 0.01f) {
-				message.surround_hue = { mean.red / largest, mean.green / largest, mean.blue / largest };
-			}
 		}
 
 		if (!Link::Get().PushRaw(CR_MSG_LIGHTING, &message, sizeof(message))) {
@@ -277,8 +272,8 @@ namespace chiefrim::Lighting
 				message.ambient.x, message.ambient.y, message.ambient.z, message.key_color.x, message.key_color.y, message.key_color.z,
 				message.key_direction.x, message.key_direction.y, message.key_direction.z, message.point_count, activeCount, Describe(message, a_player->GetPosition()),
 				!message.key_shadowed ? "no shadows (inside)" : std::format("the sun {:.0f}% seen, the sky {:.0f}% open", message.sun_visible * 100.0f, message.sky_visible * 100.0f));
-			logger::info("lighting: reflections at most {:.2f} (0: no cap), tinted ({:.2f} {:.2f} {:.2f}) by what surrounds Chief",
-				message.reflection_cap, message.surround_hue.x, message.surround_hue.y, message.surround_hue.z);
+			logger::info("lighting: reflections at most {:.2f} (0: no cap), by how bright Skyrim's picture around Chief is",
+				message.reflection_cap);
 		}
 	}
 }

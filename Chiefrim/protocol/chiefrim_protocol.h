@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 27u
+#define CR_PROTOCOL_VERSION 28u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -503,15 +503,13 @@ typedef struct cr_msg_lighting
 	is mostly blocked too. Halo dims Chief's ambient by it, and tests other
 	objects' way up itself. */
 	float    sky_visible;
-	/* protocol 27: what surrounds Chief, as Skyrim's picture shows it (the
-	compositor's meter of it). A shiny weapon shows mostly its reflection,
-	which is of its surroundings: a dim cabin's, not the light's. reflection_cap:
-	the most a reflection's strength goes (0..1; 0: not metered, no cap).
-	surround_hue: the colour of the picture's light (its mean, weighted to
-	its unsaturated parts: autumn leaves aren't the light's colour), its
-	largest part 1, which tints reflections (0 0 0: none). */
+	/* protocol 27: how bright Chief's surroundings are, as Skyrim's picture
+	shows them (the compositor's meter of it). A shiny weapon shows mostly
+	its reflection, which is of its surroundings: a dim cabin's, not the
+	light's. reflection_cap: the most a reflection's strength goes (0..1; 0:
+	not metered, no cap). Protocol 28: no hue; the picture's colour is what's
+	in view (leaves, the sky), not the light's. */
 	float    reflection_cap;
-	cr_vec3  surround_hue;
 } cr_msg_lighting;
 
 /* Chief's kit (docs §11, save and load): what the Skyrim co-save keeps.
@@ -956,7 +954,7 @@ CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_m
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
-CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28 + 12 + 16, "cr_msg_lighting");
+CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28 + 12 + 4, "cr_msg_lighting");
 CR_STATIC_ASSERT(sizeof(cr_chief_weapon) == 80, "cr_chief_weapon");
 CR_STATIC_ASSERT(sizeof(cr_chief_state) == 40 + 4 * 80, "cr_chief_state");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_state) == 8 + 360, "cr_msg_chief_state");

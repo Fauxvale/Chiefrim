@@ -1000,6 +1000,15 @@ using the camera Skyrim is about to use. It draws three layers:
     (max - min) / max; none under 0.03 bright). Its hue on the three screenshots (64 x 36 blocks):
     the cabin 1.13 0.98 0.86 (warm, 1.25 0.96 0.69 by the mean), the snow 0.90 1.02 1.07, the
     forest 0.93 1.02 0.96 (1.00 1.02 0.85 by the mean).
+    **Dropped the same day: no colour from the picture at all.** In game the greyish estimate was
+    still wrong where the picture is one colour: looking up into a clear sky (key 0.578, its
+    "light" 0.426 0.622 0.700, its shadows 0.397 0.606 0.692) turned Chief's arms and weapon very
+    blue, though only the sun lit them; in the forest the shadows' brown washed the darks. The
+    picture's colour is what's in view, never reliably the light's, and the light's colour already
+    reaches Halo from Skyrim's lights (the sun's, the ambient, torches). So the meter is brightness
+    only (one texel: key, brightest, the shadows' soft minimum), the darks are lifted in grey by
+    `fWeaponShadowLift` of the shadows' brightness, `fWeaponSceneTint` is gone, and protocol 28
+    drops `surround_hue`: the reflection cap stays.
 - **Chief's flashlight on Skyrim's world** (Phase 5, protocol 17). Halo's flashlight is a light on
   Chief's biped (d20's `characters\cyborg\flashlight_cyborg`: white, 6 wu = 1280 units, a 45°
   cone, full to 20°), which lights Halo's world, and Chiefrim draws none of it. Each frame Halo

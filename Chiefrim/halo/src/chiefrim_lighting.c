@@ -254,14 +254,6 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		lighting->reflection_tint_color.red = PIN(red / largest, 0.f, 1.f);
 		lighting->reflection_tint_color.green = PIN(green / largest, 0.f, 1.f);
 		lighting->reflection_tint_color.blue = PIN(blue / largest, 0.f, 1.f);
-		/* and by the colour of what's around it (the room's wood, the snow's
-		blue), its largest part 1 */
-		if (light->surround_hue.x > 0.f || light->surround_hue.y > 0.f || light->surround_hue.z > 0.f)
-		{
-			lighting->reflection_tint_color.red *= PIN(light->surround_hue.x, 0.f, 1.f);
-			lighting->reflection_tint_color.green *= PIN(light->surround_hue.y, 0.f, 1.f);
-			lighting->reflection_tint_color.blue *= PIN(light->surround_hue.z, 0.f, 1.f);
-		}
 	}
 	lighting->shadow_vector = key;
 	if (lighting->shadow_vector.k > -0.5f)

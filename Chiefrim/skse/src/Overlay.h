@@ -16,7 +16,7 @@ namespace chiefrim::Overlay
 	void Install();
 
 	// Skyrim's picture, as the weapon's look meters it (before Halo's layers):
-	// its key (the log average of its brightness) and the colour of its light
-	// (its mean, weighted to its unsaturated parts), at most a few frames old. False: not metered (yet, or for 2 s).
-	bool Surroundings(float& a_key, RE::NiColor& a_mean);
+	// its key (the log average of its brightness), at most a few frames old.
+	// False: not metered (yet, or for 2 s).
+	bool Surroundings(float& a_key);
 }

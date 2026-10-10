@@ -48,7 +48,6 @@ namespace chiefrim::Overlay
 			float fogPlanes[4];   // where it starts and is full (Skyrim units), 1 if on
 			float look[4];        // Chief's arms and weapon: brightness, saturation, highlights' knee, 1 if on
 			float lookScene[4];   // matched to Skyrim's picture: shadow lift, exposure's least and most, 1 if metered
-			float lookTint[4];    // how far towards the picture's mean hue
 		};
 
 		// A camera Skyrim published, for mapping Halo's frame onto the camera
@@ -96,7 +95,6 @@ namespace chiefrim::Overlay
 			double                    meterAt = 0.0;           // ms, the last meter
 			ULONGLONG                 nextReadback = 0, nextMeterLog = 0;
 			float                     readKey = 0.0f;          // as last read back
-			RE::NiColor               readMean;
 			ULONGLONG                 readAt = 0;
 
 			// Skyrim's depth, copied as its world rendering finishes
@@ -136,7 +134,7 @@ cbuffer Params : register(b0)
 {
 	float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4];
 	float4 grade; float4 tint; float4 fade; float4 fogNear; float4 fogFar; float4 fogPlanes;
-	float4 look; float4 lookScene; float4 lookTint;
+	float4 look; float4 lookScene;
 };
 Texture2D picture : register(t0);
 Texture2D<float> haloDepth : register(t1);
@@ -173,11 +171,11 @@ float4 Grade(float4 c, float a_share)
 }
 static const float3 kLuma = float3(0.2125, 0.7154, 0.0721);
 // Skyrim's picture, before Halo's layers, metered from a small mip of it:
-// texel 0 its key (the log average of its brightness) and its brightest (a
-// soft maximum), texel 1 its shadows' colour (a soft minimum), texel 2 the
-// colour of its light: its mean, weighted to its unsaturated parts (rock,
-// bark, snow, a grey sky), as a mean of all of it is the colour of what's
-// in view (autumn leaves made the light yellow)
+// its key (the log average of its brightness), its brightest (a soft
+// maximum) and its shadows' brightness (a soft minimum). Its brightness
+// only: its colour is that of what's in view (autumn leaves, the sky), not
+// of the light on Chief (in game, looking up turned his arms blue); the
+// light's colour reaches Halo from Skyrim's lights themselves.
 float4 PSMeter(VSOut i) : SV_Target
 {
 	uint level = 0, w, h, levels;
@@ -187,66 +185,52 @@ float4 PSMeter(VSOut i) : SV_Target
 	scene.GetDimensions(level, w, h, levels);
 	w = min(w, 64u);
 	h = min(h, 64u);
-	float  logSum = 0, lowWeight = 0, high = 0, highWeight = 0, greyWeight = 0;
-	float3 low = 0, sum = 0;
+	float logSum = 0, low = 0, lowWeight = 0, high = 0, highWeight = 0;
 	[loop] for (uint y = 0; y < h; y++)
 	{
 		[loop] for (uint x = 0; x < w; x++)
 		{
-			float3 c = saturate(scene.Load(int3(x, y, level)).rgb);
-			float  l = dot(c, kLuma);
+			float l = dot(saturate(scene.Load(int3(x, y, level)).rgb), kLuma);
 			logSum += log(l + 0.001);
 			float dark = exp(-16 * l), bright = exp(16 * (l - 1));
-			low += c * dark;
-			float most = max(c.r, max(c.g, c.b));
-			float grey = l > 0.03 ? exp(-8 * (most - min(c.r, min(c.g, c.b))) / max(most, 0.001)) : 0;
-			sum += c * grey;
-			greyWeight += grey;
+			low += l * dark;
 			lowWeight += dark;
 			high += l * bright;
 			highWeight += bright;
 		}
 	}
-	if (i.pos.x < 1)
-		return float4(exp(logSum / max(w * h, 1u)), high / max(highWeight, 1e-20), 0, 1);
-	if (i.pos.x < 2)
-		return float4(low / max(lowWeight, 1e-20), 1);
-	return float4(greyWeight > 1e-4 ? sum / greyWeight : float3(0.5, 0.5, 0.5), 1);
+	return float4(exp(logSum / max(w * h, 1u)), high / max(highWeight, 1e-20), low / max(lowWeight, 1e-20), 1);
 }
 // Chief's arms and weapon toned to Skyrim's world before its grade. Halo's
 // are lit by Skyrim's light, but drawn after Skyrim's tone map and without
 // the haze that lifts its shadows: in bright snow they were near black and
-// dull, in the dark too bright. So, by the meter of Skyrim's picture: the
+// dull, in the dark too bright. So, by the meter of Skyrim's picture, in
+// brightness alone (their colour is the light's, from Halo): the
 // saturation; an exposure that follows the picture's key (as an eye adapts);
-// a shift towards the hue of the picture's light (as an eye takes a room's
-// light for white: a cabin's warm, a snowy day's cool); the highlights rolled off
-// towards the picture's brightest (no shine above the sky's); and the
-// shadows lifted towards the picture's own shadows' colour (the cool haze of
-// a snowy day, nothing at night). By the amount a_share of the pixel that is
-// the weapon.
+// the highlights rolled off towards the picture's brightest (no shine above
+// the sky's); and the darks lifted by a share of the picture's shadows'
+// brightness, in grey (nothing at night). By the amount a_share of the
+// pixel that is the weapon.
 float4 Look(float4 c, float a_share)
 {
 	if (look.w <= 0 || a_share <= 0 || c.a <= 0.002)
 		return c;
-	float  key = 0.3, ceiling = 1;
-	float3 shadow = 0, hue = 1;
+	float key = 0.3, ceiling = 1, shadow = 0;
 	if (lookScene.w > 0)
 	{
-		float3 mean = meter.Load(int3(2, 0, 0)).rgb;
-		hue = lerp(1, clamp(mean / max(dot(mean, kLuma), 0.02), 0.5, 1.5), lookTint.x);
 		float4 m = meter.Load(int3(0, 0, 0));
 		key = m.x;
 		ceiling = clamp(m.y, 0.4, 1);
-		shadow = saturate(meter.Load(int3(1, 0, 0)).rgb) * lookScene.x;
+		shadow = saturate(m.z) * lookScene.x;
 	}
 	float  exposure = lookScene.w > 0 ? clamp(sqrt(key / 0.3), lookScene.y, lookScene.z) : 1;
 	float3 u = c.rgb / c.a;
-	float3 g = max(lerp(dot(u, kLuma).xxx, u, look.y), 0) * exposure * look.x * hue;
+	float3 g = max(lerp(dot(u, kLuma).xxx, u, look.y), 0) * exposure * look.x;
 	float  l = dot(g, kLuma);
 	float  k = look.z * ceiling, room = max(ceiling - k, 1e-3);
 	if (l > k)
 		g *= (k + room * (1 - exp(-(l - k) / room))) / l;
-	g = shadow + (1 - dot(shadow, kLuma)) * g;
+	g = shadow + (1 - shadow) * g;
 	return float4(lerp(c.rgb, saturate(g) * c.a, a_share), c.a);
 }
 float4 PSScreen(VSOut i) : SV_Target
@@ -571,7 +555,6 @@ float4 PSWorld(VSOut i) : SV_Target
 			float shadowLift = 0.35f;        // [Grade] fWeaponShadowLift: of the picture's shadows' colour
 			float exposureMin = 0.5f;        // [Grade] fWeaponExposureMin: in the dark
 			float exposureMax = 1.1f;        // [Grade] fWeaponExposureMax: in daylight
-			float sceneTint = 0.35f;         // [Grade] fWeaponSceneTint: towards the picture's mean hue
 		};
 
 		const GradeConfig& Grading()
@@ -585,8 +568,7 @@ float4 PSWorld(VSOut i) : SV_Target
 				Settings::ReadBool(L"Grade", L"bWeaponMatchScene", true),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponShadowLift", 0.35f), 0.0f, 1.0f),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMin", 0.5f), 0.1f, 4.0f),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMax", 1.1f), 0.1f, 4.0f),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponSceneTint", 0.35f), 0.0f, 1.0f) };
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMax", 1.1f), 0.1f, 4.0f) };
 			return config;
 		}
 
@@ -644,7 +626,6 @@ float4 PSWorld(VSOut i) : SV_Target
 			a_params.lookScene[1] = std::min(config.exposureMin, config.exposureMax);
 			a_params.lookScene[2] = config.exposureMax;
 			a_params.lookScene[3] = s.metered ? 1.0f : 0.0f;
-			a_params.lookTint[0] = config.sceneTint;
 			if (!config.enabled) {
 				return;
 			}
@@ -787,7 +768,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			}
 			if (!s.meter) {
 				D3D11_TEXTURE2D_DESC md{};
-				md.Width = 3;
+				md.Width = 1;
 				md.Height = 1;
 				md.MipLevels = 1;
 				md.ArraySize = 1;
@@ -815,17 +796,15 @@ float4 PSWorld(VSOut i) : SV_Target
 				if (SUCCEEDED(context->Map(s.meterStaging, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped))) {
 					const auto* texels = static_cast<const float*>(mapped.pData);
 					s.readKey = texels[0];
-					s.readMean = { texels[8], texels[9], texels[10] };
 					s.readAt = tick;
 					if (tick >= s.nextMeterLog) {
 						s.nextMeterLog = tick + 15000;
 						const auto& config = Grading();
 						const float exposure = std::clamp(std::sqrt(std::max(texels[0], 0.0f) / 0.3f),
 							std::min(config.exposureMin, config.exposureMax), config.exposureMax);
-						logger::info("overlay: the weapon's look: Skyrim's picture's key {:.3f}, brightest {:.3f}, shadows ({:.3f} {:.3f} {:.3f}),"
-									 " light ({:.3f} {:.3f} {:.3f}); exposure {:.2f}, highlights to {:.2f}",
-							texels[0], texels[1], texels[4], texels[5], texels[6], texels[8], texels[9], texels[10],
-							exposure * config.weaponBrightness, std::clamp(texels[1], 0.4f, 1.0f));
+						logger::info("overlay: the weapon's look: Skyrim's picture's key {:.3f}, brightest {:.3f}, shadows {:.3f}; exposure {:.2f},"
+									 " highlights to {:.2f}",
+							texels[0], texels[1], texels[2], exposure * config.weaponBrightness, std::clamp(texels[1], 0.4f, 1.0f));
 					}
 					context->Unmap(s.meterStaging, 0);
 					s.stagingPending = false;
@@ -840,7 +819,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			const float  weight = s.meterAt <= 0.0 || gap <= 0.0 || gap >= 2000.0 ? 1.0f : float(1.0 - std::exp(-gap / 500.0));
 			s.meterAt = now;
 			const float           factor[4]{ weight, weight, weight, weight };
-			const D3D11_VIEWPORT  viewport{ 0.0f, 0.0f, 3.0f, 1.0f, 0.0f, 1.0f };
+			const D3D11_VIEWPORT  viewport{ 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f };
 			ID3D11ShaderResourceView* none[6]{};
 			ID3D11ShaderResourceView* sceneSrvs[6]{ nullptr, nullptr, nullptr, nullptr, s.sceneSrv, nullptr };
 			context->PSSetShaderResources(0, 6, none);  // the meter isn't bound while it's drawn to
@@ -1368,13 +1347,12 @@ float4 PSWorld(VSOut i) : SV_Target
 		}
 	}
 
-	bool Surroundings(float& a_key, RE::NiColor& a_mean)
+	bool Surroundings(float& a_key)
 	{
 		if (!s.readAt || ::GetTickCount64() - s.readAt > 2000) {
 			return false;
 		}
 		a_key = s.readKey;
-		a_mean = s.readMean;
 		return true;
 	}
 
