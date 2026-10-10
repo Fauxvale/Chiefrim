@@ -29,6 +29,7 @@ Skyrim's shape as Halo's collision (Chiefrim/docs/DESIGN.md §5):
 #include "physics/collision_bsp.h"
 #include "physics/collisions.h"
 #include "scenario/scenario.h"
+#include "items/items.h"
 #include "units/bipeds.h"
 
 #include <math.h>
@@ -614,6 +615,40 @@ static void chiefrim_world_install(struct chiefrim_bsp *bsp)
 		biped->biped.support_surface_index = remapped;
 	}
 
+	/* Items lying on the old BSP (a dropped weapon, a cache's, a grenade)
+	name the surface they rest on by its index there, which the new one
+	hasn't, or has as another surface: item_update looks it up (for
+	breakable glass), and a stale one past the new BSP's surfaces halted
+	Halo going into a fort (#17185 in the stand-in floor's 4). They rest
+	on the new BSP's surface right under them, or on none (they settle
+	again), as bipeds do above. */
+	object_iterator_new(&iterator, _object_mask_item, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct item_datum *item = item_get(iterator.index);
+		struct collision_bsp_test_vector_result result;
+		real_point3d start;
+		real_vector3d down = { 0.f, 0.f, -(SUPPORT_PROBE_ABOVE + SUPPORT_PROBE_BELOW) };
+
+		if (!TEST_FLAG(item->item.flags, _item_on_structure_bit) && item->item.rested_surface_index == NONE)
+			continue;
+		object_get_origin(iterator.index, &start);
+		start.z += SUPPORT_PROBE_ABOVE;
+		/* (one Chief carries may still say where it lay: none now) */
+		if (TEST_FLAG(item->item.flags, _item_on_structure_bit) && item->object.parent_object_index == NONE &&
+			collision_bsp_test_vector(FLAG(_collision_test_front_facing_surfaces_bit),
+				&bsp->bsp, 0, NULL, &start, &down, REAL_MAX, &result) &&
+			result.surface_index <= 0x7fff)
+		{
+			item->item.rested_surface_index = (short)result.surface_index;
+		}
+		else
+		{
+			SET_FLAG(item->item.flags, _item_on_structure_bit, FALSE);
+			item->item.rested_surface_index = NONE;
+		}
+	}
+
 	/* the one before the old one: nothing can point into it any more */
 	chiefrim_bsp_free(world.previous);
 	world.previous = old;
@@ -895,6 +930,24 @@ void chiefrim_world_map_loaded(void)
 	world.dirty = world.have_regions;
 	if (world.world_valid)
 		chiefrim_world_install_floor();
+}
+
+/* An item's rested surface is looked up in the collision installed now
+(items.c): one from a BSP swapped out (a door, a load: the stand-in floor's
+4 surfaces) halted Halo in a fort, #17185 of 4. Checked where it's used,
+whatever left it stale. */
+boolean chiefrim_item_rest_valid(struct item_datum *item)
+{
+	struct collision_bsp *bsp = global_collision_bsp_get();
+
+	if (!chiefrim_active() || !bsp ||
+		(item->item.rested_surface_index >= 0 && item->item.rested_surface_index < bsp->surfaces.count))
+	{
+		return TRUE;
+	}
+	SET_FLAG(item->item.flags, _item_on_structure_bit, FALSE);
+	item->item.rested_surface_index = NONE;
+	return FALSE;
 }
 
 void chiefrim_world_reset(cr_vec3 origin, real floor_z)

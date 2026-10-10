@@ -27,6 +27,7 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include "camera/observer.h"
 #include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
+#include "effects/decals.h"
 #include "game/players.h"
 #include "objects/objects.h"
 #include "physics/collision_features.h"
@@ -55,7 +56,9 @@ Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
 #include <string.h>
 
 #ifdef __linux__
+#include <execinfo.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -119,6 +122,7 @@ static struct
 	uint32_t camera_frame;        /* Skyrim's camera this frame is drawn through (0: Halo's) */
 	uint32_t last_camera_frame;   /* the last one drawn */
 	long render_layer;            /* CHIEFRIM_LAYER_*: what render_window draws now */
+	boolean render_hud;           /* in the screen layer: the HUD's draws, not the weapon's */
 	float tangent_x, tangent_y;   /* the projection of the frame being drawn (0: unknown) */
 	long chief_unit;              /* Chief's unit last frame (NONE: none) */
 } chiefrim;
@@ -130,7 +134,7 @@ static uint32_t chiefrim_now_ms(void)
 	return (uint32_t)system_milliseconds();
 }
 
-static long chiefrim_local_unit(void)
+long chiefrim_local_unit(void)
 {
 	long player_index = local_player_get_player_index(0);
 
@@ -190,10 +194,12 @@ static void chiefrim_place_player(void)
 		position.x, position.y, position.z, yaw);
 }
 
+static void chiefrim_clear_level_objects(long chief, char const *why);
+
 static void chiefrim_apply_world(void)
 {
 	cr_world_context world;
-	boolean floor_moved;
+	boolean floor_moved, moved;
 
 	if (!CR_SLOT_READ(&chiefrim.shm->world_context, &world))
 		return;
@@ -202,12 +208,24 @@ static void chiefrim_apply_world(void)
 
 	floor_moved = !chiefrim.world_valid ||
 		world.floor_z - world.origin.z != chiefrim.world.floor_z - chiefrim.world.origin.z;
-	if (floor_moved || world.origin.x != chiefrim.world.origin.x || world.origin.y != chiefrim.world.origin.y)
+	moved = floor_moved || world.origin.x != chiefrim.world.origin.x || world.origin.y != chiefrim.world.origin.y ||
+		world.origin.z != chiefrim.world.origin.z || world.world_id != chiefrim.world.world_id;
+	if (moved)
 		chiefrim_world_reset(world.origin, (world.floor_z - world.origin.z) / CR_SKY_UNITS_PER_WU);
 	chiefrim.world = world;
 	chiefrim.world_generation = world.generation;
 	chiefrim_world_build_radius(world.collision_radius);
 	chiefrim_combat_reset(chiefrim_local_unit()); /* a load, a door: Skyrim's people again, Chief whole */
+	if (moved && chiefrim.level_cleared)
+	{
+		/* Halo's (0, 0, 0) is somewhere else in Skyrim now: what lay in its
+		world (weapons dropped, grenades, bullet holes) would hang where the
+		old collision was. A load or a door leaves them behind, as Skyrim's
+		world would; Chief keeps what he carries */
+		chiefrim_clear_level_objects(chiefrim_local_unit(), "a new world: left behind");
+		chiefrim_caches_forget(); /* their weapons too: Skyrim sends this world's */
+		error(_error_silent, "chiefrim: %ld decals left behind", decals_expire_all());
+	}
 	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
 	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
@@ -236,7 +254,7 @@ static void chiefrim_say_hello(void)
 #ifdef __linux__
 	hello.pid = (uint32_t)getpid();
 #endif
-	csstrncpy(hello.build, "halo-ce-universal + chiefrim phase 0", sizeof(hello.build) - 1);
+	csstrncpy(hello.build, "OpenCE + chiefrim", sizeof(hello.build) - 1);
 	cr_ring_push(&chiefrim.shm->to_skyrim, CR_MSG_HELLO, &hello, sizeof(hello));
 }
 
@@ -302,6 +320,9 @@ static void chiefrim_pump_events(void)
 			chiefrim.linked = TRUE;
 			chiefrim.skyrim_pid = hello->pid;
 			error(_error_silent, "chiefrim: linked to Skyrim (pid %u, %s)", hello->pid, hello->build);
+			chiefrim_inventory_linked();
+			chiefrim_caches_forget(); /* a new Skyrim side sends its own */
+			chiefrim_flashlight_linked();
 			chiefrim_say_hello();
 			break;
 		}
@@ -327,10 +348,20 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_LIGHTING:
 			chiefrim_lighting_message((cr_msg_lighting const *)buffer);
 			break;
+		case CR_MSG_CHIEF_RESTORE:
+			chiefrim_inventory_message((cr_msg_chief_state const *)buffer);
+			break;
+		case CR_MSG_CACHE_PLACE:
+			chiefrim_caches_message((cr_msg_cache_place const *)buffer);
+			break;
 		case CR_MSG_KEY_NAMES:
 			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
 			break;
+		case CR_MSG_DEBUG:
+			chiefrim_combat_debug((cr_msg_debug const *)buffer);
+			break;
 		case CR_MSG_PLAYER_HURT:
+		case CR_MSG_CHIEF_HEAL:
 		case CR_MSG_GIVE_WEAPON:
 			if (chiefrim.world_valid)
 				chiefrim_combat_message(chiefrim_local_unit(), type, buffer, chiefrim.world.origin);
@@ -347,10 +378,20 @@ under. His biped definition's heights scale to the height Skyrim asks for;
 Halo reads them every tick (bipeds.c), so collision, crouching and his eyes,
 and so Skyrim's camera, follow. The definition is the loaded map's tag data:
 its own values are kept, and taken again when a map load replaces them. */
+static struct biped_definition *chiefrim_scaled_biped = NULL;
+static real chiefrim_biped_original[5];  /* standing and crouching collision, then camera, then radius */
+
+boolean chiefrim_biped_unscaled(void const *definition, real *height_standing, real *radius)
+{
+	if (!definition || definition != chiefrim_scaled_biped)
+		return FALSE;
+	*height_standing = chiefrim_biped_original[0];
+	*radius = chiefrim_biped_original[4];
+	return TRUE;
+}
+
 static void chiefrim_apply_chief_height(long unit_index)
 {
-	static struct biped_definition *scaled = NULL;
-	static real original[5];  /* standing and crouching collision, then camera, then radius */
 	static real written = -1.0f;
 	struct biped_definition *definition;
 	real target, scale, radius;
@@ -358,43 +399,43 @@ static void chiefrim_apply_chief_height(long unit_index)
 	if (unit_get(unit_index)->object.type != _object_type_biped)
 		return;
 	definition = biped_definition_get(biped_get(unit_index)->definition_index);
-	if (definition != scaled || definition->biped.collision_height_standing != written)
+	if (definition != chiefrim_scaled_biped || definition->biped.collision_height_standing != written)
 	{
 		/* a definition we haven't touched (or the map reloaded it) */
-		original[0] = definition->biped.collision_height_standing;
-		original[1] = definition->biped.collision_height_crouching;
-		original[2] = definition->biped.standing_camera_height;
-		original[3] = definition->biped.crouching_camera_height;
-		original[4] = definition->biped.collision_radius;
-		scaled = definition;
-		written = original[0];
+		chiefrim_biped_original[0] = definition->biped.collision_height_standing;
+		chiefrim_biped_original[1] = definition->biped.collision_height_crouching;
+		chiefrim_biped_original[2] = definition->biped.standing_camera_height;
+		chiefrim_biped_original[3] = definition->biped.crouching_camera_height;
+		chiefrim_biped_original[4] = definition->biped.collision_radius;
+		chiefrim_scaled_biped = definition;
+		written = chiefrim_biped_original[0];
 	}
-	if (original[0] <= 0.01f)
+	if (chiefrim_biped_original[0] <= 0.01f)
 		return;
 
-	target = chiefrim.world.chief_height > 1.0f ? chiefrim.world.chief_height / CR_SKY_UNITS_PER_WU : original[0];
+	target = chiefrim.world.chief_height > 1.0f ? chiefrim.world.chief_height / CR_SKY_UNITS_PER_WU : chiefrim_biped_original[0];
 	target = PIN(target, 0.2f, 1.0f); /* a hobbit to an ogre, in world units */
-	scale = target / original[0];
-	radius = chiefrim.world.chief_radius > 1.0f ? chiefrim.world.chief_radius / CR_SKY_UNITS_PER_WU : original[4];
+	scale = target / chiefrim_biped_original[0];
+	radius = chiefrim.world.chief_radius > 1.0f ? chiefrim.world.chief_radius / CR_SKY_UNITS_PER_WU : chiefrim_biped_original[4];
 	/* thinner than ~0.12 wu (25 Skyrim units), Halo's biped tunnels
 	through surfaces: at 18 (Skyrim's own) he walked through walls and sank
 	into floors. CHIEFRIM_MINIMUM_RADIUS keeps a margin. */
 	radius = PIN(radius, CHIEFRIM_MINIMUM_RADIUS, MAX(target * 0.45f, CHIEFRIM_MINIMUM_RADIUS));
-	if (fabsf(definition->biped.collision_height_standing - original[0] * scale) < 0.0001f &&
+	if (fabsf(definition->biped.collision_height_standing - chiefrim_biped_original[0] * scale) < 0.0001f &&
 		fabsf(definition->biped.collision_radius - radius) < 0.0001f)
 	{
 		return;
 	}
 	definition->biped.collision_radius = radius;
-	definition->biped.collision_height_standing = original[0] * scale;
-	definition->biped.collision_height_crouching = original[1] * scale;
-	definition->biped.standing_camera_height = original[2] * scale;
-	definition->biped.crouching_camera_height = original[3] * scale;
+	definition->biped.collision_height_standing = chiefrim_biped_original[0] * scale;
+	definition->biped.collision_height_crouching = chiefrim_biped_original[1] * scale;
+	definition->biped.standing_camera_height = chiefrim_biped_original[2] * scale;
+	definition->biped.crouching_camera_height = chiefrim_biped_original[3] * scale;
 	written = definition->biped.collision_height_standing;
 	error(_error_silent, "chiefrim: Chief is %.0f Skyrim units tall (Halo's own: %.0f), eyes at %.0f, radius %.0f (Halo's own: %.0f)",
-		target * CR_SKY_UNITS_PER_WU, original[0] * CR_SKY_UNITS_PER_WU,
+		target * CR_SKY_UNITS_PER_WU, chiefrim_biped_original[0] * CR_SKY_UNITS_PER_WU,
 		definition->biped.standing_camera_height * CR_SKY_UNITS_PER_WU,
-		radius * CR_SKY_UNITS_PER_WU, original[4] * CR_SKY_UNITS_PER_WU);
+		radius * CR_SKY_UNITS_PER_WU, chiefrim_biped_original[4] * CR_SKY_UNITS_PER_WU);
 }
 
 /* A spot where Chief stands well: kept, a few, spaced in time and place. */
@@ -837,6 +878,17 @@ long chiefrim_overlay_layer(void)
 void chiefrim_set_render_layer(long layer)
 {
 	chiefrim.render_layer = layer;
+	chiefrim.render_hud = FALSE;
+}
+
+void chiefrim_set_render_hud(boolean hud)
+{
+	chiefrim.render_hud = hud;
+}
+
+long chiefrim_overlay_hud(void)
+{
+	return chiefrim.render_hud;
 }
 
 /* Lockstep with Skyrim (docs §9): the frame Halo draws next is for the
@@ -897,7 +949,7 @@ struct observer_result const *chiefrim_render_camera(short local_player_index, s
 /* Everything the host level placed (scenery, vehicles, weapons, machines)
 but Chief and what he carries: in Skyrim it would stand around the
 origin. */
-static void chiefrim_clear_level_objects(long chief)
+static void chiefrim_clear_level_objects(long chief, char const *why)
 {
 	struct object_iterator iterator;
 	static long doomed[2048];
@@ -906,7 +958,17 @@ static void chiefrim_clear_level_objects(long chief)
 	object_iterator_new(&iterator, _object_mask_all, 0);
 	while (object_iterator_next(&iterator) && count < (long)NUMBEROF(doomed))
 	{
-		if (iterator.index != chief && object_get_ultimate_parent(iterator.index) != chief)
+		boolean carried = FALSE;
+		short slot;
+
+		/* his weapons put away aren't attached to him, only in his slots: a
+		door erased the one he wasn't holding */
+		if (chief != NONE && unit_try_and_get(chief))
+		{
+			for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+				carried |= unit_get(chief)->unit.weapon_object_indices[slot] == iterator.index;
+		}
+		if (iterator.index != chief && !carried && object_get_ultimate_parent(iterator.index) != chief)
 			doomed[count++] = iterator.index;
 	}
 	for (index = 0; index < count; index++)
@@ -914,7 +976,7 @@ static void chiefrim_clear_level_objects(long chief)
 		if (object_try_and_get(doomed[index]))
 			object_delete(doomed[index]);
 	}
-	error(_error_silent, "chiefrim: erased the level's %ld other objects", count);
+	error(_error_silent, "chiefrim: erased %ld objects (%s) and kept Chief's", count, why);
 }
 
 struct cr_shared *chiefrim_shared(void)
@@ -932,6 +994,39 @@ boolean chiefrim_active(void)
 	return chiefrim.active;
 }
 
+#ifdef __linux__
+/* Where a hung Halo is (tools/launch_halo.sh): before it kills one that
+stopped responding, the supervisor sends SIGUSR2, and the main thread's
+stack goes to stderr (halo.out). The signal may land on another thread: it
+passes it on to the main one. */
+static pthread_t chiefrim_main_thread;
+
+static void chiefrim_hang_signal(int signal_number)
+{
+	static char const header[] = "chiefrim: asked where Halo is (it stopped responding); the main thread's stack:\n";
+	void *frames[64];
+	int count;
+
+	if (!pthread_equal(pthread_self(), chiefrim_main_thread))
+	{
+		pthread_kill(chiefrim_main_thread, signal_number);
+		return;
+	}
+	(void)!write(STDERR_FILENO, header, sizeof(header) - 1);
+	count = backtrace(frames, 64);
+	backtrace_symbols_fd(frames, count, STDERR_FILENO);
+}
+
+static void chiefrim_hang_handler_install(void)
+{
+	void *warm[1];
+
+	chiefrim_main_thread = pthread_self();
+	backtrace(warm, 1); /* loads libgcc now, not in the handler */
+	signal(SIGUSR2, chiefrim_hang_signal); /* (sigaction is hidden by -D__STRICT_ANSI__; glibc's signal restarts calls) */
+}
+#endif
+
 void chiefrim_initialize(void)
 {
 	char const *flag = getenv("CHIEFRIM");
@@ -942,6 +1037,7 @@ void chiefrim_initialize(void)
 		return;
 
 #ifdef __linux__
+	chiefrim_hang_handler_install();
 	{
 		/* not truncated: a Skyrim still mapping the file of a Halo that died
 		(the supervisor restarts it, tools/launch_halo.sh) would fault on its
@@ -1200,7 +1296,7 @@ void chiefrim_frame(void)
 	if (!chiefrim.level_cleared && chiefrim_local_unit() != NONE)
 	{
 		ai_erase(NONE, NONE, NONE, TRUE);
-		chiefrim_clear_level_objects(chiefrim_local_unit());
+		chiefrim_clear_level_objects(chiefrim_local_unit(), "the level's");
 		chiefrim.level_cleared = TRUE;
 		error(_error_silent, "chiefrim: erased the level's actors");
 	}
@@ -1348,6 +1444,12 @@ void chiefrim_frame(void)
 	chiefrim_debug_collision();
 	if (chiefrim.linked && chiefrim.world_valid)
 		chiefrim_combat_update(chiefrim_local_unit(), chiefrim.world.origin);
+	if (chiefrim.linked)
+		chiefrim_inventory_update(chiefrim_local_unit(), chiefrim.world_valid, chiefrim_combat_chief_dead());
+	if (chiefrim.linked && chiefrim.world_valid)
+		chiefrim_caches_update(chiefrim_local_unit(), chiefrim.world_generation, chiefrim.world.origin);
+	if (chiefrim.linked)
+		chiefrim_flashlight_update(chiefrim_local_unit());
 	if (chiefrim.placement_pending && chiefrim_skyrim_drives())
 		chiefrim.placement_pending = FALSE; /* placed every frame where Skyrim's player is */
 	if (chiefrim.placement_pending)

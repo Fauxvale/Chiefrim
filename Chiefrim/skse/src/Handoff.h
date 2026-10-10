@@ -9,7 +9,9 @@ namespace chiefrim::Handoff
 	// holds him (AI-driven, or his movement turned off), Skyrim has the
 	// player: its controls, camera, arms and HUD bars, and Chief gets no input
 	// and his weapon and HUD aren't drawn ([Handoff] bEnabled). Halo's world
-	// layer stays.
+	// layer stays. So too while the player is dead (Chief died in Halo, or
+	// Skyrim killed him), through the reload's loading screen, until it has
+	// faded in and he has control again ([Handoff] bDeath).
 
 	// kDataLoaded: reads Chiefrim.ini.
 	void Install();

@@ -8,11 +8,12 @@ namespace chiefrim::Hud
 	{
 		// hudmenu.swf's names (Skyrim - Interface.bsa)
 		constexpr std::array kCrosshair{ "_root.HUDMovieBaseInstance.CrosshairInstance._visible" };
-		constexpr std::array kBars{ "_root.HUDMovieBaseInstance.Health._visible", "_root.HUDMovieBaseInstance.Magica._visible",
-			"_root.HUDMovieBaseInstance.Stamina._visible" };
+		constexpr std::array kBars{ "_root.HUDMovieBaseInstance.Health._visible", "_root.HUDMovieBaseInstance.Magica._visible" };
+		constexpr std::array kStamina{ "_root.HUDMovieBaseInstance.Stamina._visible" };
 
 		bool hideCrosshair = true;  // [HUD] bHideCrosshair
 		bool hideBars = true;       // [HUD] bHideBars
+		bool hideStamina = false;   // [HUD] bHideStamina
 		bool hidden = false;        // by us, to put back
 		bool reported = false;
 
@@ -39,12 +40,15 @@ namespace chiefrim::Hud
 			if (hideBars) {
 				apply(kBars);
 			}
+			if (hideStamina) {
+				apply(kStamina);
+			}
 			if (!std::exchange(reported, true)) {
 				if (missing) {
 					logger::warn("hud: {} of Skyrim's HUD elements not found (a HUD mod's own layout?); those stay", missing);
 				} else {
-					logger::info("hud: Skyrim's{}{} hidden while Chief plays", hideCrosshair ? " crosshair" : "",
-						hideBars ? (hideCrosshair ? " and bars" : " bars") : "");
+					logger::info("hud: Skyrim's{}{}{} hidden while Chief plays", hideCrosshair ? " crosshair" : "",
+						hideBars ? " health and magicka bars" : "", hideStamina ? " stamina bar" : "");
 				}
 			}
 			return true;
@@ -55,11 +59,12 @@ namespace chiefrim::Hud
 	{
 		hideCrosshair = Settings::ReadFloat(L"HUD", L"bHideCrosshair", 1.0f) != 0.0f;
 		hideBars = Settings::ReadFloat(L"HUD", L"bHideBars", 1.0f) != 0.0f;
+		hideStamina = Settings::ReadFloat(L"HUD", L"bHideStamina", 0.0f) != 0.0f;
 	}
 
 	void Update()
 	{
-		if ((hideCrosshair || hideBars) && Set(false)) {
+		if ((hideCrosshair || hideBars || hideStamina) && Set(false)) {
 			hidden = true;
 		}
 	}

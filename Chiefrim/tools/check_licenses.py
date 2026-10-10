@@ -9,7 +9,7 @@ Checks, against licenses.toml:
 - every FetchContent dependency in skse/CMakeLists.txt is listed, under an
   allowed license, and (once fetched) its license file still says so;
 - CommonLibSSE-NG is still GPL-3.0;
-- with --halo: the pinned halo-ce-universal is still CC0, every folder in
+- with --halo: the pinned OpenCE is still CC0, every folder in
   its port/third_party is listed and allowed or excluded, and no compiled
   file, nor any of our patches, carries an excluded component's code.
 
@@ -115,7 +115,7 @@ def check_halo(manifest):
         problem("halo/.work is missing; run tools/setup_halo.py")
         return
     upstream = manifest["halo"]["upstream"]
-    check_markers(work / upstream["license_file"], upstream["markers"], "halo-ce-universal")
+    check_markers(work / upstream["license_file"], upstream["markers"], "OpenCE")
 
     listed = {entry["dir"]: entry for entry in manifest["halo"]["third_party"]}
     present = sorted(p.name for p in (work / "port" / "third_party").iterdir() if p.is_dir())

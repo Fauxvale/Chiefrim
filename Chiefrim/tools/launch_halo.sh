@@ -21,6 +21,10 @@
 # (the last run's; the one before is halo.out.1). CHIEFRIM_HALO_WRAPPER runs
 # Halo through a command (tests: "gamescope --backend headless --").
 #
+# CHIEFRIM_MAP is the host map, the campaign level whose weapons, effects and
+# HUD Halo loads (docs/DESIGN.md §5.3): d20 by default, the one with every
+# weapon a player can carry (tools/list_map_tags.py).
+#
 # CHIEFRIM_HALO_GPU picks the GPU Halo renders on, in a laptop with two:
 #   auto (the default): dgpu when NVIDIA's 32-bit GLX is installed, else igpu.
 #   igpu: the integrated one, the system's own choice; Skyrim keeps the
@@ -44,8 +48,11 @@ control=/dev/shm/chiefrim_control
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
 [ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$root/build/collision-dumps"
+# slow builds' dumps to the newest 20; Chief's falls are all kept
+python3 "$root/tools/prune_dumps.py" || true
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
-printf 'map_name levels\\b30\\b30\n' > "$data/init.txt"
+map=${CHIEFRIM_MAP:-d20}
+printf 'map_name levels\\%s\\%s\n' "$map" "$map" > "$data/init.txt"
 
 bot=""
 steam=""
@@ -75,6 +82,7 @@ esac
 halo_pid=""
 start_halo() {
 	[ -f "$data/halo.out" ] && mv -f "$data/halo.out" "$data/halo.out.1"
+	[ -f "$data/debug.txt" ] && mv -f "$data/debug.txt" "$data/debug.txt.1"  # the game starts its log afresh
 	env CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 		HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \
 		HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_FULLSCREEN=0 \
@@ -128,7 +136,11 @@ while :; do
 	if [ -n "$command" ] && [ "$command" != "$last_command" ]; then
 		last_command=$command
 		case "${command#* }" in
-		restart) say "Skyrim asks for a restart"; stop_halo; wanted=run; crashes=0 ;;
+		restart)
+			say "Skyrim asks for a restart"
+			# hung, most likely: where it is goes to halo.out (halo.out.1 after the restart)
+			if [ -n "$halo_pid" ] && kill -USR2 "$halo_pid" 2>/dev/null; then sleep 0.5; fi
+			stop_halo; wanted=run; crashes=0 ;;
 		stop) say "Skyrim turned Chiefrim off"; stop_halo; wanted=stop ;;
 		start) say "Skyrim turned Chiefrim on"; wanted=run; crashes=0 ;;
 		esac

@@ -3,6 +3,7 @@
 // THIRD-PARTY-NOTICES.md): the actor table, hits through Skyrim's own hit
 // processing, the player's damage refunded and sent on, the player killed.
 #include "Combat.h"
+#include "Hitbox.h"
 #include "Input.h"
 #include "Link.h"
 #include "Settings.h"
@@ -30,7 +31,97 @@ namespace chiefrim::Combat
 			float         blastForce = 10.0f;         // [Combat] fBlastForce
 			float         burnSeconds = 5.0f;         // [Combat] fBurnSeconds
 			float         burnDamage = 0.15f;         // [Combat] fBurnDamage
+			float         propSpeed = 5.0f;           // [Combat] fPropLaunchSpeed: m/s at an explosion's centre
+			float         propMinRadius = 64.0f;      // [Combat] fPropMinRadius: smaller splashes (a plasma bolt's) push nothing
+			bool          shootThrough = true;        // [Combat] bShootThroughDestructibles
+			float         objectDamage = 10.0f;       // [Combat] fObjectDamage: a shot's, to a destructible object
+			float         blastObjectDamage = 50.0f;  // [Combat] fBlastObjectDamage: an explosion's, at its centre
+			bool          hitObjects = true;          // [Combat] bShotsHitObjects: scripted objects get OnHit (traps)
+			bool          ignite = true;              // [Combat] bShotsIgnite: as by a flame (oil, gas)
 		} config;
+
+		// Skyrim's torch: the traps that burn (TrapExplosiveGas, and TrapOilPool
+		// after it) take a hit with it as a flame's (akWeapon == torch01)
+		constexpr RE::FormID kTorch = 0x0001D4EC;
+		// Firebolt's effect (FireDamageFFAimed: MagicDamageFire, and in
+		// TrapGasOnMagicEffectApply): an oil pool's script (TrapOilPool) lights
+		// from a fire effect applied to it, as from Flames
+		constexpr RE::FormID kFireEffect = 0x00012F03;
+
+		// The object has a script of its own: something may listen for its hits
+		bool Scripted(RE::TESObjectREFR* a_ref)
+		{
+			auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+			auto* policy = vm ? vm->GetObjectHandlePolicy() : nullptr;
+			if (!policy) {
+				return false;
+			}
+			const auto handle = policy->GetHandleForObject(RE::FormType::Reference, a_ref);
+			if (handle == policy->EmptyHandle()) {
+				return false;
+			}
+			RE::BSSpinLockGuard lock(vm->attachedScriptsLock);
+			return vm->attachedScripts.find(handle) != vm->attachedScripts.end();
+		}
+
+		// The player's hit on a scripted object, as Skyrim's own weapons
+		// raise it (TESHitEvent: Papyrus's OnHit): hanging oil lamps fall,
+		// tripwires and rigged beams go off; with bShotsIgnite, by a flame
+		// (Skyrim's torch), so oil pools and gas burn
+		void HitObject(RE::TESObjectREFR* a_ref)
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* events = RE::ScriptEventSourceHolder::GetSingleton();
+			if (!config.hitObjects || !player || !events || !a_ref || a_ref->As<RE::Actor>() || a_ref->IsDisabled() || !Scripted(a_ref)) {
+				return;
+			}
+			RE::TESHitEvent hit{ a_ref, player, config.ignite ? kTorch : 0u, 0u, RE::TESHitEvent::Flag::kNone };
+			events->SendEvent(&hit);
+			if (config.ignite) {
+				// and a fire effect on it: oil pools light from that (the hit by the
+				// torch alone didn't light one in game)
+				RE::TESMagicEffectApplyEvent burn{};
+				burn.target.reset(a_ref);
+				burn.caster.reset(player);
+				burn.magicEffect = kFireEffect;
+				events->SendEvent(&burn);
+			}
+			static int logged = 0;
+			if (logged++ < 20) {
+				auto* base = a_ref->GetBaseObject();
+				logger::info("combat: Chief's hit on scripted {:08X} (base {:08X}){}", a_ref->GetFormID(), base ? base->GetFormID() : 0u,
+					config.ignite ? ", as a flame's, and a fire effect" : "");
+			}
+		}
+
+		// A destructible object's health now (its base's until first hurt)
+		float ObjectHealth(RE::TESObjectREFR* a_ref)
+		{
+			if (auto* extra = a_ref->extraList.GetByType<RE::ExtraObjectHealth>()) {
+				return extra->health;
+			}
+			auto* base = a_ref->GetBaseObject();
+			auto* destructible = base ? skyrim_cast<RE::BGSDestructibleObjectForm*>(base) : nullptr;
+			return destructible && destructible->data ? static_cast<float>(destructible->data->health) : 0.0f;
+		}
+
+		// Skyrim's own damage to a destructible object, as ObjectReference.
+		// DamageObject does (its stages, their effects, destroyed at no
+		// health). Not through Papyrus: a web has no script, so the VM had no
+		// object of it to call the method on, and nothing happened (in game)
+		void DamageObject(RE::TESObjectREFR* a_ref, float a_damage)
+		{
+			if (a_damage <= 0.0f) {
+				return;
+			}
+			const float before = ObjectHealth(a_ref);
+			a_ref->DamageObject(a_damage, false);
+			static int logged = 0;
+			if (logged++ < 20) {
+				logger::info("combat: Chief's {:.0f} damage to destructible {:08X}: health {:.0f} -> {:.0f}{}", a_damage, a_ref->GetFormID(), before,
+					ObjectHealth(a_ref), a_ref->IsDisabled() ? " (gone)" : "");
+			}
+		}
 
 		// The people an explosion set alight (docs §8.2): burning for a while,
 		// hurt a little each frame.
@@ -102,6 +193,142 @@ namespace chiefrim::Combat
 					}
 				}
 				s.lastHit = hit;
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
+
+		// The head's centre above the feet, as the actor stands now (crouching,
+		// sitting, a child, a Khajiit): Halo puts its proxy's head there. 0: no
+		// head node (a creature), and Halo goes by the height.
+		float HeadHeight(RE::Actor* a_actor, const RE::NiPoint3& a_feet)
+		{
+			auto* root = a_actor->Get3D(false);
+			auto* head = root ? root->GetObjectByName("NPC Head [Head]") : nullptr;
+			if (!head) {
+				return 0.0f;
+			}
+			const float height = head->world.translate.z - a_feet.z;
+			return height > 10.0f && height < 2000.0f ? height : 0.0f;
+		}
+
+		// ---- explosions throw Skyrim's loose objects --------------------------
+
+		// Wakes a body and its island (hkpEntity::activate; protected in CommonLib)
+		void Activate(RE::hkpEntity* a_entity)
+		{
+			using func_t = void (*)(RE::hkpEntity*);
+			static REL::Relocation<func_t> func{ RELOCATION_ID(60096, 60849) };
+			func(a_entity);
+		}
+
+		// The dynamic rigid bodies in an explosion's reach (clutter, baskets,
+		// skulls, loose weapons), pushed away from its centre and lifted, by
+		// up to fPropLaunchSpeed (m/s) at its centre, fading to nothing at its
+		// edge: they hop and tumble, they don't fly across the room. People
+		// are thrown by Explode (with their hit).
+		void Launch(const cr_msg_explosion& a_explosion)
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* tes = RE::TES::GetSingleton();
+			auto* cell = player ? player->GetParentCell() : nullptr;
+			auto* world = cell ? cell->GetbhkWorld() : nullptr;
+			// (no push in Halo: its camera shake's wider area, not the blast)
+			if (!tes || !world || config.propSpeed <= 0.0f || a_explosion.acceleration <= 0.0f || a_explosion.radius < config.propMinRadius) {
+				return;
+			}
+			const RE::NiPoint3 center{ a_explosion.center.x, a_explosion.center.y, a_explosion.center.z };
+			const float radius = std::min(a_explosion.radius, 2048.0f);
+			const float scale = RE::bhkWorld::GetWorldScale();  // Skyrim units to Havok's
+			const float reach = center.GetDistance(player->GetPosition()) + radius;
+			int pushed = 0;
+			RE::BSWriteLockGuard guard(world->worldLock);
+			tes->ForEachReferenceInRange(player, reach, [&](RE::TESObjectREFR* a_ref) {
+				if (!a_ref || a_ref->IsDisabled() || a_ref->IsDeleted() || a_ref->As<RE::Actor>() || !a_ref->Get3D()) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				RE::BSVisit::TraverseScenegraphCollision(a_ref->Get3D(), [&](RE::bhkNiCollisionObject* a_collision) {
+					auto* body = a_collision->body ? a_collision->body->AsBhkRigidBody() : nullptr;
+					auto* rigid = body ? static_cast<RE::hkpRigidBody*>(body->referencedObject.get()) : nullptr;
+					using Motion = RE::hkpMotion::MotionType;
+					if (!rigid || !rigid->motion.type.any(Motion::kDynamic, Motion::kSphereInertia, Motion::kBoxInertia, Motion::kThinBoxInertia)) {
+						return RE::BSVisit::BSVisitControl::kContinue;
+					}
+					alignas(16) float at[4];
+					_mm_store_ps(at, rigid->motion.motionState.transform.translation.quad);
+					const RE::NiPoint3 position{ at[0] / scale, at[1] / scale, at[2] / scale };
+					RE::NiPoint3 away = position - center;
+					const float distance = away.Length();
+					if (distance > radius) {
+						return RE::BSVisit::BSVisitControl::kContinue;
+					}
+					away = distance > 1.0f ? away / distance : RE::NiPoint3{ 0.0f, 0.0f, 1.0f };
+					away.z += 0.6f;  // up and away
+					away /= away.Length();
+					// an impulse of mass times this speed: the velocity itself, woken
+					// (CommonLib's ApplyLinearImpulse calls Havok it doesn't link)
+					const float speed = config.propSpeed * (1.0f - distance / radius);
+					Activate(rigid);
+					rigid->motion.linearVelocity.quad = _mm_add_ps(rigid->motion.linearVelocity.quad,
+						_mm_setr_ps(away.x * speed, away.y * speed, away.z * speed, 0.0f));
+					++pushed;
+					return RE::BSVisit::BSVisitControl::kContinue;
+				});
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+			static int logged = 0;
+			if (pushed && logged++ < 5) {
+				logger::info("combat: an explosion (radius {:.0f}) at ({:.0f}, {:.0f}, {:.0f}) threw {} loose objects",
+					radius, center.x, center.y, center.z, pushed);
+			}
+		}
+
+		// ---- the player's healing --------------------------------------------
+
+		// Health a potion or food restores: its restore-health effects, all of
+		// their duration (food heals over time).
+		float HealthRestored(const RE::AlchemyItem* a_item)
+		{
+			float total = 0.0f;
+			for (const auto* effect : a_item->effects) {
+				const auto* setting = effect ? effect->baseEffect : nullptr;
+				if (!setting || setting->IsDetrimental() || setting->IsHostile() ||
+					setting->GetArchetype() != RE::EffectSetting::Archetype::kValueModifier ||
+					setting->data.primaryAV != RE::ActorValue::kHealth) {
+					continue;
+				}
+				total += effect->effectItem.magnitude * std::max(static_cast<float>(effect->effectItem.duration), 1.0f);
+			}
+			return total;
+		}
+
+		// Drinking a potion or eating is equipping it. Skyrim's player stays at
+		// full health while Chief has him (his lost health is refunded), so the
+		// healing goes to Chief, on the scale of Skyrim's damage to him.
+		class HealSink final : public RE::BSTEventSink<RE::TESEquipEvent>
+		{
+		public:
+			static HealSink* Get()
+			{
+				static HealSink sink;
+				return &sink;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* a_event, RE::BSTEventSource<RE::TESEquipEvent>*) override
+			{
+				auto* player = RE::PlayerCharacter::GetSingleton();
+				if (!a_event || !a_event->equipped || !player || a_event->actor.get() != player || !Link::Get().Connected() || s.chiefDead) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				const auto* item = RE::TESForm::LookupByID<RE::AlchemyItem>(a_event->baseObject);
+				const float health = item ? HealthRestored(item) : 0.0f;
+				if (health <= 0.0f) {
+					return RE::BSEventNotifyControl::kContinue;
+				}
+				cr_msg_chief_heal heal{};
+				heal.amount = health / std::max(config.incomingReference, 1.0f);
+				heal.item = item->GetFormID();
+				Link::Get().PushRaw(CR_MSG_CHIEF_HEAL, &heal, sizeof(heal));
+				logger::info("combat: {} restores {:.0f} health: Chief heals {:.0f}% of his vitality", item->GetName(), health, heal.amount * 100.0f);
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		};
@@ -242,18 +469,59 @@ namespace chiefrim::Combat
 
 		// ---- the actors, to Halo ---------------------------------------------
 
+		// Swinging, drawing a bow or casting: Halo's motion tracker shows it,
+		// as it shows a unit firing (protocol 20).
+		bool Attacking(RE::Actor* a_actor)
+		{
+			const auto* state = a_actor->AsActorState();
+			return (state && state->GetAttackState() != RE::ATTACK_STATE_ENUM::kNone) || a_actor->WhoIsCasting() != 0;
+		}
+
+		// Its race is a person's (ActorTypeNPC: the playable races, their
+		// vampires, dremora): its proxy carries a gun. Animals, draugr, falmer,
+		// skeletons, trolls, dragons and automatons have none (Skyrim.esm's
+		// races): theirs drop only a grenade or two (protocol 26)
+		constexpr RE::FormID kActorTypeNPC = 0x00013794;
+
+		bool Person(RE::Actor* a_actor)
+		{
+			static auto* keyword = RE::TESForm::LookupByID<RE::BGSKeyword>(kActorTypeNPC);
+			const auto*  race = a_actor->GetRace();
+			return keyword && (a_actor->HasKeyword(keyword) || (race && race->HasKeyword(keyword)));
+		}
+
+		// Halo's proxies: the living, and for a moment the newly dead (listed
+		// alive last frame), flagged so: a proxy drops its weapon and grenades.
+		// With each, where it's hit (Hitbox, protocol 18)
 		void WriteActors(RE::PlayerCharacter* a_player)
 		{
 			static std::vector<std::pair<float, RE::Actor*>> nearby;
+			static std::unordered_set<RE::FormID>             alive, wasAlive;
+			static std::unordered_map<RE::FormID, ULONGLONG>  diedAt;
 			nearby.clear();
+			std::swap(alive, wasAlive);
+			alive.clear();
+			const auto now = ::GetTickCount64();
+			std::erase_if(diedAt, [now](const auto& a_entry) { return now - a_entry.second > 3000; });
 			auto* lists = RE::ProcessLists::GetSingleton();
 			const auto playerPos = a_player->GetPosition();
 			if (lists) {
 				for (auto& handle : lists->highActorHandles) {
 					auto  actorPtr = handle.get();
 					auto* actor = actorPtr.get();
-					if (!actor || actor == a_player || actor->IsDisabled() || !actor->Is3DLoaded() || actor->IsGhost() || actor->IsDead()) {
+					if (!actor || actor == a_player || actor->IsDisabled() || !actor->Is3DLoaded() || actor->IsGhost()) {
 						continue;
+					}
+					if (actor->IsDead()) {
+						const auto id = actor->GetFormID();
+						if (wasAlive.contains(id)) {
+							diedAt.emplace(id, now);
+						}
+						if (!diedAt.contains(id)) {
+							continue;
+						}
+					} else {
+						alive.insert(actor->GetFormID());
 					}
 					const float distance = actor->GetPosition().GetDistance(playerPos);
 					if (distance <= kActorRange) {
@@ -263,7 +531,8 @@ namespace chiefrim::Combat
 			}
 			std::sort(nearby.begin(), nearby.end(), [](const auto& a_a, const auto& a_b) { return a_a.first < a_b.first; });
 
-			cr_actors actors{};
+			static cr_actors actors;  // (34 KB: not on the stack)
+			std::memset(&actors, 0, sizeof(actors));
 			actors.frame = ++s.actorFrame;
 			for (const auto& [distance, actor] : nearby) {
 				if (actors.count >= CR_ACTORS_MAX) {
@@ -272,12 +541,22 @@ namespace chiefrim::Combat
 				auto&      out = actors.actors[actors.count++];
 				const auto position = actor->GetPosition();
 				out.form_id = actor->GetFormID();
-				out.flags = (actor->IsHostileToActor(a_player) ? CR_ACTOR_HOSTILE : 0u) | (actor->IsEssential() ? CR_ACTOR_ESSENTIAL : 0u);
+				out.flags = (actor->IsHostileToActor(a_player) ? CR_ACTOR_HOSTILE : 0u) | (actor->IsEssential() ? CR_ACTOR_ESSENTIAL : 0u) |
+				            (actor->IsDead() ? CR_ACTOR_DEAD : 0u) | (Attacking(actor) ? CR_ACTOR_ATTACKING : 0u) |
+				            (actor->IsSneaking() ? CR_ACTOR_SNEAKING : 0u) | (Person(actor) ? CR_ACTOR_PERSON : 0u);
 				out.position = { position.x, position.y, position.z };
 				out.heading = actor->GetAngleZ();
 				out.height = std::clamp(actor->GetHeight(), 20.0f, 2000.0f);
-				out.radius = std::clamp(actor->GetBoundRadius(), 5.0f, 500.0f);
+				out.head = HeadHeight(actor, position);
+				if (!actor->IsDead()) {
+					const auto count = Hitbox::Collect(actor, actors.hitboxes + actors.hitbox_count,
+						std::min(CR_HITBOXES_PER_ACTOR, CR_HITBOXES_MAX - actors.hitbox_count));
+					out.hitbox_first = static_cast<std::uint16_t>(actors.hitbox_count);
+					out.hitbox_count = static_cast<std::uint16_t>(count);
+					actors.hitbox_count += count;
+				}
 			}
+			Hitbox::EndFrame();
 			Link::Get().SendActors(actors);
 		}
 
@@ -466,7 +745,10 @@ namespace chiefrim::Combat
 			const bool explosion = (a_hit.flags & CR_HIT_EXPLOSION) != 0;
 			const float maxHealth = a_actor->GetActorValueMax(RE::ActorValue::kHealth);
 			const float toughness = Toughness(a_actor, a_player);
-			const float damage = a_fraction * maxHealth * config.damageMult / toughness;
+			// a headshot kills, as it kills a marine, whatever the actor's level
+			const bool headshot = (a_hit.flags & CR_HIT_HEADSHOT) != 0;
+			const float damage = headshot ? a_actor->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth) + maxHealth :
+				a_fraction * maxHealth * config.damageMult / toughness;
 			if (!(damage > 0.0f)) {
 				return;
 			}
@@ -527,9 +809,9 @@ namespace chiefrim::Combat
 			++s.hitsOnActors;
 			s.damageTotal += damage;
 			if (s.hitsOnActors <= 5) {
-				logger::info("combat: Chief hit {} ({:08X}, level {}, health {:.0f}) for {:.2f} of a proxy: {:.1f} damage (toughness {:.2f}){}",
+				logger::info("combat: Chief hit {} ({:08X}, level {}, health {:.0f}) for {:.2f} of a proxy: {:.1f} damage (toughness {:.2f}){}{}",
 					a_actor->GetDisplayFullName(), a_actor->GetFormID(), a_actor->GetLevel(), maxHealth, a_fraction, damage, toughness,
-					a_actor->IsDead() ? ", dead" : "");
+					headshot ? ", a headshot" : "", a_actor->IsDead() ? ", dead" : "");
 			}
 		}
 	}
@@ -543,11 +825,19 @@ namespace chiefrim::Combat
 		config.blastForce = Settings::ReadFloat(L"Combat", L"fBlastForce", 10.0f);
 		config.burnSeconds = Settings::ReadFloat(L"Combat", L"fBurnSeconds", 5.0f);
 		config.burnDamage = Settings::ReadFloat(L"Combat", L"fBurnDamage", 0.15f);
+		config.propSpeed = Settings::ReadFloat(L"Combat", L"fPropLaunchSpeed", 5.0f);
+		config.propMinRadius = Settings::ReadFloat(L"Combat", L"fPropMinRadius", 64.0f);
+		config.shootThrough = Settings::ReadBool(L"Combat", L"bShootThroughDestructibles", true);
+		config.objectDamage = Settings::ReadFloat(L"Combat", L"fObjectDamage", 10.0f);
+		config.blastObjectDamage = Settings::ReadFloat(L"Combat", L"fBlastObjectDamage", 50.0f);
+		config.hitObjects = Settings::ReadBool(L"Combat", L"bShotsHitObjects", true);
+		config.ignite = Settings::ReadBool(L"Combat", L"bShotsIgnite", true);
 		config.giveWeaponKey = ::GetPrivateProfileIntW(L"Controls", L"iGiveWeaponKey", 0x41, path.c_str());
 		config.toggleKey = ::GetPrivateProfileIntW(L"Controls", L"iToggleChiefrimKey", 0x44, path.c_str());
 		config.restartKey = ::GetPrivateProfileIntW(L"Controls", L"iRestartHaloKey", 0x57, path.c_str());
 		if (auto* events = RE::ScriptEventSourceHolder::GetSingleton()) {
 			events->AddEventSink<RE::TESHitEvent>(HitSink::Get());
+			events->AddEventSink<RE::TESEquipEvent>(HealSink::Get());
 		}
 		if (auto* input = RE::BSInputDeviceManager::GetSingleton()) {
 			input->AddEventSink(HotkeySink::Get());
@@ -561,7 +851,9 @@ namespace chiefrim::Combat
 
 	void PerFrame(RE::PlayerCharacter* a_player, float a_delta)
 	{
-		if (s.chiefDead) {
+		// dead (Chief, or Skyrim killed its player): nothing to refund or hit
+		// until the reload's new world (Release)
+		if (s.chiefDead || a_player->IsDead()) {
 			return;
 		}
 		if (!std::exchange(s.keyChecked, true)) {
@@ -587,6 +879,80 @@ namespace chiefrim::Combat
 			s.damageTotal = s.hurtTotal = 0.0f;
 			s.nextReport = now + 30000;
 		}
+	}
+
+	bool ShootThrough(RE::TESObjectREFR* a_ref)
+	{
+		if (!config.shootThrough || !a_ref || a_ref->IsDisabled() || a_ref->IsDeleted() || a_ref->As<RE::Actor>()) {
+			return false;
+		}
+		auto* base = a_ref->GetBaseObject();
+		auto* destructible = base ? skyrim_cast<RE::BGSDestructibleObjectForm*>(base) : nullptr;
+		return destructible && destructible->data && destructible->data->health > 0;
+	}
+
+	void OnExplosion(const cr_msg_explosion& a_explosion)
+	{
+		Launch(a_explosion);
+		// the destructible objects in its reach, by how near
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* tes = RE::TES::GetSingleton();
+		if (!player || !tes || a_explosion.radius <= 1.0f) {
+			return;
+		}
+		const RE::NiPoint3 center{ a_explosion.center.x, a_explosion.center.y, a_explosion.center.z };
+		const float radius = std::min(a_explosion.radius, 2048.0f);
+		std::vector<std::pair<RE::TESObjectREFR*, float>> hurt;
+		tes->ForEachReferenceInRange(player, center.GetDistance(player->GetPosition()) + radius, [&](RE::TESObjectREFR* a_ref) {
+			auto* model = a_ref && !a_ref->As<RE::Actor>() ? a_ref->Get3D() : nullptr;
+			if (model) {
+				// to its nearest side, near enough: its centre less its size
+				const float distance = std::max(model->worldBound.center.GetDistance(center) - model->worldBound.radius * 0.5f, 0.0f);
+				if (distance < radius) {
+					hurt.emplace_back(a_ref, 1.0f - distance / radius);
+				}
+			}
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		// (out of the loop: a hit's scripts and a destruction may change the cell's references)
+		for (const auto& [ref, closeness] : hurt) {
+			if (ShootThrough(ref) && !Scripted(ref)) {  // a scripted one destroys itself (an oil pool as it lights)
+				DamageObject(ref, config.blastObjectDamage * closeness);
+			}
+			HitObject(ref);  // a lamp falls, oil and gas burn
+		}
+	}
+
+	void OnShot(const cr_msg_shot& a_shot)
+	{
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* cell = player ? player->GetParentCell() : nullptr;
+		auto* world = cell ? cell->GetbhkWorld() : nullptr;
+		if (!world) {
+			return;
+		}
+		// the first thing on the way, as Skyrim's own arrows would find it
+		const float scale = RE::bhkWorld::GetWorldScale();
+		RE::bhkPickData pick{};
+		pick.rayInput.from = RE::hkVector4(a_shot.from.x * scale, a_shot.from.y * scale, a_shot.from.z * scale, 0.0f);
+		pick.rayInput.to = RE::hkVector4(a_shot.to.x * scale, a_shot.to.y * scale, a_shot.to.z * scale, 0.0f);
+		RE::CFilter filter{};
+		player->GetCollisionFilterInfo(filter);  // its group: the player's own capsule isn't hit
+		filter.SetCollisionLayer(RE::COL_LAYER::kProjectile);
+		pick.rayInput.filterInfo = filter;
+		{
+			RE::BSReadLockGuard lock(world->worldLock);
+			world->PickObject(pick);
+		}
+		const auto* hit = pick.rayOutput.HasHit() ? pick.rayOutput.rootCollidable : nullptr;
+		auto*       ref = hit ? RE::TESHavokUtilities::FindCollidableRef(*hit) : nullptr;
+		if (!ref || ref->As<RE::Actor>()) {
+			return;  // people are hit through their proxies
+		}
+		if (ShootThrough(ref) && !Scripted(ref)) {  // a scripted one destroys itself (an oil pool as it lights)
+			DamageObject(ref, config.objectDamage);
+		}
+		HitObject(ref);  // a lamp falls, oil and gas burn, a tripwire goes off
 	}
 
 	void OnHitActor(const cr_msg_hit_actor& a_hit)

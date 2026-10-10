@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 13u
+#define CR_PROTOCOL_VERSION 28u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -218,7 +218,24 @@ CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
 CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
 /* Skyrim -> Halo. The actors near the player (docs §8.1): Halo keeps an
 unseen, hittable stand-in (a proxy biped) for each. Latest value. */
-#define CR_ACTORS_MAX 48u
+#define CR_ACTORS_MAX   48u
+#define CR_HITBOXES_MAX 1024u /* all the actors' together */
+#define CR_HITBOXES_PER_ACTOR 48u /* a dragon's skeleton has ~30 bodies */
+
+/* One of an actor's hit shapes (protocol 18): Skyrim's own, the capsules and
+spheres of its skeleton's bodies that its arrows hit, as they stand now. A
+sphere is a capsule whose ends meet; a box or a hull comes as the capsule
+along its longest side. Skyrim world units. */
+typedef struct cr_hitbox
+{
+	cr_vec3  a;
+	cr_vec3  b;
+	float    radius;
+	uint32_t flags;         /* CR_HITBOX_* */
+} cr_hitbox;
+
+#define CR_HITBOX_HEAD   0x0001u /* a person's head (NPC Head [Head]): headshots kill */
+#define CR_HITBOX_BOUNDS 0x0002u /* not its skeleton's: made from its bounds (no bodies found) */
 
 typedef struct cr_actor
 {
@@ -227,18 +244,29 @@ typedef struct cr_actor
 	cr_vec3  position;      /* feet, Skyrim units */
 	float    heading;       /* Skyrim heading (rotZ) */
 	float    height;        /* Skyrim units */
-	float    radius;        /* Skyrim units */
+	float    head;          /* Skyrim units: the head's centre above the feet, as it stands now
+	                           (protocol 16: the proxy's head is put there); 0: unknown */
+	uint16_t hitbox_first;  /* its hit shapes: cr_actors.hitboxes[first, first + count) */
+	uint16_t hitbox_count;  /* 0: none (Halo hits its proxy's own biped, scaled) */
+	uint32_t reserved;
 } cr_actor;
 
 #define CR_ACTOR_HOSTILE   0x0001u /* hostile to the player */
 #define CR_ACTOR_DEAD      0x0002u
 #define CR_ACTOR_ESSENTIAL 0x0004u
+#define CR_ACTOR_ATTACKING 0x0008u /* swinging, drawing a bow, casting: the motion tracker shows it (protocol 20) */
+#define CR_ACTOR_SNEAKING  0x0010u /* as a unit crouching: only Halo's own speed shows it on the tracker (protocol 20) */
+#define CR_ACTOR_PERSON    0x0020u /* its race is a person's (ActorTypeNPC): its proxy carries a gun; an animal's,
+                                      a draugr's or another creature's only 1 or 2 grenades (protocol 26) */
 
 typedef struct cr_actors
 {
 	uint32_t frame;
 	uint32_t count;
 	cr_actor actors[CR_ACTORS_MAX];
+	uint32_t hitbox_count;
+	uint32_t reserved;
+	cr_hitbox hitboxes[CR_HITBOXES_MAX];
 } cr_actors;
 
 CR_DECLARE_SLOT(cr_slot_display, cr_display);
@@ -281,6 +309,16 @@ vehicles); docs §10. */
 #define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §8.4) */
 #define CR_MSG_KEY_NAMES    0x0Au /* S->H: the player's keys for Chief's actions, for Halo's prompts (protocol 12) */
 #define CR_MSG_LIGHTING     0x0Bu /* S->H: Skyrim's light where the player is, for Halo's objects (protocol 13) */
+#define CR_MSG_CHIEF_STATE   0x0Cu /* H->S: Chief's weapons, ammo, grenades and vitality, when they change (protocol 14) */
+#define CR_MSG_CHIEF_RESTORE 0x0Du /* S->H: Chief's, from a Skyrim save, or the starting loadout (protocol 14) */
+#define CR_MSG_CHIEF_HEAL    0x0Eu /* S->H: the player drank or ate something that restores health (protocol 15) */
+#define CR_MSG_EXPLOSION     0x0Fu /* H->S: an explosion in Halo (a grenade, a rocket): Skyrim's loose objects fly (protocol 16) */
+#define CR_MSG_FLASHLIGHT    0x10u /* H->S: Chief's flashlight as it shines now, when it changes: Skyrim's world is lit (protocol 17) */
+#define CR_MSG_CONSOLE       0x11u /* H->S: a line for Skyrim's console, answering a console command (cr_msg_log; protocol 19) */
+#define CR_MSG_DEBUG         0x12u /* S->H: debug drawing on or off (protocol 19) */
+#define CR_MSG_SHOT          0x13u /* H->S: a projectile's way this tick: Skyrim's destructible objects on it are hurt (protocol 23) */
+#define CR_MSG_CACHE_PLACE   0x14u /* S->H: a weapon cache: a weapon lying in Skyrim's world (protocol 24) */
+#define CR_MSG_CACHE_TAKEN   0x15u /* H->S: Chief picked a cache's weapon up (protocol 24) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -324,6 +362,9 @@ typedef struct cr_msg_hit_actor
 damage): Skyrim throws the actor away from its centre and sets it alight
 (docs §8.2). */
 #define CR_HIT_EXPLOSION 0x0001u
+/* The proxy was killed outright: a headshot, which kills a marine whatever
+its vitality. Skyrim kills the actor, whatever its level (protocol 16). */
+#define CR_HIT_HEADSHOT  0x0002u
 
 /* Skyrim's damage to the player, which Skyrim has refunded: Halo applies it
 to Chief, shields first. */
@@ -348,14 +389,76 @@ typedef struct cr_msg_player_died
 	uint32_t reserved[2];
 } cr_msg_player_died;
 
-/* index: of the host map's weapons, as Halo lists them in its log at start
-(wraps); -1: the next after the last given. */
+/* Skyrim's healing (a potion, food): Halo adds it to Chief's body (his
+shields recharge by themselves, as in Halo), on the scale of
+CR_MSG_PLAYER_HURT, so a potion heals what as much Skyrim damage would hurt. */
+typedef struct cr_msg_chief_heal
+{
+	cr_msg_header header;
+	float    amount;     /* of Chief's whole vitality (shields and body): Skyrim's health over [Combat] fIncomingReference */
+	uint32_t item;       /* the potion's form id, for the logs */
+} cr_msg_chief_heal;
+
+/* An explosion's area damage started (a grenade, a rocket, a plasma bolt's
+splash): Skyrim pushes its loose physics objects in reach away from the centre. */
+typedef struct cr_msg_explosion
+{
+	cr_msg_header header;
+	cr_vec3  center;       /* Skyrim units */
+	float    radius;       /* Skyrim units: its damage's reach */
+	float    acceleration; /* Halo's push on objects in the middle (world units per tick), as a guide to its power */
+	uint32_t reserved;
+} cr_msg_explosion;
+
+/* A projectile's way this tick (protocol 23): Halo's bullets, plasma and
+grenades go through Skyrim's destructible objects (spider webs, barricades:
+Skyrim leaves them out of the collision it sends), so Skyrim looks along
+the way itself and hurts the first thing on it, if it is one. */
+typedef struct cr_msg_shot
+{
+	cr_msg_header header;
+	cr_vec3  from;         /* Skyrim units */
+	cr_vec3  to;
+	uint32_t reserved[2];
+} cr_msg_shot;
+
+/* Chief's flashlight (protocol 17): his biped's light as Halo would shine
+it now. Halo's light has no world of Halo's to fall on, so Skyrim lights its
+own along the player's view with it. Sent when it changes (switched on or
+off, fading in or out) and on linking. */
+typedef struct cr_msg_flashlight
+{
+	cr_msg_header header;
+	cr_vec3  color;          /* linear, 1 = full, its power applied; all 0: off */
+	float    radius;         /* Skyrim units: its reach */
+	float    cutoff_angle;   /* radians, from the beam's axis to the cone's edge */
+	float    falloff_angle;  /* radians: full light inside this, fading out to the cutoff */
+	uint32_t reserved[2];
+} cr_msg_flashlight;
+
+/* name (protocol 19, the console's "chiefrim give"): the weapon's tag path or
+its last part ("sniper rifle"), any case; Halo answers on the console. Empty:
+by index, of the host map's weapons as Halo lists them in its log at start
+(wraps); -1: the next after the last given (the debug key). */
+#define CR_WEAPON_NAME_LENGTH 64u
+#define CR_GIVE_LIST 0x0001u /* give nothing: list the weapons Chief may have, on the console */
 typedef struct cr_msg_give_weapon
 {
 	cr_msg_header header;
 	int32_t  index;
-	uint32_t reserved;
+	uint32_t flags;        /* CR_GIVE_* */
+	char     name[CR_WEAPON_NAME_LENGTH];
 } cr_msg_give_weapon;
+
+/* Debug drawing in Halo's overlay (protocol 19, the console's "chiefrim
+shapes"): sent when it changes and on linking */
+#define CR_DEBUG_HITBOXES 0x0001u /* the proxies' hit shapes, as wireframes over everything */
+typedef struct cr_msg_debug
+{
+	cr_msg_header header;
+	uint32_t flags;        /* CR_DEBUG_* */
+	uint32_t reserved;
+} cr_msg_debug;
 
 /* The names of the keys (or gamepad buttons, as the player last played) that
 do each of Chief's actions in Skyrim, per CR_ACTION_*: Halo's prompts ("Press
@@ -389,7 +492,104 @@ typedef struct cr_msg_lighting
 	cr_vec3  key_direction;    /* unit */
 	uint32_t point_count;      /* the point lights nearest the player (torches, fires, spells) */
 	cr_light_point points[CR_LIGHTING_POINTS];
+	/* protocol 21: shadows from the key light. key_shadowed: it casts them
+	(the sun or moon outside; an interior's directional light doesn't), so
+	Halo tests each object's way to it. sun_visible: how much of it reaches
+	Chief's eye past Skyrim's world (0..1), for Chief, his arms and weapon. */
+	uint32_t key_shadowed;
+	float    sun_visible;
+	/* protocol 22: how much of the sky is open over Chief's eye (0..1; 1
+	inside, where the ambient is the cell's): under a roof the sky's light
+	is mostly blocked too. Halo dims Chief's ambient by it, and tests other
+	objects' way up itself. */
+	float    sky_visible;
+	/* protocol 27: how bright Chief's surroundings are, as Skyrim's picture
+	shows them (the compositor's meter of it). A shiny weapon shows mostly
+	its reflection, which is of its surroundings: a dim cabin's, not the
+	light's. reflection_cap: the most a reflection's strength goes (0..1; 0:
+	not metered, no cap). Protocol 28: no hue; the picture's colour is what's
+	in view (leaves, the sky), not the light's. */
+	float    reflection_cap;
 } cr_msg_lighting;
+
+/* Chief's kit (docs §11, save and load): what the Skyrim co-save keeps.
+Halo sends it (CR_MSG_CHIEF_STATE) when it changes, a few times a second at
+most; Skyrim keeps the latest and writes it into each save. Loading a save
+sends it back (CR_MSG_CHIEF_RESTORE), and Halo gives Chief exactly that; a
+save without one (older, or a new game) asks for the starting loadout. A new
+Halo (a restart) gets the latest too.
+
+generation: each restore's is new, and Halo's states carry the last one it
+applied (0: none yet, its own Chief), so Skyrim drops states from before
+the restore it is waiting on. Weapons are named by tag path, so a save
+survives the host map's tags moving; one the map doesn't have is skipped.
+Skyrim may name one by its last part ("shotgun"), as Chiefrim.ini's
+[Loadout] does: Halo takes the map's weapon whose path ends with it. */
+#define CR_CHIEF_WEAPONS     4u  /* Halo's MAXIMUM_WEAPONS_PER_UNIT */
+#define CR_CHIEF_GRENADES    4u  /* Halo has 2 types; room to grow */
+#define CR_WEAPON_TAG_LENGTH 64u
+
+typedef struct cr_chief_weapon
+{
+	char     tag[CR_WEAPON_TAG_LENGTH]; /* the weapon's tag path, NUL-terminated; empty: no weapon */
+	int16_t  rounds_total[2];   /* per magazine: all its rounds, those loaded too; negative (S->H): */
+	int16_t  rounds_loaded[2];  /* the weapon's own, as one found in the map has them */
+	float    age;               /* energy weapons: battery spent, 0..1 */
+	uint32_t reserved;
+} cr_chief_weapon;
+
+typedef struct cr_chief_state
+{
+	uint32_t generation;
+	uint32_t flags;             /* CR_CHIEF_* */
+	int32_t  current_weapon;    /* index into weapons, -1: none */
+	int32_t  current_grenade;   /* grenade type, -1: none */
+	uint8_t  grenades[CR_CHIEF_GRENADES]; /* per type: frag, plasma */
+	float    body;              /* 0..1 of his body's vitality */
+	float    shield;            /* 0..1 (over 1: overshield) */
+	float    flashlight;        /* battery, 0..1 */
+	uint32_t reserved[2];
+	cr_chief_weapon weapons[CR_CHIEF_WEAPONS]; /* in Halo's inventory order */
+} cr_chief_state;
+
+/* CR_MSG_CHIEF_RESTORE: no saved kit, the host map's starting loadout and
+Chief whole (the rest of the state is unused) */
+#define CR_CHIEF_STARTING_LOADOUT 0x0001u
+
+typedef struct cr_msg_chief_state
+{
+	cr_msg_header  header;
+	cr_chief_state state;
+} cr_msg_chief_state;
+
+/* Weapon caches (protocol 24, docs §8.4): Skyrim chooses where weapons lie
+in its bandit camps and forts, keeps them in its co-save, and has Halo lay
+each down in the world it is in now (its world_context generation; a
+message for another world is dropped, as a new world erases Halo's loose
+objects and Skyrim sends its caches again). Halo drops it onto what lies
+below the position (once its collision has it) and reports the cache taken
+when Chief picks the weapon up. */
+typedef struct cr_msg_cache_place
+{
+	cr_msg_header header;
+	uint32_t id;           /* Skyrim's, for the taken report */
+	uint32_t generation;   /* the world_context it is for */
+	cr_vec3  position;     /* Skyrim units: above where it lies */
+	float    yaw;          /* radians from +x, counterclockwise: which way it points */
+	char     weapon[CR_WEAPON_TAG_LENGTH]; /* a tag path or its last part, NUL-terminated */
+	/* protocol 25: its ammunition, scarce: its magazine loaded, and this
+	share (0..1) of the spare rounds one in the map has; an energy weapon's
+	battery is spent by as much as it falls short */
+	float    spare;
+	uint32_t reserved;
+} cr_msg_cache_place;
+
+typedef struct cr_msg_cache_taken
+{
+	cr_msg_header header;
+	uint32_t id;
+	uint32_t reserved[3];
+} cr_msg_cache_taken;
 
 typedef struct cr_msg_hello
 {
@@ -446,7 +646,11 @@ Colours are RGBA8, premultiplied (draw with ONE, INV_SRC_ALPHA), on
 transparent black; depth is float32. Top row first, rows of width
 elements. In a slot: the screen layer at 0, the world layer at
 CR_FRAME_LAYER_BYTES, its depth at 2 * CR_FRAME_LAYER_BYTES; the world
-layer and depth only if the header says CR_FRAME_WORLD.
+layer and depth only if the header says CR_FRAME_WORLD. With CR_FRAME_MASK
+(protocol 21), at 3 * CR_FRAME_LAYER_BYTES: the screen layer's weapon share,
+one byte a pixel (255: all of the pixel's colour is Chief's arms and weapon,
+0: the HUD's, or nothing), so Skyrim grades the weapon as its own picture
+and leaves the HUD alone.
 
 Halo writes the slots round-robin, each under its own seqlock, and then
 names it the latest. Skyrim copies the latest slot out and checks its seq
@@ -457,7 +661,8 @@ can restart at any time. */
 #define CR_FRAME_MAX_WIDTH  2560u /* larger screens get a smaller picture, scaled up */
 #define CR_FRAME_MAX_HEIGHT 1440u
 #define CR_FRAME_LAYER_BYTES (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
-#define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES)
+#define CR_FRAME_MASK_BYTES  (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT)
+#define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES + CR_FRAME_MASK_BYTES)
 
 typedef struct cr_frame_header
 {
@@ -477,6 +682,7 @@ typedef struct cr_frame_header
 
 #define CR_FRAME_VISIBLE 0x0001u /* reserved: always set */
 #define CR_FRAME_WORLD   0x0002u /* the world layer has something (else it is all transparent) */
+#define CR_FRAME_MASK    0x0004u /* the screen layer's weapon share follows (protocol 21) */
 
 typedef struct cr_frames
 {
@@ -520,7 +726,7 @@ typedef struct cr_shared
 	cr_slot_display display;              /* S->H */
 	cr_slot_camera  camera;               /* S->H, protocol 7 */
 	cr_slot_actors  actors;               /* S->H, protocol 8 */
-	uint32_t reserved2[10];               /* the frames start on a 64-byte line */
+	uint32_t reserved2[8];                /* the frames start on a 64-byte line */
 	cr_frames frames;                     /* H->S */
 } cr_shared;
 
@@ -733,20 +939,32 @@ CR_STATIC_ASSERT(sizeof(cr_slot_display) == 24, "cr_slot_display");
 CR_STATIC_ASSERT(sizeof(cr_frame_header) == 48, "cr_frame_header");
 CR_STATIC_ASSERT(sizeof(cr_camera) == 64, "cr_camera");
 CR_STATIC_ASSERT(sizeof(cr_slot_camera) == 72, "cr_slot_camera");
-CR_STATIC_ASSERT(sizeof(cr_actor) == 32, "cr_actor");
-CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 32 * CR_ACTORS_MAX, "cr_slot_actors");
+CR_STATIC_ASSERT(sizeof(cr_hitbox) == 32, "cr_hitbox");
+CR_STATIC_ASSERT(sizeof(cr_actor) == 40, "cr_actor");
+CR_STATIC_ASSERT(sizeof(cr_slot_actors) == 16 + 40 * CR_ACTORS_MAX + 8 + 32 * CR_HITBOXES_MAX, "cr_slot_actors");
 CR_STATIC_ASSERT(sizeof(cr_msg_hit_actor) == 40, "cr_msg_hit_actor");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_hurt) == 40, "cr_msg_player_hurt");
 CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
-CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
+CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
+CR_STATIC_ASSERT(sizeof(cr_msg_shot) == 40, "cr_msg_shot");
+CR_STATIC_ASSERT(sizeof(cr_msg_cache_place) == 104, "cr_msg_cache_place");
+CR_STATIC_ASSERT(sizeof(cr_msg_cache_taken) == 24, "cr_msg_cache_taken");
+CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
+CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");
-CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28, "cr_msg_lighting");
+CR_STATIC_ASSERT(sizeof(cr_msg_lighting) == 8 + 4 * 12 + 4 + 4 * 28 + 12 + 4, "cr_msg_lighting");
+CR_STATIC_ASSERT(sizeof(cr_chief_weapon) == 80, "cr_chief_weapon");
+CR_STATIC_ASSERT(sizeof(cr_chief_state) == 40 + 4 * 80, "cr_chief_state");
+CR_STATIC_ASSERT(sizeof(cr_msg_chief_state) == 8 + 360, "cr_msg_chief_state");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_frames, pixels) == 192, "cr_frames.pixels");
 #define CR_OFFSET_DISPLAY (360u + 2u * (128u + CR_RING_BYTES))
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, display) == CR_OFFSET_DISPLAY, "cr_shared.display");
-CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + 1552u + 40u, "cr_shared.frames");
+#define CR_SLOT_ACTORS_BYTES (16u + 40u * CR_ACTORS_MAX + 8u + 32u * CR_HITBOXES_MAX)
+CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) == CR_OFFSET_DISPLAY + 96u + CR_SLOT_ACTORS_BYTES + 32u, "cr_shared.frames");
 CR_STATIC_ASSERT(__builtin_offsetof(cr_shared, frames) % 64u == 0, "cr_shared.frames: on a line");
-CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + 1592u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
+CR_STATIC_ASSERT(sizeof(cr_shared) == CR_OFFSET_DISPLAY + 96u + CR_SLOT_ACTORS_BYTES + 32u + 192u + CR_FRAME_SLOTS * CR_FRAME_BYTES, "cr_shared");
 
 #ifdef __cplusplus
 }

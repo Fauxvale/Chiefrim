@@ -16,6 +16,8 @@
 #include <optional>
 #include <stop_token>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <Windows.h>
 

@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Link.h"
+#include "Caches.h"
+#include "CoSave.h"
 #include "Combat.h"
+#include "Console.h"
+#include "Lighting.h"
 
 namespace chiefrim
 {
@@ -172,7 +176,7 @@ namespace chiefrim
 			return false;
 		}
 
-		alignas(8) unsigned char buffer[256];
+		alignas(8) unsigned char buffer[512];
 		int type;
 		while ((type = cr_ring_pop(&shm_->to_skyrim, buffer, sizeof(buffer))) >= 0) {
 			switch (type) {
@@ -185,11 +189,29 @@ namespace chiefrim
 			case CR_MSG_LOG:
 				logger::info("halo: {}", reinterpret_cast<const cr_msg_log*>(buffer)->text);
 				break;
+			case CR_MSG_CONSOLE:
+				Console::OnHaloLine(*reinterpret_cast<const cr_msg_log*>(buffer));
+				break;
 			case CR_MSG_HIT_ACTOR:
 				Combat::OnHitActor(*reinterpret_cast<const cr_msg_hit_actor*>(buffer));
 				break;
 			case CR_MSG_PLAYER_DIED:
 				Combat::OnChiefDied();
+				break;
+			case CR_MSG_EXPLOSION:
+				Combat::OnExplosion(*reinterpret_cast<const cr_msg_explosion*>(buffer));
+				break;
+			case CR_MSG_SHOT:
+				Combat::OnShot(*reinterpret_cast<const cr_msg_shot*>(buffer));
+				break;
+			case CR_MSG_CACHE_TAKEN:
+				Caches::OnTaken(*reinterpret_cast<const cr_msg_cache_taken*>(buffer));
+				break;
+			case CR_MSG_CHIEF_STATE:
+				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));
+				break;
+			case CR_MSG_FLASHLIGHT:
+				Lighting::OnFlashlight(*reinterpret_cast<const cr_msg_flashlight*>(buffer));
 				break;
 			default:
 				break;

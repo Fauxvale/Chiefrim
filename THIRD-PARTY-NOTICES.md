@@ -4,7 +4,7 @@ Chiefrim is licensed under the **GNU General Public License v3.0 or later** (`LI
 Its binaries include, or are built from, the components below. Each keeps its own license,
 and every one of them is compatible with GPL-3.0. Their full license texts are in their own
 source trees: the CommonLibSSE-NG submodule, the dependencies CMake fetches, and the pinned
-halo-ce-universal checkout.
+OpenCE checkout.
 
 `Chiefrim/licenses.toml` is the machine-checked list of these components.
 `Chiefrim/tools/check_licenses.py` enforces it (see `Chiefrim/docs/LICENSING.md`).
@@ -24,17 +24,18 @@ No game data from Skyrim or Halo is part of Chiefrim. Users supply both games.
 The plugin uses Microsoft's C/C++ runtime and the Windows SDK (including DirectXMath) as
 **system libraries** (GPL-3.0 §1). Chiefrim doesn't distribute them.
 
-## Halo (built from halo-ce-universal)
+## Halo (built from OpenCE, formerly halo-ce-universal)
 
 | Component | License | Notice |
 |---|---|---|
-| [halo-ce-universal](https://github.com/cybersecurity/halo-ce-universal) (the decompilation and its ports) | CC0-1.0 | Dedicated to the public domain by its authors |
+| [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), formerly halo-ce-universal (the decompilation and its ports) | CC0-1.0 | Dedicated to the public domain by its authors |
 | expat | MIT | Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper; Copyright (c) 2001-2025 Expat maintainers |
 | kcp | MIT | Copyright (c) 2017 Lin Wei |
 | Mbed TLS | Apache-2.0 (elected from Apache-2.0 OR GPL-2.0-or-later) | Copyright The Mbed TLS Contributors |
 | miniupnpc | BSD-3-Clause | Copyright (c) 2005-2025, Thomas BERNARD |
 | Monocypher | CC0-1.0 (elected from BSD-2-Clause OR CC0-1.0) | Copyright (c) 2017-2023, Loup Vaillant |
 | musl (math functions) | MIT | Copyright (c) 2005-2020 Rich Felker, et al. |
+| SMAA | MIT | Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez |
 | stb | MIT (elected from MIT OR Unlicense) | Copyright (c) 2017 Sean Barrett |
 | tomlc17 | MIT | Copyright (c) 2024-2026, CK Tan |
 | zlib | Zlib | Copyright (C) 1995-1998 Jean-loup Gailly and Mark Adler |

@@ -2,9 +2,12 @@
 #include "Puppet.h"
 #include "Settings.h"
 
+#include "Caches.h"
 #include "Camera.h"
 #include "Collision.h"
+#include "CoSave.h"
 #include "Combat.h"
+#include "Console.h"
 #include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
@@ -224,6 +227,7 @@ namespace chiefrim::Puppet
 			link.SendWorldContext(context);
 			link.SendTeleport(position, a_player->data.angle.z);
 			Collision::Reset(context.generation);  // Halo forgets the old world's collision
+			Caches::OnWorld(context.generation);   // and its loose objects: the caches again
 
 			s.worldSent = true;
 			s.worldId = a_id;
@@ -453,6 +457,7 @@ namespace chiefrim::Puppet
 					Hud::Restore();
 					Camera::Release(a_player, true);
 					Combat::Release(a_player);
+					Lighting::RemoveFlashlight();
 					RestoreController(a_player);
 				}
 				WatchAfterUnlink(a_player);
@@ -461,6 +466,8 @@ namespace chiefrim::Puppet
 			if (!wasConnected) {
 				s.worldSent = false;  // a new Halo: tell it everything again
 				Input::OnLinked();
+				CoSave::OnLinked();
+				Console::OnLinked();
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}
@@ -526,8 +533,11 @@ namespace chiefrim::Puppet
 				return;
 			}
 
+			CoSave::Update();  // after the world: a load's kit comes after Halo makes Chief whole
 			Combat::PerFrame(a_player, a_delta);
 			Lighting::Update(a_player);
+			Lighting::UpdateFlashlight(a_player);
+			Caches::Update(a_player);
 			if (Settings::SkyrimMoves() || handedOff) {
 				// handed off, Skyrim moves the player whatever the mode, and Chief follows
 				PublishPlayer(a_player);

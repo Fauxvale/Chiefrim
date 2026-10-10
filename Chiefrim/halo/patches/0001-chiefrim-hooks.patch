@@ -1,16 +1,27 @@
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
-index 43c924d2..fc48394e 100644
+index d78df080..47d517d9 100644
 --- a/port/linux/src/d3d8_gl.c
 +++ b/port/linux/src/d3d8_gl.c
-@@ -25,6 +25,7 @@ Conventions carried over from the Xbox:
- #include "sdl_platform.h"
- #include "halo_ui_pointer.h"
- #include "port_config.h"
+@@ -28,6 +28,7 @@ Conventions carried over from the Xbox:
+ #include "main/console.h"
+ 
+ #include <SDL3/SDL.h>
 +#include "chiefrim_overlay_gl.h" /* CHIEFRIM */
  
  #include <math.h>
  #include <stdio.h>
-@@ -101,6 +102,8 @@ static void screen_mode_choose(long *width, float scale[2])
+@@ -145,7 +146,9 @@ static void anti_aliasing_prepare(void);
+ /* display.anti_aliasing's value (none of them: the first, off) */
+ static void anti_aliasing_read(void)
+ {
+-	const char *setting = config_string("display.anti_aliasing");
++	/* CHIEFRIM: off: the overlay is read back as drawn, never multisampled,
++	supersampled or filtered over */
++	const char *setting = chiefrim_overlay_enabled() ? "off" : config_string("display.anti_aliasing");
+ 	int value;
+ 
+ 	for (value = NUMBER_OF_ANTI_ALIASING_VALUES - 1;
+@@ -189,6 +192,8 @@ static void screen_mode_choose(long *width, float scale[2])
  #else
  	long display_width, display_height;
  
@@ -19,34 +30,39 @@ index 43c924d2..fc48394e 100644
  	*width = 640;
  	scale[0] = scale[1] = 1.0f;
  	if (platform_screen_mode(&display_width, &display_height) && display_width > 0 && display_height > 0)
-@@ -849,6 +852,8 @@ static GLuint framebuffer_get(GLuint color, GLuint depth)
+@@ -1443,6 +1448,8 @@ static unsigned long render_target_write_serial;
  
  /* the pixels per unit of the bound targets (render_target_get) */
  static float target_scale[2] = { 1.0f, 1.0f };
 +/* CHIEFRIM: the bound framebuffer has the overlay's coverage target */
 +static BOOL chiefrim_coverage_bound;
  
- /* the pixel edge of a coordinate in the bound targets' units */
- static GLint target_pixel(float coordinate, int axis)
-@@ -872,7 +877,16 @@ static BOOL bind_targets(BOOL *has_depth)
+ /* the pixel edge of a coordinate in a target's units, at its scale:
+ floorf's, without its call (on 32-bit x86 it saves and restores the FPU's
+@@ -1485,6 +1492,22 @@ static BOOL bind_targets(BOOL *has_depth)
  	/* viewports and clears are in the targets' units (render_target_get) */
  	target_scale[0] = color ? color->target.scale[0] : depth->target.scale[0];
  	target_scale[1] = color ? color->target.scale[1] : depth->target.scale[1];
--	state_framebuffer(framebuffer_get(color ? color->target.texture : 0, depth ? depth->target.texture : 0));
 +	{
-+		/* CHIEFRIM: the back buffer with the overlay's coverage */
++		/* CHIEFRIM: the back buffer with the overlay's coverage, read back as
++		drawn: never multisampled */
 +		GLuint overlay = color && color->target.data == device.back_buffer.Data ?
 +			chiefrim_overlay_framebuffer(color->target.texture, depth ? depth->target.texture : 0,
 +				color->target.gl_width, color->target.gl_height) : 0;
 +
 +		chiefrim_coverage_bound = overlay != 0;
-+		state_framebuffer(overlay ? overlay :
-+			framebuffer_get(color ? color->target.texture : 0, depth ? depth->target.texture : 0));
++		if (overlay)
++		{
++			state_framebuffer(overlay);
++			target_samples = 1;
++			*has_depth = depth != NULL;
++			return TRUE;
++		}
 +	}
- 	*has_depth = depth != NULL;
- 	return TRUE;
- }
-@@ -2385,6 +2399,9 @@ static void apply_raster_state(BOOL has_depth)
+ 	/* with multisampling, multisampled where either is a screen buffer or
+ 	is multisampled already */
+ 	samples = anti_aliasing() == _anti_aliasing_msaa ? anti_aliasing_samples : 0;
+@@ -3413,6 +3436,9 @@ static void apply_raster_state(BOOL has_depth)
  		gl_state.color_mask = color_mask;
  		glColorMask((color_mask & 1) != 0, (color_mask & 2) != 0, (color_mask & 4) != 0, (color_mask & 8) != 0);
  	}
@@ -56,7 +72,7 @@ index 43c924d2..fc48394e 100644
  
  	/* the cull mode names the winding to discard; FRONTFACE names the
  	front winding */
-@@ -3545,6 +3562,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -4762,6 +4788,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  			device.depth_stencil ? (unsigned long)device.depth_stencil->Data : 0);
  	stats.clears++;
  	color_to_vec4(color, rgba);
@@ -65,7 +81,7 @@ index 43c924d2..fc48394e 100644
  	if (flags & D3DCLEAR_TARGET)
  	{
  		/* the Xbox clears the channels named (D3DCLEAR_TARGET_R, _G, _B, _A):
-@@ -3579,6 +3598,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -4796,6 +4824,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  		glScissor(x0, y0, target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0,
  			target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
  		glClear(mask);
@@ -74,7 +90,7 @@ index 43c924d2..fc48394e 100644
  		glDisable(GL_SCISSOR_TEST);
  		xgpu_gl_state_invalidate();
  		return;
-@@ -3673,6 +3694,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5042,6 +5072,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  	{
  		struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
  		int window_width, window_height, width, height, x, y;
@@ -82,9 +98,9 @@ index 43c924d2..fc48394e 100644
  
  		if (trace_frame())
  			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
-@@ -3680,6 +3702,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
- 		if (screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0)
- 			write_screenshot(back_buffer);
+@@ -5057,6 +5088,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+ 			write_key_screenshot(back_buffer);
+ #endif
  
 +		/* CHIEFRIM: published for Skyrim, Halo's window isn't swapped (its vsync would hold up the lockstep) */
 +		chiefrim_published = chiefrim_overlay_present(back_buffer->target.texture, back_buffer->target.gl_width,
@@ -92,7 +108,7 @@ index 43c924d2..fc48394e 100644
  		platform_video_drawable_size(&window_width, &window_height);
  		/* letterbox to the back buffer's aspect ratio */
  		width = window_width;
-@@ -3700,7 +3725,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5077,7 +5111,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		/* row 0 of the render target is the top of the picture */
  		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
  			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -100,10 +116,10 @@ index 43c924d2..fc48394e 100644
 +		if (!chiefrim_published)
 +			platform_video_swap();
  		xgpu_gl_state_invalidate();
+ 		memory_watch_begin_frame();
  		xgpu_texture_cache_begin_frame();
- #ifdef HALO_ANDROID
 diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
-index bbea0de6..1b9042af 100644
+index 211146d1..0a8bf1d5 100644
 --- a/port/linux/src/nv2a_psh.c
 +++ b/port/linux/src/nv2a_psh.c
 @@ -17,6 +17,7 @@ Register values are clamped to [-1, 1] between stages, as on the hardware.
@@ -114,17 +130,18 @@ index bbea0de6..1b9042af 100644
  
  #include <stdio.h>
  #include <stdlib.h>
-@@ -554,6 +555,9 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+@@ -618,6 +619,10 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  		"in float xFog;\n"
  		"layout(location = 0) out vec4 fragment_color;\n"
  		XGPU_PIXEL_UNIFORMS);
 +	if (chiefrim_overlay_enabled()) /* CHIEFRIM: the overlay's coverage (chiefrim_overlay_gl.h) */
 +		xgpu_text_append(&text, "layout(location = 1) out vec4 chiefrim_coverage;\n"
-+			"layout(location = 2) out vec4 chiefrim_depth;\n");
++			"layout(location = 2) out vec4 chiefrim_depth;\n"
++			"layout(location = 3) out vec4 chiefrim_weapon;\n");
  	for (stage = 0; stage < 4; stage++)
  		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
- 	xgpu_text_append(&text,
-@@ -659,6 +663,15 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+ 	if (key->per_pixel_lighting)
+@@ -745,6 +750,16 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  	if (key->count_samples)
  		xgpu_text_append(&text, "\tatomicCounterIncrement(visible_samples);\n");
  #endif
@@ -135,65 +152,120 @@ index bbea0de6..1b9042af 100644
 +		xgpu_text_append(&text, "\tvec4 shown = clamp(result, 0.0, 1.0);\n"
 +			"\tchiefrim_coverage = vec4(dot(shown.rgb, vec3(1.0 / 3.0)), 0.0, 0.0, shown.a);\n"
 +			"\tchiefrim_depth = vec4(max(max(shown.r, shown.g), max(shown.b, shown.a)) > 0.004 ?\n"
-+			"\t\t1.0 / gl_FragCoord.w : 1.0e30);\n");
++			"\t\t1.0 / gl_FragCoord.w : 1.0e30);\n"
++			"\tchiefrim_weapon = vec4(1.0, 0.0, 0.0, shown.a);\n");
 +	}
  	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
  	return text.buffer;
  }
+diff --git a/source/effects/decals.c b/source/effects/decals.c
+index 18641671..7f5376a2 100644
+--- a/source/effects/decals.c
++++ b/source/effects/decals.c
+@@ -866,6 +866,34 @@ void decals_update(
+ 	return;
+ }
+ 
++/* CHIEFRIM: every decal but the map's ends at the next update, as an old
++one does (Skyrim's world moved: they're on surfaces that aren't there) */
++long decals_expire_all(
++	void)
++{
++	long count = 0;
++
++	if (global_decal_data->valid)
++	{
++		struct data_iterator iterator;
++		struct decal_datum *decal;
++
++		data_iterator_new(&iterator, global_decal_data);
++		while ((decal = data_iterator_next(&iterator)) != NULL)
++		{
++			if (!TEST_FLAG(decal->flags, _decal_permanent_bit))
++			{
++				decal->creation_time = game_time_get() - 1;
++				decal->lifetime = 0.0001f;
++				decal->decay_time = 0.f;
++				count++;
++			}
++		}
++	}
++
++	return count;
++}
++
+ void decals_delete_permanent_from_cluster(
+ 	short cluster_index)
+ {
+diff --git a/source/effects/decals.h b/source/effects/decals.h
+index 4af0f508..770f2556 100644
+--- a/source/effects/decals.h
++++ b/source/effects/decals.h
+@@ -76,6 +76,8 @@ void decals_dispose(
+ 	void);
+ void decals_dispose_from_old_map(
+ 	void);
++long decals_expire_all( /* CHIEFRIM */
++	void);
+ void decals_update(
+ 	void);
+ void decals_delete_permanent_from_cluster(
 diff --git a/source/game/game.c b/source/game/game.c
-index 0549cc04..8a62a182 100644
+index 83742035..9b50472c 100644
 --- a/source/game/game.c
 +++ b/source/game/game.c
-@@ -179,6 +179,7 @@ struct game_options;
- #include "structures/structures.h"
+@@ -182,6 +182,7 @@ struct game_options;
  #include "units/units.h"
  #include "units/vehicles.h"
+ #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
  
  /* network_game_globals.c's */
  boolean network_game_distributed_client(void);
-@@ -323,7 +324,7 @@ void game_tick(
+@@ -335,7 +336,9 @@ void game_tick(
  	/* (the host's actors drive the host's units, which a client of the
  	distributed netcode has from the host: its own would fight the host's
  	positions, and could place objects of their own) */
 -	if (!network_game_distributed_client())
-+	if (!network_game_distributed_client() && !chiefrim_active()) /* CHIEFRIM: no level AI */
++	if (chiefrim_active())
++		; /* CHIEFRIM: no level AI */
++	else if (!network_game_distributed_client())
  		ai_update();
- 	players_update_before_game();
- 
-@@ -337,7 +338,8 @@ void game_tick(
- 	unlock_global_random_seed();
- 	game_engine_update();
- 	editor_update();
--	hs_update();
-+	if (!chiefrim_active()) /* CHIEFRIM: no level scripts or cutscenes */
-+		hs_update();
+ 	else
+ 		network_actors_drive();
+@@ -360,7 +363,8 @@ void game_tick(
+ 	/* port: in network co-op only the host runs the scripts. A client running
+ 	them would place the map's actors and objects a second time and make
+ 	decisions that belong to the host. */
+-	if (!(network_game_distributed_client() && network_coop_active()))
++	if (!(network_game_distributed_client() && network_coop_active()) &&
++		!chiefrim_active()) /* CHIEFRIM: no level scripts or cutscenes */
+ 		hs_update();
  	recorded_animations_update();
  	objects_update();
- 	players_update_after_game();
 diff --git a/source/game/player_control.c b/source/game/player_control.c
-index 72798d4b..015440ec 100644
+index 429fd821..b269faa6 100644
 --- a/source/game/player_control.c
 +++ b/source/game/player_control.c
-@@ -209,6 +209,7 @@ symbols in this file:
- #include "units/vehicles.h"
+@@ -211,6 +211,7 @@ symbols in this file:
  
  #include "real_math.h"
+ #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
  
  /* ---------- constants */
  
-@@ -1236,7 +1237,8 @@ static void get_local_player_input_blob(
- 							/* no magnetism for the mouse (port/linux/src/xinput_sdl.c) */
+@@ -1286,7 +1287,8 @@ static void get_local_player_input_blob(
  							extern int halo_linux_mouse_aiming(short gamepad_index);
+ 							extern int halo_linux_touch_aiming(short gamepad_index);
  
--							if (halo_linux_mouse_aiming(gamepad_index))
-+							if (halo_linux_mouse_aiming(gamepad_index) ||
+-							if (halo_linux_mouse_aiming(gamepad_index) || halo_linux_touch_aiming(gamepad_index))
++							if (halo_linux_mouse_aiming(gamepad_index) || halo_linux_touch_aiming(gamepad_index) ||
 +								chiefrim_input_driving(gamepad_index)) /* CHIEFRIM: aims like the mouse */
  							{
  								control->magnetism_level = 0.f;
  							}
-@@ -1300,6 +1302,21 @@ static void get_local_player_input_blob(
+@@ -1351,6 +1353,21 @@ static void get_local_player_input_blob(
  							input->facing_delta.yaw += mouse_yaw;
  							input->facing_delta.pitch += mouse_pitch;
  						}
@@ -216,10 +288,10 @@ index 72798d4b..015440ec 100644
  				}
  				else
 diff --git a/source/game/players.c b/source/game/players.c
-index a834d481..94d17bf0 100644
+index 51dbc730..9893eb2c 100644
 --- a/source/game/players.c
 +++ b/source/game/players.c
-@@ -275,6 +275,7 @@ symbols in this file:
+@@ -279,6 +279,7 @@ symbols in this file:
  #include "units/units.h"
  #include "units/vehicle_definitions.h"
  #include "units/vehicles.h"
@@ -227,7 +299,7 @@ index a834d481..94d17bf0 100644
  
  /* network_game_globals.c's */
  boolean network_game_distributed_client(void);
-@@ -3897,7 +3898,10 @@ void players_update_after_game(
+@@ -4781,7 +4782,10 @@ void players_update_after_game(
  				else if (player->unit_index != NONE)
  				{
  					unit = unit_get(player->unit_index);
@@ -239,7 +311,7 @@ index a834d481..94d17bf0 100644
  					{
  						players_show_telefragged(iterator.datum_index);
  						player_telefrag_effect_stop(iterator.datum_index);
-@@ -3932,7 +3936,8 @@ void players_update_after_game(
+@@ -4820,7 +4824,8 @@ void players_update_after_game(
  						&scenario->bsp_switch_trigger_volumes,
  						bsp_switch_trigger_volume_index,
  						struct scenario_bsp_switch_trigger_volume);
@@ -250,7 +322,7 @@ index a834d481..94d17bf0 100644
  						scenario_trigger_volume_test_object(
  							bsp_switch_trigger_volume->trigger_volume_index,
 diff --git a/source/input/input_abstraction.c b/source/input/input_abstraction.c
-index a9decc9c..f8550cb1 100644
+index 5caa4942..ccf1b0e1 100644
 --- a/source/input/input_abstraction.c
 +++ b/source/input/input_abstraction.c
 @@ -69,6 +69,7 @@ symbols in this file:
@@ -270,27 +342,27 @@ index a9decc9c..f8550cb1 100644
  	for (control_index = 0; control_index < NUMBER_OF_GAME_CONTROLS; control_index++)
  	{
  		if (keyboard_game_controls[control_index] < 0)
-@@ -268,6 +271,7 @@ static void keyboard_controls_update(
- 		state->forward_movement = y * length;
- 		state->strafe = -x * length;
+@@ -286,6 +289,7 @@ static void keyboard_controls_update(
+ 			state->strafe = strafe;
+ 		}
  	}
 +	chiefrim_input_movement((short)controller_index, &state->forward_movement, &state->strafe); /* CHIEFRIM */
  	return;
  }
  
 diff --git a/source/interface/hud_messaging.c b/source/interface/hud_messaging.c
-index 1413e765..fcd41f87 100644
+index 29248cc4..67bc1df0 100644
 --- a/source/interface/hud_messaging.c
 +++ b/source/interface/hud_messaging.c
-@@ -145,6 +145,7 @@ symbols in this file:
- #include "text/font_group.h"
+@@ -146,6 +146,7 @@ symbols in this file:
  #include "text/text_group.h"
  #include "text/unicode.h"
+ #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
  
  #include <stddef.h>
  
-@@ -1532,7 +1533,16 @@ void hud_messaging_update(
+@@ -1578,7 +1579,16 @@ void hud_messaging_update(
  					case _hud_message_type_icon:
  						{
  							short icon_index = NONE;
@@ -308,7 +380,7 @@ index 1413e765..fcd41f87 100644
  							{
  								if (element->data <= _icon_look)
 diff --git a/source/interface/interface.c b/source/interface/interface.c
-index 996b8957..da90305b 100644
+index e0d616f8..3562ba88 100644
 --- a/source/interface/interface.c
 +++ b/source/interface/interface.c
 @@ -104,6 +104,7 @@ symbols in this file:
@@ -331,11 +403,69 @@ index 996b8957..da90305b 100644
  		}
  		else
  		{
+diff --git a/source/interface/motion_sensor.c b/source/interface/motion_sensor.c
+index be07f7fe..9e6891a0 100644
+--- a/source/interface/motion_sensor.c
++++ b/source/interface/motion_sensor.c
+@@ -94,6 +94,7 @@ symbols in this file:
+ #include "cseries.h"
+ #include "real_math.h"
+ #include "motion_sensor.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ #include "camera/director.h"
+ #include "game/game.h"
+ #include "game/game_allegiance.h"
+@@ -851,6 +852,13 @@ static char blip_type_get(
+ 	if (!unit_try_and_get(object_index))
+ 		return _blip_type_enemy;
+ 
++	{
++		boolean chiefrim_hostile; /* CHIEFRIM: one of Skyrim's people: red if hostile to the player, yellow if not */
++
++		if (chiefrim_proxy_motion_sensor(object_index, 0.f, NULL, &chiefrim_hostile))
++			return chiefrim_hostile ? _blip_type_enemy : _blip_type_friend;
++	}
++
+ 	unit = unit_get(object_index);
+ 	if (vehicle_try_and_get(object_index))
+ 	{
+@@ -1018,7 +1026,12 @@ static boolean should_draw_object(
+ 	{
+ 		struct unit_datum *unit = unit_get(object_index);
+ 
+-		if (TEST_FLAG(
++		if (chiefrim_proxy_motion_sensor(object_index, /* CHIEFRIM: as its actor moves or attacks in Skyrim */
++			hud_globals->defaults.motion_sensor_velocity_sensitivity, &result, NULL))
++		{
++			result = result || debug_motion_sensor_draw_all_units;
++		}
++		else if (TEST_FLAG(
+ 			unit->unit.control_flags,
+ 			_unit_control_weapon_primary_trigger_bit) ||
+ 			(unit->unit.grenade_throw_state != _unit_grenade_throw_idle &&
 diff --git a/source/items/items.c b/source/items/items.c
-index 3e2c7c0c..e4cc47f6 100644
+index 942008ac..4f7809cb 100644
 --- a/source/items/items.c
 +++ b/source/items/items.c
-@@ -678,6 +678,11 @@ boolean item_update(
+@@ -76,6 +76,7 @@ symbols in this file:
+ #include "scenario/scenario.h"
+ #include "sound/game_sound.h"
+ #include "units/units.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -387,7 +388,8 @@ void item_accelerate(
+ 		{
+ 			struct object_marker marker;
+ 
+-			if (object_get_marker_by_name(item_index, "ground point", &marker, 1))
++			if (object_get_marker_by_name(item_index, "ground point", &marker, 1) &&
++				chiefrim_item_rest_valid(item)) /* CHIEFRIM: a surface of the collision installed now */
+ 			{
+ 				struct collision_bsp *collision_bsp;
+ 				struct collision_surface const *surface;
+@@ -718,6 +720,11 @@ boolean item_update(
  					switch (collision.type)
  					{
  					case _collision_result_structure:
@@ -345,21 +475,75 @@ index 3e2c7c0c..e4cc47f6 100644
 +						if (collision.surface_index > 0x7fff)
 +							break;
  						SET_FLAG(item->item.flags, _item_on_structure_bit, TRUE);
- 						item->item.rested_surface_index =
- 							(short)collision.surface_index;
+ 						item_set_rested_surface(item, collision.surface_index);
+ 						item->item.bsp_index =
+@@ -806,7 +813,8 @@ boolean item_update(
+ 
+ 			if (TEST_FLAG(item->item.flags, _item_on_structure_bit) &&
+ 				item_rested_surface_index(item) != NONE &&
+-				item->item.bsp_index == global_structure_bsp_index_get())
++				item->item.bsp_index == global_structure_bsp_index_get() &&
++				chiefrim_item_rest_valid(item)) /* CHIEFRIM: a surface of the collision installed now */
+ 			{
+ 				struct collision_surface const *surface;
+ 
+diff --git a/source/items/projectiles.c b/source/items/projectiles.c
+index 77783077..d6a8a33f 100644
+--- a/source/items/projectiles.c
++++ b/source/items/projectiles.c
+@@ -142,6 +142,8 @@ symbols in this file:
+ #include "units/bipeds.h"
+ #include "units/units.h"
+ 
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
++
+ /* ---------- constants */
+ 
+ enum projectile_datum_flags
+@@ -1279,6 +1281,8 @@ static boolean projectile_collision_test_line(
+ 	struct projectile_datum *projectile = projectile_get(projectile_index);
+ 	struct projectile_definition const *definition = projectile_definition_get(projectile->definition_index);
+ 
++	if (chiefrim_active()) /* CHIEFRIM: Skyrim hurts the destructible objects on the way (spider webs) */
++		chiefrim_note_projectile_way(&projectile->object.position, new_position);
+ 	if (collision_test_line(
+ 		_collision_test_for_projectiles_flags,
+ 		&projectile->object.position,
+@@ -1573,6 +1577,13 @@ static void projectile_collision(
+ 		if (damage.material_type != NONE)
+ 			material_type = damage.material_type;
+ 		material_effect_scale = damage.material_effect_scale;
++		/* CHIEFRIM: a stand-in for a Skyrim person bleeds as one would (blood,
++		not its biped's armour's sparks) */
++		if (chiefrim_object_is_proxy(collision->object_index))
++		{
++			material_type = _material_human;
++			chiefrim_proxy_struck(collision->object_index, &collision->point, damage.definition_index);
++		}
+ 	}
+ 
+ 	projectile->projectile.hit_material_type = material_type;
 diff --git a/source/main/main.c b/source/main/main.c
-index e35691e1..33935254 100644
+index 3d70fbb8..bc01c798 100644
 --- a/source/main/main.c
 +++ b/source/main/main.c
-@@ -388,6 +388,7 @@ symbols in this file:
- #include "text/draw_string.h"
- #include "text/font_group.h"
- #include "tag_files/files.h"
+@@ -403,6 +403,7 @@ symbols in this file:
+ #define HALO_BUILD_FLAVOR "local"
+ #endif
+ #endif
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
  
  /* ---------- constants */
  
-@@ -3026,6 +3027,7 @@ static void main_game_render(
+@@ -1158,6 +1159,7 @@ void set_window_camera_values(
+ 				1.0f);
+ 
+ 		if (window->local_player_index != NONE &&
++			!chiefrim_active() && /* CHIEFRIM: no camera shake or kick: Skyrim's camera is the view, and decals slid on its world */
+ 			!console_is_active() &&
+ 			!game_time_get_paused() &&
+ 			director_get_perspective(window->local_player_index) !=
+@@ -3273,6 +3275,7 @@ static void main_game_render(
  			window->local_player_index = last_local_player_index;
  			observer = observer_get_camera(window->local_player_index);
  			observer = render_interpolation_camera(window->local_player_index, observer);
@@ -367,7 +551,7 @@ index e35691e1..33935254 100644
  		}
  		else
  		{
-@@ -3082,6 +3084,7 @@ void main_loop(
+@@ -3329,6 +3332,7 @@ void main_loop(
  	main_globals.switch_to_structure_bsp_index = NONE;
  	main_globals.halt_time_scale = TRUE;
  
@@ -375,7 +559,7 @@ index e35691e1..33935254 100644
  	console_initialize();
  	debug_keys_initialize();
  	game_initialize();
-@@ -3266,6 +3269,7 @@ void main_loop(
+@@ -3519,6 +3523,7 @@ void main_loop(
  					collision_log_continue_period(1);
  					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
@@ -384,10 +568,10 @@ index e35691e1..33935254 100644
  					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  				}
 diff --git a/source/objects/damage.c b/source/objects/damage.c
-index 5f00c31c..16053cde 100644
+index c75e6b50..ce0d0742 100644
 --- a/source/objects/damage.c
 +++ b/source/objects/damage.c
-@@ -131,6 +131,7 @@ symbols in this file:
+@@ -132,6 +132,7 @@ symbols in this file:
  #include "rasterizer/rasterizer.h"
  #include "render/render.h"
  #include "scenario/scenario.h"
@@ -395,7 +579,25 @@ index 5f00c31c..16053cde 100644
  #include "tag_files/tag_files.h"
  #include "text/draw_string.h"
  #include "units/unit_definitions.h"
-@@ -2482,6 +2483,8 @@ static void area_of_effect_cause_damage_to_object(
+@@ -1920,6 +1921,8 @@ void area_of_effect_cause_damage(
+ 	long object_indices[HALO_PORT_MAXIMUM_AREA_OF_EFFECT_OBJECTS];
+ 	short object_count;
+ 
++	if (chiefrim_active()) /* CHIEFRIM: Skyrim's loose objects fly too */
++		chiefrim_note_explosion(&damage->epicenter, definition->cutoff_radius, definition->damage.instantaneous_acceleration);
+ 	object_count = objects_in_sphere(
+ 		0,
+ 		0,
+@@ -2545,6 +2548,8 @@ static void area_of_effect_cause_damage_to_object(
+ 			&object->object.bounding_sphere_center,
+ 			&damage->direction);
+ 		distance = normalize3d(&damage->direction);
++		if (chiefrim_active()) /* CHIEFRIM: to a Skyrim actor's nearest shape (a dragon's tail) */
++			chiefrim_proxy_area_distance(object_index, epicenter, &distance);
+ 		radius_delta = damage_effect->cutoff_radius - damage_effect->falloff_radius;
+ 		if (radius_delta > 0.f)
+ 		{
+@@ -2569,6 +2574,8 @@ static void area_of_effect_cause_damage_to_object(
  
  		if (scale > 0.f)
  		{
@@ -405,7 +607,7 @@ index 5f00c31c..16053cde 100644
  				damage,
  				object_index,
 diff --git a/source/objects/object_lights.c b/source/objects/object_lights.c
-index f4ba4d79..8544f711 100644
+index 8c996afd..b7fa3834 100644
 --- a/source/objects/object_lights.c
 +++ b/source/objects/object_lights.c
 @@ -183,6 +183,7 @@ symbols in this file:
@@ -414,9 +616,9 @@ index f4ba4d79..8544f711 100644
  #include "units/units.h"
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
  
- /* ---------- constants */
- 
-@@ -2277,6 +2278,10 @@ void lights_prepare_for_object_static(
+ /* port: port/linux/src (halo.log) */
+ void platform_log(const char *format, ...);
+@@ -2512,6 +2513,10 @@ void lights_prepare_for_object_static(
  		"c:\\halo\\SOURCE\\objects\\object_lights.c",
  		970,
  		lighting);
@@ -427,20 +629,136 @@ index f4ba4d79..8544f711 100644
  	if (TEST_FLAG(object->object.flags, _object_static_lighting_raycast_sideways_bit))
  	{
  		SET_FLAG(flags, _distant_lighting_raycast_sideways_bit, TRUE);
+@@ -2617,3 +2622,65 @@ void lights_prepare_for_object_static(
+ 
+ 	return;
+ }
++
++/* CHIEFRIM: how an object's flashlight shines now (Chief's, docs §9): the
++light attached to it that is marked as the first-person flashlight (else its
++first light), as lights_preprocess_scene would make it this frame: its colour
++(black when off), radius (world units) and cone (radians). Skyrim lights its
++own world with it, as Halo's light has no world of Halo's to fall on. */
++boolean chiefrim_object_flashlight(
++	long object_index,
++	real_rgb_color *color,
++	real *radius,
++	real *cutoff_angle,
++	real *falloff_angle)
++{
++	struct object_datum *object = object_try_and_get(object_index);
++	struct object_definition *object_definition;
++	struct object_attachment_definition *found = NULL;
++	struct point_light_definition *definition = NULL;
++	short attachment_index;
++	real intensity = 0.0f;
++
++	if (!object)
++		return FALSE;
++	object_definition = object_definition_get(object->definition_index);
++	for (attachment_index = 0; attachment_index < object_definition->object.attachments.count; attachment_index++)
++	{
++		struct object_attachment_definition *attachment = TAG_BLOCK_GET_ELEMENT(
++			&object_definition->object.attachments,
++			attachment_index,
++			struct object_attachment_definition);
++		struct point_light_definition *candidate;
++
++		if (attachment->type.group_tag != LIGHT_DEFINITION_TAG || attachment->type.index == NONE)
++			continue;
++		candidate = light_definition_get(attachment->type.index);
++		if (TEST_FLAG(candidate->flags, _light_definition_is_first_person_flashlight_bit) || !found)
++		{
++			found = attachment;
++			definition = candidate;
++			if (TEST_FLAG(candidate->flags, _light_definition_is_first_person_flashlight_bit))
++				break;
++		}
++	}
++	if (!found)
++		return FALSE;
++
++	object_get_function_value(object_index, found->primary_scale_function_reference - 1, &intensity);
++	rgb_colors_interpolate_and_scale(
++		color,
++		definition->color_interpolation_flags,
++		&definition->color_lower_bound,
++		&definition->color_upper_bound,
++		found->change_color_reference - 1 == NONE
++			? global_real_rgb_white
++			: &object->object.outgoing_change_colors[found->change_color_reference - 1],
++		intensity);
++	*radius = (definition->radius_modifier_lower_bound * (1.0f - intensity)
++		+ definition->radius_modifier_upper_bound * intensity)
++		* definition->radius;
++	*cutoff_angle = definition->cutoff_angle;
++	*falloff_angle = definition->falloff_angle;
++	return TRUE;
++}
+diff --git a/source/objects/objects.c b/source/objects/objects.c
+index 4c9f6a1d..f4995b12 100644
+--- a/source/objects/objects.c
++++ b/source/objects/objects.c
+@@ -55,6 +55,7 @@ OBJECTS.C
+ #include "units/units.h"
+ /* port: object_bounds_cache.c's */
+ void object_bounds_cache_update(long object_index, real_point3d const *center, real radius);
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -2940,6 +2941,8 @@ void object_compute_node_matrices(
+ 	{
+ 		object->object.bounding_sphere_radius *= object->object.scale;
+ 	}
++	if (chiefrim_active()) /* CHIEFRIM: a Skyrim actor's proxy is as big as its actor's shapes */
++		chiefrim_proxy_bounds(object_index, &object->object.bounding_sphere_center, &object->object.bounding_sphere_radius);
+ 	/* port: (and in the packed copy collision reads: object_bounds_cache.c) */
+ 	object_bounds_cache_update(object_index, &object->object.bounding_sphere_center, object->object.bounding_sphere_radius);
+ 
+diff --git a/source/physics/collisions.c b/source/physics/collisions.c
+index 42775183..ab3ca026 100644
+--- a/source/physics/collisions.c
++++ b/source/physics/collisions.c
+@@ -115,6 +115,7 @@ symbols in this file:
+ #include "units/bipeds.h"
+ /* port: object_bounds_cache.c's */
+ boolean object_bounds_cache_out_of_reach(long object_index, real_point3d const *point, real radius);
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
+ 
+@@ -1692,7 +1693,15 @@ static boolean object_test_vector(
+ 				&object->object.bounding_sphere_center,
+ 				(object->object.bounding_sphere_radius)))
+ 		{
+-			if (TEST_FLAG(_object_mask_vehicle, object->object.type) &&
++			long chiefrim_hit = chiefrim_active() ? /* CHIEFRIM: a Skyrim actor's proxy is hit on its actor's own shapes */
++				chiefrim_proxy_test_vector(object_index, point, vector, collision) : NONE;
++
++			if (chiefrim_hit != NONE)
++			{
++				if (chiefrim_hit)
++					hit = TRUE;
++			}
++			else if (TEST_FLAG(_object_mask_vehicle, object->object.type) &&
+ 				TEST_FLAG(flags, _collision_test_use_vehicle_physics_bit))
+ 			{
+ 				struct physics_instance instance;
 diff --git a/source/render/render.c b/source/render/render.c
-index 68a746c2..24b5171a 100644
+index dc251459..cd512776 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
-@@ -87,6 +87,8 @@ symbols in this file:
- #include "effects/weather_particle_systems.h"
- #include "main/main.h"
+@@ -89,6 +89,8 @@ symbols in this file:
  #include "structures/structures.h"
+ /* port: static transparent part links for the newly loaded model tags. */
+ #include "models/models.h"
 +#include "chiefrim/chiefrim.h" /* CHIEFRIM */
 +void render_frustum_get_projection_bounds(struct render_frustum const *frustum, real_rectangle2d *bounds); /* CHIEFRIM: render_cameras.c's */
  
  /* ---------- constants */
  
-@@ -310,6 +312,9 @@ static void render_window(
+@@ -314,6 +316,9 @@ static void render_window(
  {
  	struct rasterizer_window_begin_parameters parameters;
  	short rendered_cluster_index;
@@ -450,7 +768,7 @@ index 68a746c2..24b5171a 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -323,13 +328,67 @@ static void render_window(
+@@ -327,13 +332,69 @@ static void render_window(
  	parameters.rasterizer_target = rasterizer_target;
  	parameters.has_mirror = has_mirror;
  	parameters.window_index = render.window_index;
@@ -508,18 +826,20 @@ index 68a746c2..24b5171a 100644
 +		rasterizer_transparent_geometry_draw(TRUE);
 +		rasterizer_transparent_geometry_draw(FALSE);
 +		rasterizer_transparent_geometry_stop();
++		chiefrim_set_render_hud(TRUE); /* Skyrim grades the weapon, not the HUD */
 +		interface_draw_screen();
 +		rasterizer_screen_flash();
 +		halo_screen_ui_offset(TRUE);
 +		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 +		halo_screen_ui_offset(FALSE);
++		chiefrim_render_hitboxes(); /* the console's "chiefrim shapes": over everything */
 +		chiefrim_set_render_layer(CHIEFRIM_LAYER_ALL);
 +	}
 +	else if (!bink_playback_in_progress())
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -528,7 +587,7 @@ static void render_player_frame(
+@@ -542,7 +603,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  
@@ -611,7 +931,7 @@ index dad616be..f12b20d2 100644
  			interpolate_real_rgb_color(
  				&lighting->ambient_color,
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
-index 265149a3..76b6189b 100644
+index ff88903b..5dd8fe66 100644
 --- a/source/scenario/scenario.c
 +++ b/source/scenario/scenario.c
 @@ -194,6 +194,7 @@ symbols in this file:
@@ -646,7 +966,7 @@ index 265149a3..76b6189b 100644
  struct bsp3d *global_bsp3d_get(
  	void)
  {
-@@ -1039,6 +1057,7 @@ boolean scenario_switch_structure_bsp(
+@@ -1147,6 +1165,7 @@ boolean scenario_switch_structure_bsp(
  				struct collision_bsp);
  			scenario_globals->structure_bsp_index = structure_bsp_index;
  			global_structure_bsp_index = structure_bsp_index;
@@ -654,6 +974,18 @@ index 265149a3..76b6189b 100644
  
  			if (had_old_structure_bsp)
  			{
+@@ -1352,6 +1371,11 @@ void scenario_get_sound_environment(
+ 		render_debug_string(FALSE, temporary);
+ 	}
+ 
++	if (chiefrim_active()) /* CHIEFRIM: Skyrim's world has its own ambience: none of the level's loops or acoustics */
++	{
++		selected_sound_environment_index = NONE;
++		selected_background_sound_index = NONE;
++	}
+ 	if (selected_sound_environment_index == NONE)
+ 		definition = (struct sound_environment_definition *)&default_sound_environment;
+ 	else
 diff --git a/source/scenario/scenario.h b/source/scenario/scenario.h
 index 73088440..c3e862fb 100644
 --- a/source/scenario/scenario.h

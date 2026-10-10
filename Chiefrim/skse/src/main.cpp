@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "Caches.h"
 #include "Camera.h"
+#include "CoSave.h"
 #include "Combat.h"
+#include "Console.h"
 #include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
@@ -33,9 +36,11 @@ namespace
 			chiefrim::Puppet::Install();
 			chiefrim::Overlay::Install();
 			chiefrim::Combat::Install();
+			chiefrim::Console::Install();
 			chiefrim::Hud::Install();
 			chiefrim::Handoff::Install();
 			chiefrim::Lighting::Install();
+			chiefrim::Caches::Install();
 		}
 	}
 }
@@ -47,5 +52,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	SetupLog();
 	logger::info("Chiefrim {} loading (runtime {})", "0.0.1", a_skse->RuntimeVersion().string());
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
+	chiefrim::CoSave::Install();
 	return true;
 }

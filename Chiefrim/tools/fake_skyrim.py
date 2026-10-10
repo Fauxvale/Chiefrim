@@ -27,14 +27,16 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 13
+VERSION = 28
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
-OFF_FRAMES = OFF_DISPLAY + 96 + 1552 + 40
+ACTORS_MAX, HITBOXES_MAX = 48, 1024
+SLOT_ACTORS_BYTES = 16 + 40 * ACTORS_MAX + 8 + 32 * HITBOXES_MAX
+OFF_FRAMES = OFF_DISPLAY + 96 + SLOT_ACTORS_BYTES + 32
 OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
-FRAME_BYTES = 3 * FRAME_LAYER_BYTES
+FRAME_BYTES = 3 * FRAME_LAYER_BYTES + FRAME_MAX_W * FRAME_MAX_H  # the layers, the weapon share
 OFF_CAMERA = OFF_DISPLAY + 24
 TOTAL_SIZE = OFF_FRAMES + 192 + FRAME_SLOTS * FRAME_BYTES
 
@@ -48,6 +50,13 @@ RING_TO_HALO, RING_TO_SKYRIM = 360, 360 + 128 + RING_BYTES
 SIDE_READY, SIDE_CLOSING = 2, 3
 MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
+MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION, MSG_FLASHLIGHT = 12, 13, 14, 15, 16
+MSG_SHOT = 0x13
+MSG_CACHE_PLACE, MSG_CACHE_TAKEN = 0x14, 0x15
+SHOTS = [0]
+MSG_CONSOLE, MSG_DEBUG = 17, 18
+GIVE_LIST, DEBUG_HITBOXES = 1, 1
+KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
 REGION_UNITS = 1024.0
@@ -55,6 +64,38 @@ TRIS_PER_MESSAGE = 1600
 
 
 ROUGH = False
+
+# --actor-shape: the test actor's hit shapes (cr_hitbox), from its feet, Skyrim
+# units; it faces south, towards Chief. (a, b, radius, flags); flag 1: a person's head
+HITBOX_HEAD = 1
+ACTOR_SHAPES = {
+    "person": (128.0, 118.0, [
+        ((-8, 0, 12), (-8, 0, 78), 9, 0), ((8, 0, 12), (8, 0, 78), 9, 0),  # legs
+        ((0, 0, 82), (0, 0, 104), 17, 0),                                    # body
+        ((0, 0, 118), (0, 0, 118), 11, HITBOX_HEAD),                         # head
+    ]),
+    "wolf": (70.0, 0.0, [
+        ((0, 35, 42), (0, -30, 42), 17, 0),                                  # body, nose south
+        ((0, -55, 50), (0, -62, 50), 11, 0),                                 # head: a creature's, no headshot
+        ((-10, 25, 2), (-10, 25, 32), 5, 0), ((10, 25, 2), (10, 25, 32), 5, 0),
+        ((-10, -22, 2), (-10, -22, 32), 5, 0), ((10, -22, 2), (10, -22, 32), 5, 0),
+    ]),
+}
+
+
+def actors_payload(frame, actor, shape):
+    """cr_actors: one actor (or none), with its hit shapes"""
+    if actor is None:
+        return struct.pack("<II", frame, 0)
+    form_id, flags, x, y, z, heading = actor
+    height, head, boxes = ACTOR_SHAPES.get(shape, (128.0, 118.0, []))
+    out = struct.pack("<II", frame, 1)
+    out += struct.pack("<II3ffffHHI", form_id, flags, x, y, z, heading, height, head, 0, len(boxes), 0)
+    out += bytes(40 * (ACTORS_MAX - 1))
+    out += struct.pack("<II", len(boxes), 0)
+    for (ax, ay, az), (bx, by, bz), radius, box_flags in boxes:
+        out += struct.pack("<3f3ffI", x + ax, y + ay, z + az, x + bx, y + by, z + bz, radius, box_flags)
+    return out
 
 
 def terrain_height(dx, dy):
@@ -93,6 +134,8 @@ CR_TRIANGLE_ONE_SIDED = 0x0001
 CR_TRIANGLE_LAND = 0x0002
 LEDGE = 0.0
 PLANK = False
+ROOF = 0.0  # a slab this high over where the actor stands (--roof)
+ROOF_Y = 0.0
 
 
 def terrain_triangles(ox, oy, oz):
@@ -129,6 +172,9 @@ def terrain_triangles(ox, oy, oz):
             add_box(tris, corners)
     if LEDGE:  # a slab like a road piece across the way north, LEDGE units up, from y 80 to 200
         corners = [(ox + (300 if k & 1 else -300), oy + (200 if k & 2 else 80), oz + (LEDGE if k & 4 else (LEDGE - 4 if PLANK else -10))) for k in range(8)]
+        add_box(tris, corners)
+    if ROOF:  # a slab over the actor's spot, ROOF units up, 20 thick: a shadow from above
+        corners = [(ox + (250 if k & 1 else -250), oy + ROOF_Y + (250 if k & 2 else -250), oz + (ROOF + 20 if k & 4 else ROOF)) for k in range(8)]
         add_box(tris, corners)
     # a wall south of the start, 400 high, facing north
     a, b = (ox - 2000, oy - 800, oz), (ox + 2000, oy - 800, oz)
@@ -293,8 +339,42 @@ class Link:
             return msg_type, body
 
 
+def kit_unpack(body):
+    head = struct.unpack_from(KIT_HEAD, body)
+    weapons = [struct.unpack_from(KIT_WEAPON, body, 40 + 80 * i) for i in range(4)]
+    return {"generation": head[0], "flags": head[1], "current": head[2], "grenade": head[3],
+            "grenades": list(head[4:8]), "body": head[8], "shield": head[9], "flashlight": head[10],
+            "weapons": [{"tag": text(w[0]), "total": [w[1], w[2]], "loaded": [w[3], w[4]], "age": w[5]} for w in weapons]}
+
+
+def kit_pack(kit):
+    body = struct.pack(KIT_HEAD, kit["generation"], kit["flags"], kit["current"], kit["grenade"],
+                       *kit["grenades"], kit["body"], kit["shield"], kit["flashlight"], 0, 0)
+    for w in kit["weapons"]:
+        body += struct.pack(KIT_WEAPON, w["tag"].encode()[:63], *w["total"], *w["loaded"], w["age"], 0)
+    return body
+
+
+def kit_text(kit):
+    weapons = ", ".join(f"{w['tag'].rsplit(chr(92), 1)[-1]} {w['loaded'][0]}/{w['total'][0]}"
+                        + (" (in hand)" if i == kit["current"] else "")
+                        for i, w in enumerate(kit["weapons"]) if w["tag"])
+    return (f"gen {kit['generation']}: {weapons or 'no weapons'}; grenades {kit['grenades'][:2]} (type {kit['grenade']}); "
+            f"body {kit['body']:.2f}, shields {kit['shield']:.2f}, flashlight {kit['flashlight']:.2f}")
+
+
 def text(raw):
     return raw.split(b"\0", 1)[0].decode(errors="replace")
+
+
+def covered_mean(pixels):
+    """mean brightness (0-255) of a layer's covered pixels (alpha over 200), and how many"""
+    total = count = 0
+    for i in range(0, len(pixels), 4 * 7):  # every 7th pixel: enough, and quick
+        if pixels[i + 3] > 200:
+            total += pixels[i] + pixels[i + 1] + pixels[i + 2]
+            count += 1
+    return (total / (3 * count) if count else 0.0), count
 
 
 def grab_frame(link, directory, index):
@@ -310,17 +390,25 @@ def grab_frame(link, directory, index):
         return False
     start = OFF_FRAMES + 192 + slot * FRAME_BYTES
     pixels = bytes(link.shm[start:start + width * height * 4])
+    mask = bytes(link.shm[start + 3 * FRAME_LAYER_BYTES:start + 3 * FRAME_LAYER_BYTES + width * height]) if flags & 4 else None
     world = bytes(link.shm[start + FRAME_LAYER_BYTES:start + FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     depth = bytes(link.shm[start + 2 * FRAME_LAYER_BYTES:start + 2 * FRAME_LAYER_BYTES + width * height * 4]) if flags & 2 else None
     if link.u32(header) != seq:
         return False
     saved = [write_png(directory, f"overlay{index:03}.png", width, height, pixels)]
-    note = ""
+    mean, count = covered_mean(pixels)
+    note = f"; screen layer {mean:.0f} bright on {count}"
+    if mask:
+        saved.append(write_png(directory, f"weapon{index:03}.png", width, height, b"".join(bytes((m, m, m, 255)) for m in mask)))
+        weapon = sum(1 for i in range(0, len(mask), 7) if mask[i] > 127)
+        note += f" ({weapon} of them the weapon's)"
     if world:
         saved.append(write_png(directory, f"world{index:03}.png", width, height, world))
+        mean, count = covered_mean(world)
+        note += f", world layer {mean:.0f} on {count}"
         values = [v for v in struct.unpack(f"<{width * height}f", depth) if v < 1e29]
         if values:
-            note = (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
+            note += (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
                     f"-{max(values) * 213.36:.0f} Skyrim units")
     print(f"fake_skyrim: frame {frame} ({width}x{height}, flags {flags}, camera {camera_frame} of"
           f" {LAST_CAMERA[0]}, tangents {tangent_x:.4f} x {tangent_y:.4f}{note}) -> {', '.join(saved)}", flush=True)
@@ -405,6 +493,8 @@ def main():
     parser.add_argument("--grab-every", type=float, default=5.0)
     parser.add_argument("--actor", type=float, default=0.0,
                         help="Skyrim units: a hostile actor (128 tall) stands this far north of the start; Halo's hits on it are printed")
+    parser.add_argument("--actor-shape", choices=("biped",) + tuple(ACTOR_SHAPES), default="biped",
+                        help="with --actor: its hit shapes (protocol 18); biped: none, Halo hits its proxy's biped")
     parser.add_argument("--hurt-at", type=float, default=0.0,
                         help="seconds in: the player is hurt, --hurt-count times a second apart (melee, from the north)")
     parser.add_argument("--hurt-amount", type=float, default=0.2, help="each hurt, of Chief's whole vitality")
@@ -412,10 +502,48 @@ def main():
     parser.add_argument("--give-at", type=float, default=0.0,
                         help="seconds in: give Chief the host map's next weapon, --give-count times a second apart")
     parser.add_argument("--give-count", type=int, default=1)
+    parser.add_argument("--cache", default="",
+                        help="a weapon cache: this weapon laid down 150 units north of the start, sent every 2 s as the plugin does")
+    parser.add_argument("--cache-at", type=float, default=2.0)
+    parser.add_argument("--cache-spare", type=float, default=1.0, help="the cache's share of spare rounds (protocol 25)")
+    parser.add_argument("--cache-north", type=float, default=150.0, help="how far north of the start the cache lies")
+    parser.add_argument("--action-at", default="",
+                        help="seconds in (comma-separated): hold the action key (pick up, swap) for 1 s")
+    parser.add_argument("--cache2", default="", help="a second cache, at Chief's feet, from --cache2-at seconds in")
+    parser.add_argument("--cache2-at", type=float, default=0.0)
+    parser.add_argument("--give-name", default="",
+                        help="with --give-at: weapons by name, comma-separated, in turn (the console's chiefrim give); empty: the next")
+    parser.add_argument("--list-weapons-at", type=float, default=0.0, help="seconds in: the console's chiefrim weapons")
+    parser.add_argument("--shapes", action="store_true", help="the console's chiefrim shapes on: Halo draws the proxies' hit shapes")
+    parser.add_argument("--restore-at", type=float, default=0.0,
+                        help="seconds in: as a save's load, send back Chief's last kit changed "
+                             "(weapons in reverse, the last in hand, half their rounds, 3 frags and 2 plasmas, "
+                             "body 0.5, shields 0.25) (CR_MSG_CHIEF_RESTORE)")
+    parser.add_argument("--heal-at", type=float, default=0.0,
+                        help="seconds in: a potion heals --heal-amount of Chief's whole vitality (CR_MSG_CHIEF_HEAL)")
+    parser.add_argument("--heal-amount", type=float, default=0.2)
+    parser.add_argument("--loadout-at", type=float, default=0.0,
+                        help="seconds in: as Chiefrim.ini's [Loadout], --loadout's weapons by name with their own rounds")
+    parser.add_argument("--loadout", default="shotgun, Sniper Rifle",
+                        help="comma-separated weapon names (a tag path's last part)")
+    parser.add_argument("--restore-default-at", type=float, default=0.0,
+                        help="seconds in: as a save without a kit: the starting loadout")
     parser.add_argument("--light", type=float, default=-1.0,
                         help="Skyrim's light for Halo's objects (CR_MSG_LIGHTING): ambient and a sun from above, this bright (0: dark)")
     parser.add_argument("--light-to", type=float, default=-1.0, help="with --light: this bright from --light-at seconds in")
     parser.add_argument("--light-at", type=float, default=10.0)
+    parser.add_argument("--sun-color", default="1,0.95,0.85",
+                        help="with --light: the sun's colour (r,g,b), scaled by --light")
+    parser.add_argument("--torch", default="",
+                        help="with --light: a point light 'dx,dy,dz,reach,r,g,b' from the start (Skyrim units), as a torch on a wall")
+    parser.add_argument("--sun-visible", type=float, default=-1.0,
+                        help="with --light: shadows on (protocol 21), and this much of the sun reaches Chief's eye (0..1)")
+    parser.add_argument("--sky-visible", type=float, default=1.0,
+                        help="with --sun-visible: how much of the sky is open over Chief's eye (0: under a roof)")
+    parser.add_argument("--sun-visible-to", type=float, default=-1.0, help="with --sun-visible: this from --sun-visible-at seconds in")
+    parser.add_argument("--sun-visible-at", type=float, default=10.0)
+    parser.add_argument("--roof", type=float, default=0.0,
+                        help="with --terrain: a slab this high over --actor's spot (its shadow from above)")
     parser.add_argument("--key-names", default="",
                         help="comma-separated, per CR_ACTION_* (jump,crouch,fire,zoom,reload,grenade,melee,action,...): "
                              "the keys Halo's prompts show")
@@ -433,6 +561,21 @@ def main():
     parser.add_argument("--zoom-at", type=float, default=0.0,
                         help="seconds in: switch weapon (to the pistol, on b30), then hold zoom from 2 s later"
                              " (without --drive: the input slot is otherwise unused)")
+    parser.add_argument("--actor-friendly", action="store_true",
+                        help="with --actor: not hostile to the player (a yellow blip on the motion tracker, not red)")
+    parser.add_argument("--actor-walk", type=float, default=0.0,
+                        help="with --actor: Skyrim units a second it walks east and west, 400 units each way (the motion tracker)")
+    parser.add_argument("--actor-sneaks", action="store_true",
+                        help="with --actor: sneaking (CR_ACTOR_SNEAKING: only Halo's own speed shows it on the tracker)")
+    parser.add_argument("--actor-attack-at", type=float, default=0.0,
+                        help="with --actor: seconds in, it attacks for 3 s (CR_ACTOR_ATTACKING: the tracker shows it standing)")
+    parser.add_argument("--actor-dies-at", type=float, default=0.0,
+                        help="with --actor: seconds in, it dies (listed dead for 3 s, then gone): its proxy drops its kit"
+                             " (a person's gun and grenades; with --actor-shape wolf, 1 or 2 grenades)")
+    parser.add_argument("--reflection-cap", type=float, default=0.0,
+                        help="with --light: reflections no stronger than this (0..1; 0: no cap), as the plugin's meter of Skyrim's picture sends")
+    parser.add_argument("--flashlight-at", type=float, default=0.0,
+                        help="seconds in: switch Chief's flashlight on, and off again 4 s later")
     options = parser.parse_args()
     if options.dump:
         global DUMP
@@ -485,8 +628,9 @@ def main():
         ROUGH = options.rough
         HOLE = options.hole
         LEDGE = options.ledge
-        global PLANK
+        global PLANK, ROOF, ROOF_Y
         PLANK = options.plank
+        ROOF, ROOF_Y = options.roof, options.actor
         send_terrain(link, 1, *(options.dump_origin if DUMP else (options.x, options.y, options.z)))
 
     display = None
@@ -531,12 +675,38 @@ def main():
                     print(f"fake_skyrim: Halo says hello (protocol {version}, pid {pid}, {text(body[8:56])})", flush=True)
                 elif msg_type == MSG_LOG:
                     print(f"halo: {text(body)}", flush=True)
+                elif msg_type == MSG_CONSOLE:
+                    print(f"console: {text(body)}", flush=True)
                 elif msg_type == MSG_HIT_ACTOR:
                     form_id, flags, fraction, _, bx, by, bz = struct.unpack_from("<IIff3f", body)
                     blast = f", explosion at ({bx:.0f} {by:.0f} {bz:.0f})" if flags & 1 else ""
+                    blast += ", headshot" if flags & 2 else ""
                     print(f"fake_skyrim: Chief hit actor {form_id:08X} for {fraction:.3f} of its proxy{blast}", flush=True)
                 elif msg_type == MSG_PLAYER_DIED:
                     print("fake_skyrim: Chief died: Skyrim's player would die now", flush=True)
+                elif msg_type == MSG_EXPLOSION:
+                    cx, cy, cz, radius, acceleration = struct.unpack_from("<3fff", body)
+                    print(f"fake_skyrim: explosion at ({cx:.0f} {cy:.0f} {cz:.0f}), radius {radius:.0f}, acceleration {acceleration:.3f}", flush=True)
+                elif msg_type == MSG_CACHE_TAKEN:
+                    print(f"fake_skyrim: cache {struct.unpack_from('<I', body)[0]:08X} taken", flush=True)
+                elif msg_type == MSG_SHOT:
+                    fx, fy, fz, tx, ty, tz = struct.unpack_from("<3f3f", body)
+                    SHOTS[0] += 1
+                    if SHOTS[0] <= 3 or SHOTS[0] % 50 == 0:
+                        print(f"fake_skyrim: shot #{SHOTS[0]}: a projectile's way ({fx:.0f} {fy:.0f} {fz:.0f}) -> ({tx:.0f} {ty:.0f} {tz:.0f}), "
+                              f"{math.dist((fx, fy, fz), (tx, ty, tz)):.0f} units", flush=True)
+                elif msg_type == MSG_FLASHLIGHT:
+                    r, g, b, radius, cutoff, falloff = struct.unpack_from("<3ffff", body)
+                    state = f"on, colour ({r:.2f} {g:.2f} {b:.2f})" if r + g + b > 0 else "off"
+                    print(f"fake_skyrim: Chief's flashlight {state}, radius {radius:.0f}, cone {math.degrees(cutoff):.0f} "
+                          f"(full to {math.degrees(falloff):.0f}) degrees", flush=True)
+                elif msg_type == MSG_CHIEF_STATE:
+                    kit = kit_unpack(body)
+                    shown = kit_text(dict(kit, body=round(kit["body"], 1), shield=round(kit["shield"], 1)))
+                    if shown != drive_state.get("kit_shown"):
+                        print(f"fake_skyrim: Chief's kit {kit_text(kit)}", flush=True)
+                        drive_state["kit_shown"] = shown
+                    drive_state["kit"] = kit
             if (options.recenter_every > 0 and last_position and
                     time.monotonic() - last_recenter >= options.recenter_every):
                 # wherever a build is: the race between a build and a new origin
@@ -601,10 +771,30 @@ def main():
                     print("fake_skyrim: zoom held", flush=True)
                 link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 3) if zooming else 0, 1,
                                                         *presses, 0.0, 0.0, 0.0, 0.0))
+            if options.flashlight_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                for at, name in ((options.flashlight_at, "on"), (options.flashlight_at + 4.0, "off")):
+                    if t >= at and not drive_state.get("flashlight " + name):
+                        presses[10] = (presses[10] + 1) & 0xFF  # CR_ACTION_FLASHLIGHT
+                        drive_state["flashlight " + name] = True
+                        print(f"fake_skyrim: flashlight {name}", flush=True)
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
             t = time.monotonic() - started
             if options.actor:
-                link.slot_write(OFF_ACTORS, struct.pack("<II", frame, 1) +
-                    struct.pack("<II3ffff", 0x0001A2B3, 0x1, options.x, options.y + options.actor, options.z, math.pi, 128.0, 20.0))
+                dead = options.actor_dies_at and t >= options.actor_dies_at
+                if dead and not drive_state.get("actor dead"):
+                    drive_state["actor dead"] = True
+                    print("fake_skyrim: the actor dies", flush=True)
+                listed = not (dead and t >= options.actor_dies_at + 3.0)
+                attacking = options.actor_attack_at and options.actor_attack_at <= t < options.actor_attack_at + 3.0
+                flags = (0 if options.actor_friendly else 0x1) | (0x2 if dead else 0) | (0x8 if attacking else 0) | (0x10 if options.actor_sneaks else 0)
+                flags |= 0x20 if options.actor_shape != "wolf" else 0  # CR_ACTOR_PERSON: a wolf drops grenades, no gun
+                walked = options.actor_walk * t % 1600.0 if options.actor_walk and not dead else 0.0
+                walked = walked if walked < 800.0 else 1600.0 - walked  # 0..800 and back
+                link.slot_write(OFF_ACTORS, actors_payload(frame, (0x0001A2B3, flags, options.x - 400.0 + walked if options.actor_walk else options.x,
+                    options.y + options.actor, options.z, math.pi) if listed else None, options.actor_shape))
             if options.hurt_at and t >= options.hurt_at + drive_state.get("hurts", 0) and drive_state.get("hurts", 0) < options.hurt_count:
                 drive_state["hurts"] = drive_state.get("hurts", 0) + 1
                 link.push(RING_TO_HALO, MSG_PLAYER_HURT, struct.pack("<fII3f2I", options.hurt_amount, 1, 0x0001A2B3,
@@ -614,18 +804,82 @@ def main():
                 drive_state["next_light"] = time.monotonic() + 0.1
                 level = options.light_to if options.light_to >= 0.0 and t >= options.light_at else options.light
                 a, k = 0.3 * level, 1.0 * level
-                link.push(RING_TO_HALO, MSG_LIGHTING, struct.pack("<3f3f3f3fI", a, a, a, 0.0, 0.0, 0.0, k, k * 0.95, k * 0.85,
-                                                                  0.3, 0.4, -0.866, 0) + bytes(4 * 28))
+                torch = [float(v) for v in options.torch.split(",")] if options.torch else []
+                seen = options.sun_visible_to if options.sun_visible_to >= 0.0 and t >= options.sun_visible_at else options.sun_visible
+                link.push(RING_TO_HALO, MSG_LIGHTING, struct.pack("<3f3f3f3fI", a, a, a, 0.0, 0.0, 0.0, *(k * float(v) for v in options.sun_color.split(",")),
+                                                                  0.3, 0.4, -0.866, 1 if options.torch else 0)
+                          + (struct.pack("<3ff3f", options.x + torch[0], options.y + torch[1], options.z + torch[2], *torch[3:7])
+                             if options.torch else b"") + bytes(4 * 28 - (28 if options.torch else 0))
+                          + struct.pack("<Iff", 1 if seen >= 0.0 else 0, max(seen, 0.0), options.sky_visible if seen >= 0.0 else 1.0)
+                          + struct.pack("<f", options.reflection_cap))
             if options.key_names and not drive_state.get("named"):
                 # the plugin's CR_MSG_KEY_NAMES: per CR_ACTION_*, 16 bytes each
                 names = options.key_names.split(",") + [""] * 12
                 link.push(RING_TO_HALO, MSG_KEY_NAMES, b"".join(n.encode()[:15].ljust(16, b"\0") for n in names[:12]))
                 drive_state["named"] = True
                 print(f"fake_skyrim: key names {names[:12]}", flush=True)
+            if options.restore_at and t >= options.restore_at and not drive_state.get("restored") and drive_state.get("kit"):
+                kit = drive_state["kit"]
+                held = [w for w in kit["weapons"] if w["tag"]][::-1]
+                weapons = [dict(w, total=[n // 2 for n in w["total"]], loaded=[n // 2 for n in w["loaded"]]) for w in held]
+                weapons += [{"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}] * (4 - len(weapons))
+                restore = dict(kit, generation=7, flags=0, current=len(held) - 1, grenade=1, grenades=[3, 2, 0, 0],
+                               body=0.5, shield=0.25, flashlight=0.4, weapons=weapons)
+                link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack(restore))
+                drive_state["restored"] = True
+                print(f"fake_skyrim: restore {kit_text(restore)}", flush=True)
+            if options.heal_at and t >= options.heal_at and not drive_state.get("healed"):
+                link.push(RING_TO_HALO, MSG_CHIEF_HEAL, struct.pack("<fI", options.heal_amount, 0x0003EADE))
+                drive_state["healed"] = True
+                print(f"fake_skyrim: heal {options.heal_amount:.2f} of Chief's vitality", flush=True)
+            if options.loadout_at and t >= options.loadout_at and not drive_state.get("loaded_out"):
+                names = [n.strip() for n in options.loadout.split(",") if n.strip()][:4]
+                weapons = [{"tag": n, "total": [-1, -1], "loaded": [-1, -1], "age": 0.0} for n in names]
+                weapons += [{"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}] * (4 - len(weapons))
+                kit = {"generation": 9, "flags": 0, "current": 0, "grenade": 0, "grenades": [2, 3, 0, 0],
+                       "body": 1.0, "shield": 1.0, "flashlight": 1.0, "weapons": weapons}
+                link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack(kit))
+                drive_state["loaded_out"] = True
+                print(f"fake_skyrim: starting loadout {names}", flush=True)
+            if options.restore_default_at and t >= options.restore_default_at and not drive_state.get("defaulted"):
+                link.push(RING_TO_HALO, MSG_CHIEF_RESTORE, kit_pack({"generation": 8, "flags": 1, "current": -1, "grenade": -1,
+                    "grenades": [0, 0, 0, 0], "body": 0.0, "shield": 0.0, "flashlight": 0.0,
+                    "weapons": [{"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}] * 4}))
+                drive_state["defaulted"] = True
+                print("fake_skyrim: restore: the starting loadout", flush=True)
             if options.give_at and t >= options.give_at + drive_state.get("gives", 0) and drive_state.get("gives", 0) < options.give_count:
                 drive_state["gives"] = drive_state.get("gives", 0) + 1
-                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI", -1, 0))
-                print(f"fake_skyrim: give weapon #{drive_state['gives']}", flush=True)
+                names = [n.strip() for n in options.give_name.split(",") if n.strip()]
+                name = names[(drive_state["gives"] - 1) % len(names)] if names else ""
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, 0, name.encode()[:63]))
+                print(f"fake_skyrim: give weapon #{drive_state['gives']} {name!r}", flush=True)
+            if options.cache and t >= options.cache_at and t >= drive_state.get("cache_next", 0.0):
+                drive_state["cache_next"] = t + 2.0
+                # cr_msg_cache_place: id, generation, position, yaw, weapon
+                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64sfI", 0xCAC1, generation,
+                    options.x, options.y + options.cache_north, options.z + 120.0, math.pi / 2, options.cache.encode()[:63],
+                    options.cache_spare, 0))
+                if not drive_state.get("cache_said"):
+                    drive_state["cache_said"] = True
+                    print(f"fake_skyrim: cache CAC1: {options.cache} {options.cache_north:.0f} units north, world {generation}", flush=True)
+            if options.action_at and not options.drive:
+                t = time.monotonic() - started
+                frame += 1
+                holding = any(float(a) <= t < float(a) + 1.0 for a in options.action_at.split(","))
+                link.slot_write(SLOT_INPUT, struct.pack(INPUT_FORMAT, frame, 0, (1 << 7) if holding else 0, 1,
+                                                        *presses, 0.0, 0.0, 0.0, 0.0))
+            if options.cache2 and t >= options.cache2_at and t >= drive_state.get("cache2_next", 0.0):
+                drive_state["cache2_next"] = t + 0.2
+                link.push(RING_TO_HALO, MSG_CACHE_PLACE, struct.pack("<II3ff64sfI", 0xCAC2, generation,
+                    options.x, options.y + 20.0, options.z + 120.0, 0.0, options.cache2.encode()[:63], 1.0, 0))
+            if options.list_weapons_at and t >= options.list_weapons_at and not drive_state.get("listed"):
+                drive_state["listed"] = True
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, GIVE_LIST, b""))
+                print("fake_skyrim: chiefrim weapons", flush=True)
+            if options.shapes and not drive_state.get("shapes"):
+                drive_state["shapes"] = True
+                link.push(RING_TO_HALO, MSG_DEBUG, struct.pack("<II", DEBUG_HITBOXES, 0))
+                print("fake_skyrim: chiefrim shapes on", flush=True)
             if display:
                 display[2] += 1
                 link.slot_write(OFF_DISPLAY, struct.pack("<4I", display[0], display[1], 0x1, display[2]))

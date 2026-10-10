@@ -9,7 +9,8 @@ namespace chiefrim::Combat
 	// actors near the player go to Halo (which keeps a hittable stand-in for
 	// each), and the player's lost health is refunded and sent to Halo, where
 	// it hurts Chief, shields first. Halo's hits on the stand-ins come back
-	// and go through Skyrim's own hit processing.
+	// and go through Skyrim's own hit processing. Restore-health potions and
+	// food heal Chief.
 
 	// kDataLoaded: hit events, Skyrim's hit pipeline, the debug weapon key.
 	void Install();
@@ -20,6 +21,11 @@ namespace chiefrim::Combat
 	// Link::Update, for Halo's messages.
 	void OnHitActor(const cr_msg_hit_actor& a_hit);
 	void OnChiefDied();
+	void OnExplosion(const cr_msg_explosion& a_explosion);  // Skyrim's loose objects fly, destructible ones are hurt
+	void OnShot(const cr_msg_shot& a_shot);                 // destructible objects on a projectile's way are hurt
+	// A destructible object not destroyed yet ([Combat] bShootThroughDestructibles):
+	// left out of Halo's collision, so Halo's shots go through (spider webs)
+	bool ShootThrough(RE::TESObjectREFR* a_ref);
 
 	// The link closed or a new world: the player is Skyrim's own again.
 	void Release(RE::PlayerCharacter* a_player);

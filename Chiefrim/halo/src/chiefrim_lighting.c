@@ -10,14 +10,23 @@ player instead (CR_MSG_LIGHTING): its directional ambient, its key light (the
 sun, the moon, an interior's directional light) and the point lights nearest
 the player (torches, fires, spells). Each object takes them at its own
 position: the nearest strong point light is its fill, the others brighten
-its ambient. object_lights.c's hook calls this in place of the lightmap. */
+its ambient. object_lights.c's hook calls this in place of the lightmap.
+
+Shadows (protocol 21): outside, the sun or moon reaches an object only if
+nothing of Skyrim's is in its way. Chief, and what he holds (his arms and
+weapon take his lighting), use what Skyrim found at his eye (its own
+physics, as far as its loaded cells); every other object casts a ray to it
+through Chiefrim's collision BSP, Skyrim's shapes around Chief. Halo's
+blend of each object's lighting softens the change. */
 
 #include "cseries.h"
 #include "chiefrim/chiefrim.h"
 #include "chiefrim/chiefrim_protocol.h"
 
+#include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
 #include "objects/objects.h"
+#include "physics/collisions.h"
 #include "render/render.h"
 
 #include <math.h>
@@ -46,6 +55,72 @@ void chiefrim_lighting_forget(void)
 	chiefrim_lighting.valid = FALSE;
 }
 
+/* how far towards the sun an object's ray looks for what shades it: past
+the collision BSP's reach (iRadius 2 rings of 1024 units, ~12 world units) */
+#define CHIEFRIM_SHADOW_REACH 40.f
+
+/* under a roof (no sky over it), the share of the sky's light an object
+still gets: what comes in sideways, and off the ground */
+#define CHIEFRIM_ROOFED_AMBIENT 0.4f
+/* how high a roof over an object is looked for (~2100 Skyrim units) */
+#define CHIEFRIM_ROOF_REACH 10.f
+
+/* Chief, or what he holds (his arms and weapon take his lighting): Skyrim
+tested his eye's way to the sun and the sky */
+static boolean chiefrim_is_chiefs(long object_index, struct object_datum const *object)
+{
+	long root = object_index, chief = chiefrim_local_unit();
+	struct object_datum const *parent = object;
+
+	while (parent->object.parent_object_index != NONE)
+	{
+		root = parent->object.parent_object_index;
+		parent = object_get(root);
+	}
+	return root == chief && chief != NONE;
+}
+
+/* How much of the sky is open over the object (1 inside: the cell's
+ambient). Others than Chief's: one ray straight up through the collision BSP */
+static real chiefrim_sky_visible(long object_index, struct object_datum const *object, boolean chiefs)
+{
+	cr_msg_lighting const *light = &chiefrim_lighting.light;
+	struct collision_result collision;
+	real_vector3d up = { 0.f, 0.f, CHIEFRIM_ROOF_REACH };
+
+	if (!light->key_shadowed)
+		return 1.f;
+	if (chiefs)
+		return PIN(light->sky_visible, 0.f, 1.f);
+	return collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_back_facing_surfaces_bit), &object->object.bounding_sphere_center, &up, object_index, &collision) ? 0.f : 1.f;
+}
+
+/* How much of the key light reaches the object: 1 inside (an interior's
+directional light casts no shadows) */
+static real chiefrim_key_visible(long object_index, struct object_datum const *object, real_vector3d const *key, boolean chiefs)
+{
+	cr_msg_lighting const *light = &chiefrim_lighting.light;
+	struct collision_result collision;
+	real_point3d from;
+	real_vector3d towards;
+
+	if (!light->key_shadowed)
+		return 1.f;
+	if (chiefs)
+		return PIN(light->sun_visible, 0.f, 1.f);
+	/* from its centre, a little towards the sun: past its own surface */
+	from = object->object.bounding_sphere_center;
+	from.x -= key->i * 0.05f;
+	from.y -= key->j * 0.05f;
+	from.z -= key->k * 0.05f;
+	towards.i = -key->i * CHIEFRIM_SHADOW_REACH;
+	towards.j = -key->j * CHIEFRIM_SHADOW_REACH;
+	towards.k = -key->k * CHIEFRIM_SHADOW_REACH;
+	return collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_back_facing_surfaces_bit), &from, &towards, object_index, &collision) ? 0.f : 1.f;
+}
+
 static real chiefrim_luminance(real_rgb_color const *color)
 {
 	return 0.299f * color->red + 0.587f * color->green + 0.114f * color->blue;
@@ -66,6 +141,9 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	real best = 0.f, brightness;
 	long point, best_point = NONE;
 	real_vector3d key;
+	real_rgb_color torch;
+	real sky;
+	boolean chiefs;
 
 	if (!chiefrim_active() || !chiefrim_lighting.valid || !chiefrim_world_origin(&origin))
 		return FALSE;
@@ -78,7 +156,10 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 
 	memset(lighting, 0, sizeof(*lighting));
 	lighting->distant_light_count = 2;
-	chiefrim_rgb(&lighting->ambient_color, light->ambient, 1.f);
+	chiefs = chiefrim_is_chiefs(object_index, object);
+	/* the sky's light, less under a roof */
+	sky = CHIEFRIM_ROOFED_AMBIENT + (1.f - CHIEFRIM_ROOFED_AMBIENT) * chiefrim_sky_visible(object_index, object, chiefs);
+	chiefrim_rgb(&lighting->ambient_color, light->ambient, sky);
 
 	key.i = light->key_direction.x;
 	key.j = light->key_direction.y;
@@ -89,11 +170,11 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		key.j = 0.f;
 		key.k = -1.f;
 	}
-	chiefrim_rgb(&lighting->distant_lights[0].color, light->key_color, 1.f);
+	chiefrim_rgb(&lighting->distant_lights[0].color, light->key_color, chiefrim_key_visible(object_index, object, &key, chiefs));
 	lighting->distant_lights[0].direction = key;
 
 	/* the fill: the sky's light from above, unless a point light is stronger */
-	chiefrim_rgb(&lighting->distant_lights[1].color, light->ambient_up, 1.f);
+	chiefrim_rgb(&lighting->distant_lights[1].color, light->ambient_up, sky);
 	lighting->distant_lights[1].direction.i = 0.f;
 	lighting->distant_lights[1].direction.j = 0.f;
 	lighting->distant_lights[1].direction.k = -1.f;
@@ -137,12 +218,43 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 		}
 	}
 
-	/* reflections and the shadow, as build_distant_lights makes them from a lightmap */
-	brightness = chiefrim_luminance(&lighting->ambient_color) + 0.5f * chiefrim_luminance(&lighting->distant_lights[0].color);
+	/* reflections and the shadow, as build_distant_lights makes them from a
+	lightmap: by the light that reaches the object, a torch's (the fill, when
+	it is a point light, also tinting it) as well as the sun's. Shiny weapons (the MA5B) show
+	mostly their reflection: with the key's alone a torch beside Chief added
+	a little diffuse light and no shine (offline, 5 against the key's 36) */
+	memset(&torch, 0, sizeof(torch));
+	if (best_point != NONE)
+		torch = lighting->distant_lights[1].color;
+	/* its strength by the light shining on it straight, the sun's and a
+	torch's, as Halo's by its lightmap's: with the ambient's in full,
+	Skyrim's daylight sky alone (~0.5) made it the most it goes, and the
+	pistol's slide shone as bright in a building's shade as in the sun (the
+	first in-game look) */
+	brightness = chiefrim_luminance(&lighting->distant_lights[0].color) + chiefrim_luminance(&torch) +
+		0.35f * chiefrim_luminance(&lighting->ambient_color);
 	lighting->reflection_tint_color.alpha = PIN(brightness * 1.5f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.red = PIN(lighting->ambient_color.red * 2.f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.green = PIN(lighting->ambient_color.green * 2.f + 0.25f, 0.f, 1.f);
-	lighting->reflection_tint_color.blue = PIN(lighting->ambient_color.blue * 2.f + 0.25f, 0.f, 1.f);
+	/* but no more than its surroundings, as Skyrim's picture shows them
+	(protocol 27), give: a reflection is of them. In a dim cabin the MA5B
+	shone near white by a fire's light (the room's brightest 0.3) */
+	if (light->reflection_cap > 0.f)
+		lighting->reflection_tint_color.alpha = MIN(lighting->reflection_tint_color.alpha, PIN(light->reflection_cap, 0.f, 1.f));
+	/* tinted by the colour of the light that reaches it, the sun's or moon's
+	(past what shades it), the sky's and a torch's: their hue, its largest
+	part 1 (how bright is the alpha's). Halo tints by its lightmap's colour
+	too, but by its size: Skyrim's daylight (ambient 0.44 0.54 0.51, an
+	orange afternoon sun 0.63 0.46 0.35) came out white, the shine never the
+	sun's colour (the first in-game look) */
+	{
+		real red = lighting->ambient_color.red + lighting->distant_lights[0].color.red + torch.red;
+		real green = lighting->ambient_color.green + lighting->distant_lights[0].color.green + torch.green;
+		real blue = lighting->ambient_color.blue + lighting->distant_lights[0].color.blue + torch.blue;
+		real largest = MAX(MAX(red, green), MAX(blue, 0.001f));
+
+		lighting->reflection_tint_color.red = PIN(red / largest, 0.f, 1.f);
+		lighting->reflection_tint_color.green = PIN(green / largest, 0.f, 1.f);
+		lighting->reflection_tint_color.blue = PIN(blue / largest, 0.f, 1.f);
+	}
 	lighting->shadow_vector = key;
 	if (lighting->shadow_vector.k > -0.5f)
 	{
@@ -153,4 +265,68 @@ boolean chiefrim_object_lighting(long object_index, struct render_lighting *ligh
 	lighting->shadow_color.green = PIN(1.f - lighting->distant_lights[0].color.green * 1.3f + 0.25f, 0.03f, 1.f);
 	lighting->shadow_color.blue = PIN(1.f - lighting->distant_lights[0].color.blue * 1.3f + 0.25f, 0.03f, 1.f);
 	return TRUE;
+}
+
+/* ---------- Chief's flashlight on Skyrim's world */
+
+/* Halo's flashlight is a light on Chief's biped, which lights Halo's own
+world; Chiefrim draws none of that, so it went nowhere. Its light as it
+shines now (on, off, fading in) goes to Skyrim (CR_MSG_FLASHLIGHT), which
+lights its own world along the player's view with it. */
+static struct
+{
+	boolean sent;          /* Skyrim has one */
+	boolean logged;
+	uint32_t sent_ms;
+	cr_msg_flashlight last;
+} chiefrim_flashlight;
+
+void chiefrim_flashlight_linked(void)
+{
+	chiefrim_flashlight.sent = FALSE;
+}
+
+void chiefrim_flashlight_update(long chief)
+{
+	struct cr_shared *shm = chiefrim_shared();
+	cr_msg_flashlight message;
+	real_rgb_color color = { 0 };
+	real radius = 0.f, cutoff = 0.f, falloff = 0.f;
+	uint32_t now = (uint32_t)system_milliseconds();
+	boolean on, was_on, changed;
+
+	if (!shm)
+		return;
+	memset(&message, 0, sizeof(message));
+	if (chief != NONE && chiefrim_object_flashlight(chief, &color, &radius, &cutoff, &falloff))
+	{
+		message.color.x = PIN(color.red, 0.f, 1.f);
+		message.color.y = PIN(color.green, 0.f, 1.f);
+		message.color.z = PIN(color.blue, 0.f, 1.f);
+		message.radius = radius * CR_SKY_UNITS_PER_WU;
+		message.cutoff_angle = cutoff;
+		message.falloff_angle = falloff;
+		if (!chiefrim_flashlight.logged)
+		{
+			chiefrim_flashlight.logged = TRUE;
+			error(_error_silent, "chiefrim: Chief's flashlight: radius %.2f world units, cone %.1f degrees (full to %.1f)",
+				radius, cutoff * 180.f / CR_PI, falloff * 180.f / CR_PI);
+		}
+	}
+	on = message.color.x + message.color.y + message.color.z > 0.001f;
+	was_on = chiefrim_flashlight.last.color.x + chiefrim_flashlight.last.color.y + chiefrim_flashlight.last.color.z > 0.001f;
+	changed = fabsf(message.color.x - chiefrim_flashlight.last.color.x) > 0.01f ||
+		fabsf(message.color.y - chiefrim_flashlight.last.color.y) > 0.01f ||
+		fabsf(message.color.z - chiefrim_flashlight.last.color.z) > 0.01f ||
+		fabsf(message.radius - chiefrim_flashlight.last.radius) > 0.02f * MAX(chiefrim_flashlight.last.radius, 1.f);
+	/* switched on or off at once; fading, ~30 times a second */
+	if (chiefrim_flashlight.sent && (on == was_on) && (!changed || now - chiefrim_flashlight.sent_ms < 33))
+		return;
+	if (!cr_ring_push(&shm->to_skyrim, CR_MSG_FLASHLIGHT, &message, sizeof(message)))
+		return;
+	if (on != was_on)
+		error(_error_silent, "chiefrim: Chief's flashlight %s", on ? "on" : "off");
+	chiefrim_flashlight.last = message;
+	chiefrim_flashlight.sent = TRUE;
+	chiefrim_flashlight.sent_ms = now;
 }
