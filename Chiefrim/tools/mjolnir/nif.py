@@ -14,6 +14,20 @@ import sys
 from pathlib import Path
 
 
+# a vertex desc's flags (BSVertexDesc's, from its bit 44)
+VF_VERTEX = 0x001
+VF_UV = 0x002
+VF_UV_2 = 0x004
+VF_NORMAL = 0x008
+VF_TANGENT = 0x010
+VF_COLORS = 0x020
+VF_SKINNED = 0x040
+VF_LAND_DATA = 0x080
+VF_EYE_DATA = 0x100
+VF_INSTANCE = 0x200
+VF_FULL_PRECISION = 0x400
+
+
 class Reader:
 	def __init__(self, data, position=0):
 		self.data = data
@@ -86,6 +100,97 @@ class Nif:
 
 	parse_BSFadeNode = parse_NiNode
 	parse_BSLeafAnimNode = parse_NiNode
+
+	# ---- skinned meshes: BSTriShape, BSDismemberSkinInstance, NiSkinData,
+	# NiSkinPartition (Skyrim SE keeps a skinned shape's vertices in its
+	# partition, the shape's own data size being 0)
+
+	def transform(self, reader):
+		rotation = [reader.unpack("3f") for _ in range(3)]
+		return {"rotation": rotation, "translation": reader.unpack("3f"), "scale": reader.one("f")}
+
+	def vertices(self, reader, desc, count):
+		"""BSVertexDataSSE: the attributes vertex desc's flags (its bits 44
+		up) say it has, in this order. Skyrim SE's positions are always
+		floats (VF_FULL_PRECISION is Fallout 4's)."""
+		flags = desc >> 44
+		result = []
+		for _ in range(count):
+			vertex = {}
+			if flags & VF_VERTEX:
+				if flags & VF_FULL_PRECISION or self.bs_version == 100:
+					*vertex["position"], vertex["bitangent_x"] = reader.unpack("4f")
+				else:
+					*vertex["position"], vertex["bitangent_x"] = reader.unpack("4e")
+			if flags & VF_UV:
+				vertex["uv"] = reader.unpack("2e")
+			if flags & VF_NORMAL:
+				*vertex["normal"], vertex["bitangent_y"] = (b / 127.5 - 1 for b in reader.unpack("4B"))
+			if flags & VF_TANGENT:
+				*vertex["tangent"], vertex["bitangent_z"] = (b / 127.5 - 1 for b in reader.unpack("4B"))
+			if flags & VF_COLORS:
+				vertex["color"] = reader.unpack("4B")
+			if flags & VF_SKINNED:
+				vertex["weights"] = reader.unpack("4e")
+				vertex["bones"] = reader.unpack("4B")
+			if flags & VF_EYE_DATA:
+				vertex["eye"] = reader.one("f")
+			result.append(vertex)
+		return result
+
+	def parse_BSTriShape(self, reader, block):
+		self.av_object(reader, block)
+		block["bound"] = reader.unpack("4f")
+		block["skin"], block["shader_property"], block["alpha_property"] = reader.unpack("3i")
+		block["vertex_desc"] = reader.one("Q")
+		triangle_count, vertex_count, data_size = reader.unpack("HHI")
+		block["vertex_count"], block["triangle_count"] = vertex_count, triangle_count
+		block["vertices"] = self.vertices(reader, block["vertex_desc"], vertex_count) if data_size else []
+		block["triangles"] = [reader.unpack("3H") for _ in range(triangle_count)] if data_size else []
+
+	def parse_BSDismemberSkinInstance(self, reader, block):
+		block["data"], block["partition"], block["skeleton_root"] = reader.unpack("3i")
+		block["bones"] = list(reader.unpack(f"{reader.one('I')}i"))
+		block["partitions"] = [reader.unpack("HH") for _ in range(reader.one("I"))]  # flags, body part
+
+	def parse_NiSkinData(self, reader, block):
+		block["skin_transform"] = self.transform(reader)
+		count, has_weights = reader.unpack("IB")
+		block["bones"] = []
+		for _ in range(count):
+			bone = {"transform": self.transform(reader), "bound": reader.unpack("4f")}
+			weights = reader.one("H")
+			bone["weights"] = [reader.unpack("Hf") for _ in range(weights)] if has_weights else []
+			block["bones"].append(bone)
+
+	def parse_NiSkinPartition(self, reader, block):
+		count = reader.one("I")
+		data_size, vertex_size, desc = reader.unpack("IIQ")
+		block["vertex_desc"] = desc
+		start = reader.position
+		block["vertices"] = self.vertices(reader, desc, data_size // vertex_size) if vertex_size else []
+		if reader.position != start + data_size:
+			raise ValueError(f"NiSkinPartition: {reader.position - start} bytes of vertices read, its data size is {data_size}")
+		block["partitions"] = []
+		for _ in range(count):
+			vertices, triangles, bones, strips, weights_per_vertex = reader.unpack("5H")
+			partition = {"bones": list(reader.unpack(f"{bones}H"))}
+			if reader.one("B"):
+				partition["vertex_map"] = list(reader.unpack(f"{vertices}H"))
+			if reader.one("B"):
+				partition["vertex_weights"] = [reader.unpack(f"{weights_per_vertex}f") for _ in range(vertices)]
+			strip_lengths = reader.unpack(f"{strips}H")
+			if reader.one("B"):
+				if strips:
+					partition["strips"] = [reader.unpack(f"{n}H") for n in strip_lengths]
+				else:
+					partition["triangles"] = [reader.unpack("3H") for _ in range(triangles)]
+			if reader.one("B"):
+				partition["bone_indices"] = [reader.unpack(f"{weights_per_vertex}B") for _ in range(vertices)]
+			partition["lod_level"], partition["global_vb"] = reader.unpack("BB")
+			partition["vertex_desc"] = reader.one("Q")
+			partition["triangles_copy"] = [reader.unpack("3H") for _ in range(triangles)]
+			block["partitions"].append(partition)
 
 	# ---- tree
 

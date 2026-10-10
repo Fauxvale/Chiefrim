@@ -21,6 +21,7 @@ Halo is +x forward, +y left, +z up, in units of 10 feet; Skyrim is +y
 forward, +x right, +z up, 70 units to the metre.
 
 Usage: tools/mjolnir/fit.py [--skyrim DATA_DIR] [--dir build/mjolnir] [--shoulders 1]
+         [--torso 1] [--head T] [--arms T]
 """
 import argparse
 import json
@@ -118,7 +119,7 @@ def least_rotation(a, b):
 	return numpy.eye(3) + s * k + (1 - c) * k @ k
 
 
-def fit(model, bones, shoulders=1.0):
+def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0):
 	names = [node["name"] for node in model["nodes"]]
 	halo_matrices = dict(zip(names, halo_world(model["nodes"])))
 	halo = {name: HALO_TO_SKYRIM @ matrix[:3, 3] for name, matrix in halo_matrices.items()}
@@ -138,6 +139,23 @@ def fit(model, bones, shoulders=1.0):
 		joint = skyrim[bone].copy()
 		width = abs(halo[f"bip01 {side} upperarm"][0]) * across
 		joint[0] = numpy.sign(joint[0]) * (abs(joint[0]) + shoulders * (width - abs(joint[0])))
+		skyrim[bone] = joint
+	# Skyrim's spine runs 7.5 cm behind its hips, as a person's does, and
+	# Skyrim's body sits forward of it; Halo's runs straight up from Chief's
+	# hips, through the middle of him. So his spine's joints (and his
+	# collarbones) are fitted as far forward of the pelvis as Halo puts them
+	# (torso 1), and his torso keeps its place over his hips; bending about
+	# Skyrim's joints behind it is how Skyrim's own body bends. His head and
+	# shoulders may follow (head, arms 1), or stay on Skyrim's joints (0):
+	# fitted forward of them, a nod or an arm raised forward slips a little.
+	pelvis = skyrim[BONES["bip01 pelvis"][0]][1]
+	moved = [("bip01 spine", torso), ("bip01 spine1", torso), ("bip01 neck", torso), ("bip01 head", head)]
+	moved += [(f"bip01 {side} {part}", fraction) for side in "lr" for part, fraction in (("clavicle", torso), ("upperarm", arms))]
+	for name, fraction in moved:
+		bone = JOINTS.get(name, BONES[name][0])
+		joint = skyrim[bone].copy()
+		forward = pelvis + (halo[name][1] - halo["bip01 pelvis"][1]) * across
+		joint[1] += fraction * (forward - joint[1])
 		skyrim[bone] = joint
 	# Chief's knee-to-sole is longer than Skyrim's knee-to-ground (Halo's
 	# ankle is 20 cm up his boot, Skyrim's 9): his lower legs are squashed
@@ -220,7 +238,7 @@ def fit(model, bones, shoulders=1.0):
 	for name in order:
 		parent, matrix = bones[name]
 		nodes.append({"name": name, "parent": order.index(parent) if parent in used else -1, "matrix": matrix.tolist()})
-	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders,
+	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders, "torso": torso, "head": head, "arms": arms,
 		"nodes": nodes, "shaders": model["shaders"], "parts": parts}
 
 
@@ -230,12 +248,19 @@ def main():
 	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
 	parser.add_argument("--shoulders", type=float, default=1.0,
 		help="how far the arms are fitted out from Skyrim's shoulders (0) to Chief's (1)")
+	parser.add_argument("--torso", type=float, default=1.0,
+		help="how far the torso is fitted forward, from Skyrim's spine (0) to over his hips as in Halo (1)")
+	parser.add_argument("--head", type=float, help="the same for the head (default: --torso)")
+	parser.add_argument("--arms", type=float, help="the same for the shoulder joints (default: --torso)")
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	model = json.loads((directory / "model.json").read_text())
-	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders)
+	head = args.torso if args.head is None else args.head
+	arms = args.torso if args.arms is None else args.arms
+	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders, args.torso, head, arms)
 	(directory / "fitted.json").write_text(json.dumps(fitted))
-	print(f"fitted to Skyrim's skeleton (scaled {fitted['across']:.3f} across, shoulders {args.shoulders:g})"
+	print(f"fitted to Skyrim's skeleton (scaled {fitted['across']:.3f} across, shoulders {args.shoulders:g},"
+		f" torso {args.torso:g}, head {head:g}, arms {arms:g})"
 		f" -> {directory / 'fitted.json'}")
 
 
