@@ -13,7 +13,9 @@ for the whole model (Skyrim's height over Halo's). A node with no segment
 is turned as its parent is (the feet, the hands), or by the least rotation
 from its bone's direction to its Skyrim bone's (the pelvis, the head: both
 skeletons hold them upright; a Halo foot's bone points down, a Skyrim
-foot's to its toes).
+foot's to its toes). His helmet is then lowered (helmet, in cm): Halo's
+head joint is at its base, Skyrim's up at the jaw, so on Skyrim's joint
+it sat 8 cm high, over a long neck.
 The vertices are moved by their nodes' transforms, blended by their
 weights, as a skinned mesh is; the weights then name the Skyrim bones.
 
@@ -21,7 +23,7 @@ Halo is +x forward, +y left, +z up, in units of 10 feet; Skyrim is +y
 forward, +x right, +z up, 70 units to the metre.
 
 Usage: tools/mjolnir/fit.py [--skyrim DATA_DIR] [--dir build/mjolnir] [--shoulders 1]
-         [--torso 1] [--head T] [--arms T] [--boots B]
+         [--torso 1] [--head T] [--arms T] [--boots B] [--helmet 7.5]
 """
 import argparse
 import json
@@ -119,7 +121,7 @@ def least_rotation(a, b):
 	return numpy.eye(3) + s * k + (1 - c) * k @ k
 
 
-def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None):
+def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None, helmet=0.0):
 	names = [node["name"] for node in model["nodes"]]
 	halo_matrices = dict(zip(names, halo_world(model["nodes"])))
 	halo = {name: HALO_TO_SKYRIM @ matrix[:3, 3] for name, matrix in halo_matrices.items()}
@@ -202,6 +204,11 @@ def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None):
 		transform = numpy.eye(4)
 		transform[:3, :3] = linear
 		transform[:3, 3] = skyrim_joint(name) - linear @ halo[name]
+		if name == "bip01 head":
+			# Skyrim's male head is 115 to 132 units up from chin to crown,
+			# Chief's helmet 119 to 139 on Skyrim's head joint: 7.5 cm down
+			# centres it on the head, its chin at Chief's collar
+			transform[2, 3] -= helmet / 100 / SKYRIM_UNIT
 		transforms[name] = transform
 	parts = []
 	for part in model["parts"]:
@@ -243,7 +250,7 @@ def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None):
 	for name in order:
 		parent, matrix = bones[name]
 		nodes.append({"name": name, "parent": order.index(parent) if parent in used else -1, "matrix": matrix.tolist()})
-	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders, "torso": torso, "head": head, "arms": arms, "boots": squash["bip01 l foot"],
+	return {"name": model["name"], "frame": "skyrim", "unit": SKYRIM_UNIT, "bone_axis": "z", "across": across, "shoulders": shoulders, "torso": torso, "head": head, "arms": arms, "boots": squash["bip01 l foot"], "helmet": helmet,
 		"nodes": nodes, "shaders": model["shaders"], "parts": parts}
 
 
@@ -259,15 +266,17 @@ def main():
 	parser.add_argument("--arms", type=float, help="the same for the shoulder joints (default: --torso)")
 	parser.add_argument("--boots", type=float,
 		help="how much of their height his boots keep (default: as much as his shins, about 0.76; least: down to Skyrim's ankle, about 0.45)")
+	parser.add_argument("--helmet", type=float, default=7.5,
+		help="how far his helmet is lowered from Skyrim's head joint, in cm (0: as Halo's head joint puts it)")
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	model = json.loads((directory / "model.json").read_text())
 	head = args.torso if args.head is None else args.head
 	arms = args.torso if args.arms is None else args.arms
-	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders, args.torso, head, arms, args.boots)
+	fitted = fit(model, skyrim_skeleton(args.skyrim), args.shoulders, args.torso, head, arms, args.boots, args.helmet)
 	(directory / "fitted.json").write_text(json.dumps(fitted))
 	print(f"fitted to Skyrim's skeleton (scaled {fitted['across']:.3f} across, shoulders {args.shoulders:g},"
-		f" torso {args.torso:g}, head {head:g}, arms {arms:g}, boots {fitted['boots']:.2f})"
+		f" torso {args.torso:g}, head {head:g}, arms {arms:g}, boots {fitted['boots']:.2f}, helmet {args.helmet:g} cm)"
 		f" -> {directory / 'fitted.json'}")
 
 

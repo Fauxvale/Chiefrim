@@ -34,6 +34,8 @@ VF_FULL_PRECISION = 0x400
 SHADER_TYPE_FLOATS = {1: 1, 5: 3, 6: 3, 7: 2, 11: 6, 14: 4, 16: 7}
 
 HEADER = "Gamebryo File Format, Version 20.2.0.7"
+# Skyrim's units to one of Havok's
+HAVOK_SCALE = 69.99125
 
 
 def vertex_desc(flags):
@@ -414,6 +416,71 @@ class Nif:
 		writer.pack("I", len(block["textures"]))
 		for texture in block["textures"]:
 			writer.string("I", texture)
+
+	# ---- a ground model's extra data: BSXFlags, BSInvMarker
+
+	def parse_BSXFlags(self, reader, block):
+		block["name"], block["value"] = self.name(reader.one("i")), reader.one("I")
+
+	def write_BSXFlags(self, writer, block):
+		writer.pack("iI", self.string_index(block["name"]), block["value"])
+
+	def parse_BSInvMarker(self, reader, block):
+		block["name"] = self.name(reader.one("i"))
+		block["rotation"], block["zoom"] = reader.unpack("3H"), reader.one("f")  # milliradians
+
+	def write_BSInvMarker(self, writer, block):
+		writer.pack("i3Hf", self.string_index(block["name"]), *block["rotation"], block["zoom"])
+
+	# ---- collision: bhkCollisionObject, bhkRigidBody, bhkConvexVerticesShape
+	# (Havok's units: HAVOK_SCALE of Skyrim's to one)
+
+	def parse_bhkCollisionObject(self, reader, block):
+		block["target"], block["flags"], block["body"] = reader.unpack("iHi")
+
+	def write_bhkCollisionObject(self, writer, block):
+		writer.pack("iHi", block["target"], block["flags"], block["body"])
+
+	def parse_bhkConvexVerticesShape(self, reader, block):
+		block["material"], block["radius"] = reader.unpack("If")
+		block["properties"] = reader.unpack("6I")  # vertices', normals' bhkWorldObjCInfoProperty
+		block["vertices"] = [reader.unpack("4f") for _ in range(reader.one("I"))]
+		block["planes"] = [reader.unpack("4f") for _ in range(reader.one("I"))]  # normal, -distance
+
+	def write_bhkConvexVerticesShape(self, writer, block):
+		writer.pack("If6I", block["material"], block["radius"], *block.get("properties", (0, 0, 0x80000000, 0, 0, 0x80000000)))
+		for points in (block["vertices"], block["planes"]):
+			writer.pack("I", len(points))
+			for point in points:
+				writer.pack("4f", *point)
+
+	# bhkRigidBody (Skyrim SE's: its bhkRigidBodyCInfo2010), field by field;
+	# "unused" are bytes the game ignores, kept as read
+	RIGID_BODY = [
+		("shape", "i"), ("filter", "4B"), ("unused1", "4s"), ("broad_phase", "B"), ("unused2", "3s"), ("property", "3I"),
+		("response", "B"), ("unused3", "B"), ("callback_delay", "H"), ("unused4", "4s"), ("body_filter", "4B"),
+		("unused5", "8s"), ("body_response", "B"), ("unused6", "B"), ("body_callback_delay", "H"),
+		("translation", "4f"), ("rotation", "4f"), ("linear_velocity", "4f"), ("angular_velocity", "4f"),
+		("inertia", "12f"), ("center", "4f"), ("mass", "f"), ("linear_damping", "f"), ("angular_damping", "f"),
+		("time_factor", "f"), ("gravity_factor", "f"), ("friction", "f"), ("rolling_friction", "f"), ("restitution", "f"),
+		("max_linear_velocity", "f"), ("max_angular_velocity", "f"), ("penetration_depth", "f"),
+		("motion", "B"), ("deactivator", "B"), ("solver_deactivation", "B"), ("quality", "B"),
+		("auto_remove_level", "B"), ("response_modifier", "B"), ("shape_keys", "B"), ("force_collide", "B"),
+		("unused7", "12s"),
+	]
+
+	def parse_bhkRigidBody(self, reader, block):
+		for name, fmt in self.RIGID_BODY:
+			values = reader.unpack(fmt)
+			block[name] = values[0] if len(values) == 1 else values
+		block["constraints"] = list(reader.unpack(f"{reader.one('I')}i"))
+		block["body_flags"] = reader.one("H")
+
+	def write_bhkRigidBody(self, writer, block):
+		for name, fmt in self.RIGID_BODY:
+			value = block[name]
+			writer.pack(fmt, *(value if isinstance(value, (tuple, list)) else (value,)))
+		writer.pack(f"I{len(block['constraints'])}iH", len(block["constraints"]), *block["constraints"], block["body_flags"])
 
 	# ---- tree
 

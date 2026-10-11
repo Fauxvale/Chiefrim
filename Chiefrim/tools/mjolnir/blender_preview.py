@@ -5,10 +5,13 @@ skeleton and skin weights, and renders it from the front, the side and the
 back, so the port can be checked without opening Blender.
 
 Usage: blender -b --factory-startup -P tools/mjolnir/blender_preview.py -- [--dir build/mjolnir]
-         [--fitted | --nif FILE...] [--pieces] [--pose] [--bones] [--blend]
+         [--fitted | --nif FILE... | --ground FILE...] [--pieces] [--pose] [--bones] [--blend]
   --fitted  the model fitted to Skyrim's skeleton (preview_fitted_*.png)
   --nif FILE...  the NIFs armor.py wrote, read back, worn together on
             Skyrim's skeleton (preview_nif_*.png)
+  --ground FILE...  ground models (ground.py's, or Skyrim's _go.nif) as they
+            lie, their collision hulls in wireframe, also from above
+            (preview_ground_*.png)
   --pieces  each NIF in its own colour, the body's skin in another
   --pose NAME  pose the skeleton first (preview_*_NAME_*.png): bend (an arm,
             a knee and the head, in their bones' axes: the skeleton and the
@@ -35,7 +38,7 @@ import bpy
 from mathutils import Matrix, Quaternion, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from nif import Nif  # noqa: E402
+from nif import HAVOK_SCALE, Nif  # noqa: E402
 
 HALO_UNIT = 3.048
 AXES = {"x": Vector((1, 0, 0)), "z": Vector((0, 0, 1))}
@@ -78,6 +81,9 @@ def nif_model(directory, paths, pieces):
 	for number, path in enumerate(paths):
 		nif = Nif(path)
 		for shape in (b for b in nif.blocks if b["type"] == "BSTriShape"):
+			if shape["skin"] < 0:
+				parts.append(static_part(directory, nif, shape, shaders, pieces, number))
+				continue
 			skin = nif.blocks[shape["skin"]]
 			partition = nif.blocks[skin["partition"]]
 			bones = [nif.blocks[b]["name"] for b in skin["bones"]]
@@ -129,6 +135,60 @@ def build_armature(model, matrices):
 	return armature
 
 
+def shape_shader(directory, nif, shape, pieces, number, name):
+	textures = nif.blocks[nif.blocks[shape["shader_property"]]["texture_set"]]["textures"]
+	stem = Path(textures[0].replace("\\", "/")).stem
+	if pieces:
+		return {"name": name, "solid": PIECE_COLOURS[number % len(PIECE_COLOURS)]}
+	if (directory / f"{stem}_color.png").exists():
+		return {"name": stem, "baked": {key: f"{stem}_{key}.png" for key in ("color", "glow", "reflection")}}
+	return {"name": stem, "solid": (0.6, 0.6, 0.6)}
+
+
+def static_part(directory, nif, shape, shaders, pieces, number):
+	"""An unskinned shape (a ground model's), in its own frame."""
+	shaders.append(shape_shader(directory, nif, shape, pieces, number, shape["name"]))
+	frame = Matrix([list(row) for row in shape["rotation"]]) * shape["scale"]
+	offset = Vector(shape["translation"])
+	vertices = [{"position": list(frame @ Vector(v["position"]) + offset), "normal": list(frame.normalized() @ Vector(v["normal"])),
+		"uv": v["uv"], "bones": [], "weights": []} for v in shape["vertices"]]
+	return {"shader": len(shaders) - 1, "vertices": vertices, "triangles": shape["triangles"]}
+
+
+def hulls(paths):
+	"""The NIFs' convex collision shapes' vertices, in Skyrim's units."""
+	result = []
+	for path in paths:
+		nif = Nif(path)
+		for block in nif.blocks:
+			if block["type"] == "bhkConvexVerticesShape":
+				result.append([Vector(v[:3]) * HAVOK_SCALE for v in block["vertices"]])
+	return result
+
+
+def build_hulls(model, points):
+	"""Each hull as a wireframe, drawn over the model."""
+	import bmesh
+	material = bpy.data.materials.new("hull")
+	tree = material.node_tree
+	emission = tree.nodes.new("ShaderNodeEmission")
+	emission.inputs["Color"].default_value = (1.0, 0.1, 0.6, 1)
+	tree.links.new(emission.outputs["Emission"], tree.nodes["Material Output"].inputs["Surface"])
+	for index, hull in enumerate(points):
+		mesh = bpy.data.meshes.new(f"hull{index}")
+		b = bmesh.new()
+		for point in hull:
+			b.verts.new(point * model["unit"])
+		bmesh.ops.convex_hull(b, input=b.verts)
+		b.to_mesh(mesh)
+		obj = bpy.data.objects.new(f"hull{index}", mesh)
+		bpy.context.collection.objects.link(obj)
+		obj.data.materials.append(material)
+		wire = obj.modifiers.new("wire", "WIREFRAME")
+		wire.thickness = 0.004
+		obj.show_in_front = True
+
+
 def build_materials(directory, shaders):
 	"""The baked colour (halo_model.py's bake()) as the base colour, its glow
 	as emission; the shield's effect shaders are not drawn."""
@@ -177,7 +237,7 @@ def build_mesh(model, materials, armature):
 			positions.append(Vector(vertex["position"]) * unit)
 			normals.append(Vector(vertex["normal"]))
 			# Halo's vertices name nodes by index, fitted ones bones by name
-			bones = vertex.get("bones") or [names[n] if n >= 0 else None for n in vertex["nodes"]]
+			bones = vertex["bones"] if "bones" in vertex else [names[n] if n >= 0 else None for n in vertex["nodes"]]
 			weights.append(list(zip(bones, vertex["weights"])))
 		for triangle in part["triangles"]:
 			# Halo's wind clockwise from the front, Skyrim's (and Blender's)
@@ -245,7 +305,7 @@ def pose(armature, frame, name):
 		bpy.context.view_layer.update()
 
 
-def render(directory, obj, armature, show_bones, prefix, front):
+def render(directory, obj, armature, show_bones, prefix, front, above=False):
 	scene = bpy.context.scene
 	for engine in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"):
 		try:
@@ -280,17 +340,20 @@ def render(directory, obj, armature, show_bones, prefix, front):
 	height = high.z - low.z
 	camera = bpy.data.objects.new("camera", bpy.data.cameras.new("camera"))
 	camera.data.type = "ORTHO"
-	camera.data.ortho_scale = height * 1.1
+	# tall enough for the model, and wide enough (the picture is 3:4)
+	camera.data.ortho_scale = max(height, max(high.x - low.x, high.y - low.y) / 0.75) * 1.1
 	scene.collection.objects.link(camera)
 	scene.camera = camera
 	armature.show_in_front = show_bones
 	armature.hide_render = not show_bones
 	if show_bones:
 		armature.data.display_type = "STICK"
-	for name, angle in (("front", 0), ("side", 90), ("back", 180)):
+	views = [("front", 0, 1.5), ("side", 90, 1.5), ("back", 180, 1.5)] + ([("top", 0, 40)] if above else [])
+	for name, angle, rise in views:
 		direction = Vector((math.cos(math.radians(angle + front)), math.sin(math.radians(angle + front)), 0))
-		# looking down a little, so the ground shows as a strip
-		camera.location = centre + direction * 10 + Vector((0, 0, 1.5))
+		# looking down a little, so the ground shows as a strip (or from
+		# nearly straight above)
+		camera.location = centre + direction * (10 if rise < 10 else 0.5) + Vector((0, 0, rise))
 		camera.rotation_euler = (centre - camera.location).to_track_quat("-Z", "Y").to_euler()
 		scene.render.filepath = str(directory / f"{prefix}_{name}.png")
 		bpy.ops.render.render(write_still=True)
@@ -306,11 +369,12 @@ def main():
 	parser.add_argument("--pose", choices=["bend", *WORLD_POSES])
 	parser.add_argument("--fitted", action="store_true")
 	parser.add_argument("--nif", nargs="+")
+	parser.add_argument("--ground", nargs="+")
 	parser.add_argument("--pieces", action="store_true")
 	args = parser.parse_args(argv)
 	directory = Path(args.dir).resolve()
-	if args.nif:
-		model = nif_model(directory, args.nif, args.pieces)
+	if args.nif or args.ground:
+		model = nif_model(directory, args.nif or args.ground, args.pieces)
 	else:
 		model = json.loads((directory / ("fitted.json" if args.fitted else "model.json")).read_text())
 	frame = model.get("frame", "halo")
@@ -318,10 +382,12 @@ def main():
 		bpy.data.objects.remove(obj)
 	armature = build_armature(model, node_matrices(model))
 	obj = build_mesh(model, build_materials(directory, model["shaders"]), armature)
+	if args.ground:
+		build_hulls(model, hulls(args.ground))
 	if args.pose:
 		pose(armature, frame, args.pose)
-	prefix = "preview" + ("_nif" if args.nif else "_fitted" if args.fitted else "") + ("_pieces" if args.pieces else "") + (f"_{args.pose}" if args.pose else "")
-	render(directory, obj, armature, args.bones, prefix, FRONT[frame])
+	prefix = "preview" + ("_ground" if args.ground else "_nif" if args.nif else "_fitted" if args.fitted else "") + ("_pieces" if args.pieces else "") + (f"_{args.pose}" if args.pose else "")
+	render(directory, obj, armature, args.bones, prefix, FRONT[frame], above=bool(args.ground))
 	if args.blend:
 		bpy.ops.wm.save_as_mainfile(filepath=str(directory / f"{prefix}.blend"))
 

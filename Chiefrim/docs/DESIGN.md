@@ -419,19 +419,27 @@ is in the repo): `build/mjolnir/Data/`, and the same packed for a mod manager as
   reflection cube maps (his visor's is gold);
 - `fit.py` fits him to Skyrim's skeleton: joints onto Skyrim's, segments turned and stretched
   onto its bones, his shoulders and torso where Halo has them (bound to Skyrim's joints), his
-  boots squashed so his soles meet the ground;
+  boots squashed so his soles meet the ground, his helmet lowered 7.5 cm onto Skyrim's head
+  (Halo's head joint is at the helmet's base, Skyrim's at the jaw);
 - `armor.py` splits him by the bone each triangle is weighted most to, as Skyrim's armor
   divides a body: helmet (head, visor), gauntlets (forearms, hands), boots (calves, feet),
   cuirass (the rest, with the body's own forearms and calves, as Skyrim's cuirasses carry
   them, so nothing is missing without gauntlets or boots); and writes skinned SE NIFs
   (`nif.py`, which writes vanilla NIFs back byte for byte) for both ends of the weight slider,
   male and female cuirasses, and first person;
+- `ground.py` writes each piece's ground model (`<piece>_go.nif`, its world model: dropped and in
+  the inventory) as Skyrim's Steel Plate armor's are made: unskinned, lying as they do (helmet
+  upright, cuirass on its back without its thighs, gauntlets flat, boots standing), with one
+  convex hull (its 26-sided bounding polyhedron, inside Havok's convex radius) on Steel Plate's
+  rigid body (mass, friction, material) from the user's own Skyrim;
 - `textures.py` writes them as uncompressed DDS (the colours exactly the bake's);
 - `plugin.py` writes `ChiefrimMjolnir.esp` (`esp.py`): an armor and addon per piece, made from
-  the user's Skyrim.esm's Daedric ones (races, keywords, stats). The cuirass also covers the
+  the user's Skyrim.esm's Daedric ones (races, keywords, stats), the armor's world model its
+  ground model. The cuirass also covers the
   tail slot (40).
 
-`blender_preview.py` renders each stage headless (`--nif` reads the written NIFs back).
+`blender_preview.py` renders each stage headless (`--nif` reads the written NIFs back, `--ground`
+the ground models with their hulls).
 
 ## 7. Input
 
