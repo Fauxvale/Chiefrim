@@ -355,7 +355,8 @@ definition comes from that map. Chiefrim loads one **host map**.
   view is Skyrim's camera, and the shaken world layer slid decals and bullet holes over Skyrim's.
   A proxy carries a weapon and grenades at random, each as likely: a pistol, an MA5B, a plasma
   pistol or a needler, and its biped's grenade count of frags or plasmas, and drops them when its
-  actor dies, however: Skyrim lists the newly dead for 3 s (`CR_ACTOR_DEAD`), and the proxy dies
+  actor dies (since protocol 31, as Skyrim items by the corpse; since protocol 32, by `[Loot]`'s
+  odds, and a creature's nothing: §8.4), however: Skyrim lists the newly dead for 3 s (`CR_ACTOR_DEAD`), and the proxy dies
   Halo's way and lets go of its gun at once (a dying unit drops it partway through its death
   animation, and the proxy was deleted the next frame: the first in-game test saw grenades fall,
   never a gun). Offline (`fake_skyrim.py --actor-dies-at`): the pistol and grenades on the ground.
@@ -719,10 +720,11 @@ Without Covenant enemies there are no weapon drops. Options:
 - **c)** A loot bridge, where certain Skyrim items in containers become Halo weapons or ammo.
 
 v1 ships (a) with a debug command to spawn any weapon (the F7 key, and the console's
-`chiefrim give <name>`, §11). (c) is later work.
+`chiefrim give <name>`, §11). (b) was built and then replaced (2026-10-10, protocol 30) by the
+loot rework below, which is (c) with Halo's weapons as Skyrim items rather than a stand-in.
 
 **(b) Weapon caches (Phase 5, 2026-10-08, protocol 24, `skse/src/Caches.cpp`,
-`halo/src/chiefrim_caches.c`).** Halo weapons lying in Skyrim's world: Halo objects, not Skyrim
+`halo/src/chiefrim_caches.c`; removed 2026-10-10, protocol 30: kept here as their record).** Halo weapons lying in Skyrim's world: Halo objects, not Skyrim
 items, so no Skyrim plugin (esp) or assets. Halo lays each one down in its world (drawn in the world
 layer, lit by Skyrim's light, on Skyrim's surfaces through the collision BSP) and Chief picks it up
 as in Halo.
@@ -776,6 +778,141 @@ laid on the tower once and on the ground below twice: Halo looked 4 world units 
 to lie on, and before the tower's collision arrived found the ground. It looks 1 (~210 Skyrim
 units) now, and waits for the chest's own. The log also names each location the player enters and
 whether it's a camp or fort (and its decision), for a fort that logged nothing.
+
+**Loot rework (branch `loot-rework`, 2026-10-10, prototype): Halo's weapons as Skyrim items,** to
+replace the caches. `tools/mjolnir/weapons.py` turns a weapon's world model (its weap's model, lod
+0) into a Skyrim world model, as `ground.py` does the armor's: one unskinned shape per Halo shader
+(a model shader baked as the armor's, its cube map as Skyrim's environment map; a chicago shader as
+its first map in Skyrim's effect shader, added, as the Dwarven staff's crystal glows), upright on
+the ground, its muzzle to +y, in a convex hull on the Iron Dagger's rigid body made heavier and
+duller (20 kg, restitution 0.1, friction 0.8, damped: in game a dagger's skittered). `plugin.py`
+makes each a WEAP in `ChiefrimMjolnir.esp` from the Iron Dagger's (no damage, only
+`VendorItemWeapon` of its keywords), at a fixed form ID (the needler: 900), and its first-person
+model a STAT of the same NIF (980): the inventory shows a weapon by that one (without it, it went on
+showing the item looked at before).
+
+*Rounds and hand-back (protocol 29, 2026-10-10).* Each item has its rounds in its name, as Halo's HUD
+shows them: "Needler (20/60)" (loaded, spare), "Plasma Rifle (40%)" (battery); one without (found,
+bought) has a new one's. Skyrim keeps the name with the item wherever it goes (dropped, in a chest,
+sold, saved), so a gun's rounds are its own. `skse/src/Arsenal.cpp` watches the player's equips: one
+of these goes to Halo (`CR_MSG_GIVE_WEAPON` with `CR_GIVE_ITEM`: its tag, its rounds) and that
+instance leaves the inventory; while Chiefrim is off or unlinked it is unequipped again and kept.
+Halo (`halo/src/chiefrim_inventory.c`) waits for its world, then:
+- Chief carries one of the same with magazines: his takes the item's rounds, spare then loaded, up
+  to its maximum (Halo's pickup takes only the spare ones and deletes the rest; here none are lost),
+  and what's left comes back as an item (`CR_RETURNED_LEFTOVER`; none left: only the count, for the
+  notice). An energy weapon (its magazine holds no spare rounds: Halo never merges those) takes the
+  place of his, which comes back.
+- Else he takes it into his hands; with two already, the one selected comes back.
+- He can't (no Chief, a weapon he may not carry): it comes back whole (`CR_RETURNED_REFUSED`).
+Every weapon he lets go of (`units.c`: `unit_drop_current_weapon`, `unit_drop_selected_weapon`, the
+hook `chiefrim_weapon_released`: a swap, a third weapon, the debug give) that Skyrim has an item for
+(`CR_MSG_ARSENAL`, sent on linking) goes back with its rounds (`CR_MSG_WEAPON_RETURNED`) and is
+deleted from Halo's world the next frame, so none lies about to be picked up again; any other stays
+in Halo's world, as before. One that can't fire any more Halo deletes as it drops it, as ever. Not as
+he dies: Skyrim loads a save then. Skyrim makes a returned one an item by placing it at the player,
+naming it and picking it up (an item's own extra data can't be made otherwise), with a notice. The
+kit's restore had capped a weapon's loaded rounds at its spare ones (a needler 20/0 came back empty);
+its rounds are Halo's own now: spare (`rounds_total`) and loaded beside them.
+Offline (`fake_skyrim.py --give-item needler:20/10,plasma_rifle:0.4 --arsenal ...`): a third weapon
+sends the assault rifle back 60/240; a needler 5/60 gives Chief's 20/10 all 65 rounds (20/75), a new
+one 5 (it's back 20/55); a plasma rifle at 0.9 swaps for his at 0.4, which comes back; a fuel rod is
+refused; a weapon outside the arsenal stays in Halo's world.
+*All of Chief's weapons (2026-10-10).* The needler, assault rifle, pistol, shotgun, sniper rifle,
+rocket launcher, plasma pistol and plasma rifle are items (900 to 907, their inventory models 980 to
+987; the fuel rod and the flamethrower Chief can't carry). A model's vertices are at its nodes' rest
+poses (Halo draws them by each node's matrix times its default's inverse), so a model of several
+nodes is taken whole. A model shader with no cube map and a self-illumination (the plasma weapons'
+luminous parts, the rifle's display) glows (Skyrim's glow shader; one with both reflects); an
+alpha-blended decal (the markings) is blended by its base map's alpha as a decal; a transparent
+generic shader (the bolts) is as a chicago one, added or blended by its alpha as Halo's framebuffer
+blend function says; a meter (the heat gauges) is left out, as a cool gun's draws next to nothing.
+`halo_model.py` reads uncompressed cube maps too (the plasma rifle's). Offline: each given as an
+item, held, and sent back with its rounds as the next came.
+*Loot (2026-10-10; richer 2026-10-11).* `plugin.py` adds these leveled lists (LVLI, A00 to A07):
+
+| List | Contents |
+|---|---|
+| Light | needler, assault rifle, pistol, plasma pistol (as the caches had them) |
+| Medium | shotgun, plasma rifle |
+| Heavy | sniper rifle, rocket launcher |
+| Grenades | 1 or 2 frags, or 1 or 2 plasmas |
+| An ordinary chest's | a third each light, medium, grenades |
+| A boss chest's | a third heavy, a third medium, a sixth each light and grenades |
+| A merchant's weapon | light two times in three, else medium |
+| A merchant's grenades | 2 or 4 of a kind |
+
+It also adds form lists (FLST, A10 to A12), taken from the user's own Skyrim.esm by editor ID:
+- **Treasure chests:** containers `Treas*` that hold `TGLootProwlersProfit`, as a treasure chest's
+  loot does, so not a merchant's or a quest's (36).
+- **Boss chests:** those that also hold `LItemSpecialLoot100` (17).
+- **Merchants' chests:** `*Merchant*` containers with Skyrim's weapons for sale
+  (`LItemBlacksmithWeapon75`, `LItemMiscVendorWeapon75`): blacksmiths, general goods, the
+  caravans, the fences (39).
+
+No Skyrim record is overridden. `skse/src/Loot.cpp` works at kDataLoaded:
+- It sets each list's chance-none from `Chiefrim.ini` `[Loot]`: `fChestChance` 0.12,
+  `fBossChestChance` 0.4, `fVendorWeaponChance` 0.25, `fVendorGrenadeChance` 0.35. The first
+  version had 0.06 and 0.3 and no grenades, and a medium weapon in 1.5% of ordinary chests; now
+  4%.
+- It adds each list to its containers' contents (`TESContainer::AddObjectToContainer`). Other
+  mods' changes to the same chests are kept. A merchant's list is drawn again each time its stock
+  comes in.
+
+Verified in game (2026-10-11): the chests', boss chests' and merchants' Halo loot.
+
+A first version also rolled for a weapon as a human enemy died (by its death item, `fDeathChance`).
+Proxy drops (below) replaced it the same day: every enemy Chief fights drops its proxy's kit.
+
+It doesn't add to Skyrim's own leveled lists. The game stores their entries without the count
+header that CommonLib's `SimpleArray` assumes, so growing one there would corrupt the heap. A
+found weapon has no name, so it comes with a new one's rounds.
+
+*The caches removed (protocol 30).* The following are gone:
+- `skse/src/Caches.cpp` and `halo/src/chiefrim_caches.c`.
+- `CR_MSG_CACHE_PLACE` and `CR_MSG_CACHE_TAKEN` (0x14 and 0x15, retired).
+- `Chiefrim.ini`'s `[Caches]`.
+- `fake_skyrim.py`'s `--cache`.
+
+An older save's `CACH` co-save record is skipped as it loads.
+
+*Grenades and proxy drops (protocol 31, 2026-10-11).* The frag and plasma grenades are items too
+(908 and 909, from their equipment's world models; `weapons.py` takes an `eqip` as it does a
+`weap`).
+- **Handing over grenades:** equipping one takes all of that kind out of the inventory and sends
+  them (`CR_GIVE_GRENADES`, `count`). Chief takes as many as the globals' maximum leaves room for,
+  and the rest come back (`CR_RETURNED_LEFTOVER` with its `count`; `taken`, his).
+- **The arsenal:** it names the grenade types' equipment as well.
+- **Proxy drops:** a proxy's kit no longer falls in Halo's world. As its actor dies,
+  `chiefrim_inventory_loot` sends what Skyrim has items for: the gun, with its rounds, if Skyrim
+  has items for every gun it holds, and each grenade type's count. They go as
+  `CR_RETURNED_LOOT`, with `item` set to the actor's reference. Anything else still falls in Halo.
+  In game the needler fell twice, once in Halo and once in Skyrim. `unit_delete_all_weapons` keeps
+  the weapon in the unit's hand, so the proxy's gun was still dropped in Halo. That gun now leaves
+  its hand (`unit_drop_current_weapon`) and is deleted (marked: `object_delete` defers).
+- **Placing them:** Skyrim places each item by the corpse, a little above and around it, so they
+  fall as a Skyrim actor's own weapon does; the gun is named for its rounds. An actor not loaded
+  gets them in its inventory.
+- **Who drops what (protocol 32):** a wolf carrying grenades made no sense, and a gun on every
+  bandit was too generous. Skyrim now sends `Chiefrim.ini`'s odds with the arsenal, and Halo arms
+  each proxy by them as it's made. Halo uses the same values until it hears them.
+  - A person's proxy carries a gun by `fEnemyWeaponChance` (0.33), else none.
+  - A person's proxy carries 1 grenade of a random type by `fEnemyOneGrenadeChance` (0.2), 2 by
+    `fEnemyTwoGrenadesChance` (0.1), else none.
+  - A creature's carries nothing (`bCreaturesDrop`, 0; at 1, 1 or 2 grenades as before).
+
+  Its biped's own weapon goes whatever it carries, including the one in its hand. Offline, six
+  people's proxies carried 2 guns and 2, 2, 0, 0, 1 and 0 grenades; a wolf's carried nothing.
+  Verified in game (2026-10-11).
+- **Mass:** an item's rigid-body mass is now twice its weight (a grenade's 2 kg; the needler's
+  20 kg, as before).
+- **Offline:** 3 frags against Chief's 4 come back whole; of 6 plasmas he takes 4 and 2 come
+  back. A person's proxy sends its assault rifle at 60/180 and 4 plasma grenades by its actor; a
+  wolf's sends 1 frag.
+
+The sniper rifle's textures were mangled in game. Its model has a base map scale (1.07 × 1.99, at
+`mode` 0x30) that Halo's vertex shader multiplies its texture coordinates by. `read_model` applies
+it now; every other model's is 1.
 
 ## 9. Rendering
 
@@ -1293,7 +1430,7 @@ Each phase ends in something you can play.
 | 2 | **Overlay** | First-person and HUD layers composited (CPU path). Chief's arms, weapon and HUD are in Skyrim, and reloads and weapon swaps animate. Works with SSE Display Tweaks. **Status: done (2026-10-05), verified in game:** the weapon, arms and HUD show as in Halo, animate, and hide in menus; zooming works (the pistol's; other scopes to check). One picture for both layers (§9). Tested with the fake Skyrim: 1920x1080 frames at Halo's frame rate (~60), 15% of the screen covered by the weapon, arms and HUD, transparent elsewhere; the compositor's shader and blend checked under Proton with DXVK. |
 | 3 | **Combat** | Proxies, HitActor, PlayerHurt, shields, death, the world layer with depth (projectiles, effects, grenades). You can clear a bandit camp with an MA5B and frag grenades. **Status: done (2026-10-06), verified in game:** the world layer (§9: decals, projectiles, effects, depth-tested against Skyrim's, reprojected onto its camera), proxies, damage both ways with level scaling, shields, death both ways, the debug weapon key (§8); Skyrim's own hit processing (pain, hit reactions, crime), explosions that throw and burn; crash recovery and the on/off and restart keys (§11); Halo's prompts naming Skyrim's keys (§7). |
 | 4 | **Full world** | Interiors and load doors, the deep-water decision, furniture and scene hand-off (CollisionField stage C came with Phase 1, §5.2). Also Skyrim's HUD and light (§9). **Status: done (2026-10-06), verified in game:** Skyrim's HUD and light on Halo's objects (§9); the hand-off to Skyrim's furniture, beds, mounts, scenes and swimming (§11; beast forms verified 2026-10-07); load doors, interiors and fast travel (a new world and `Teleport` when the world changes, a loading screen closes or the player jumps over 1024 units). The one crash in testing was MaxsuCombatEscape's (combat pathing run inside a cell change; it crashes the same way without Chiefrim). |
-| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout (**weapon caches done 2026-10-09, verified in game**, §8.4, protocol 24: chosen, laid down, taken and kept; a fort's boss chest to check), lighting matched to Skyrim weather (**built 2026-10-08, checked offline**, §9: the sun's shadows, Skyrim's grade and fog on Halo's layers, protocol 21; in game to check), better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
+| 5 | **Persistence and polish** | Co-save state (**done 2026-10-07, verified in game**, §11: saves, loads, F10 and F11 keep the kit; a save without one gets the starting loadout), weapon acquisition beyond the loadout (weapon caches done 2026-10-09; **replaced 2026-10-10** by the loot rework, §8.4, protocol 30: Halo's weapons as Skyrim items, found in chests and on fallen enemies, handed to Chief by equipping them, given back with their rounds), lighting matched to Skyrim weather (**built 2026-10-08, checked offline**, §9: the sun's shadows, Skyrim's grade and fog on Halo's layers, protocol 21; in game to check), better proxy hitboxes for creatures (**done 2026-10-08, verified in game**, §8.1: each actor's own hit shapes, protocol 18; people, a giant, a horse, a mammoth, a dragon), the `chiefrim` console command (**done 2026-10-08, verified in game**, §11), launch script hardening. **No third-person view** (decided 2026-10-08): Halo never had one, so Chiefrim doesn't either. |
 | ★ | **Stretch: Covenant** | Revisit later (see Scope). |
 
 ## 13. Decisions

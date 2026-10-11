@@ -105,10 +105,11 @@ wchar_t const *chiefrim_control_key_name(long control); /* hud_messaging.c: the 
 void chiefrim_inventory_linked(void);                  /* Skyrim said hello */
 void chiefrim_inventory_message(cr_msg_chief_state const *message); /* CR_MSG_CHIEF_RESTORE */
 void chiefrim_inventory_update(long chief, boolean world_valid, boolean dead); /* each frame while linked, after the world */
-/* chiefrim_caches.c (docs §8.4): weapon caches in Skyrim's camps and forts */
-void chiefrim_caches_message(cr_msg_cache_place const *message);
-void chiefrim_caches_update(long chief, uint32_t generation, cr_vec3 origin);
-void chiefrim_caches_forget(void);
+void chiefrim_inventory_give(cr_msg_give_weapon const *message); /* CR_MSG_GIVE_WEAPON from a Skyrim item (CR_GIVE_ITEM) */
+void chiefrim_inventory_arsenal(cr_msg_arsenal const *message); /* CR_MSG_ARSENAL */
+void chiefrim_weapon_released(long unit_index, long weapon_index); /* units.c: a unit lets go of a weapon (a swap, a drop) */
+void chiefrim_inventory_odds(real *weapon, real *one_grenade, real *two_grenades, boolean *creatures); /* what a proxy carries (CR_MSG_ARSENAL's, else Halo's own) */
+boolean chiefrim_inventory_loot(uint32_t actor, long unit_index); /* a dying proxy's kit to Skyrim as items (CR_RETURNED_LOOT); what it had of them is gone */
 /* items.c: the surface an item says it rests on is one of the collision
 installed now (else it rests on none, and settles again) */
 struct item_datum;

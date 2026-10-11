@@ -136,8 +136,10 @@ def build_armature(model, matrices):
 
 
 def shape_shader(directory, nif, shape, pieces, number, name):
-	textures = nif.blocks[nif.blocks[shape["shader_property"]]["texture_set"]]["textures"]
-	stem = Path(textures[0].replace("\\", "/")).stem
+	shader = nif.blocks[shape["shader_property"]]
+	# an effect shader (a weapon's glow) names its own texture
+	first = shader["source_texture"] if "source_texture" in shader else nif.blocks[shader["texture_set"]]["textures"][0]
+	stem = Path(first.replace("\\", "/")).stem
 	if pieces:
 		return {"name": name, "solid": PIECE_COLOURS[number % len(PIECE_COLOURS)]}
 	if (directory / f"{stem}_color.png").exists():

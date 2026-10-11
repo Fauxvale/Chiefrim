@@ -2,7 +2,7 @@
 #include "Puppet.h"
 #include "Settings.h"
 
-#include "Caches.h"
+#include "Arsenal.h"
 #include "Camera.h"
 #include "Collision.h"
 #include "CoSave.h"
@@ -227,7 +227,6 @@ namespace chiefrim::Puppet
 			link.SendWorldContext(context);
 			link.SendTeleport(position, a_player->data.angle.z);
 			Collision::Reset(context.generation);  // Halo forgets the old world's collision
-			Caches::OnWorld(context.generation);   // and its loose objects: the caches again
 
 			s.worldSent = true;
 			s.worldId = a_id;
@@ -468,6 +467,7 @@ namespace chiefrim::Puppet
 				Input::OnLinked();
 				CoSave::OnLinked();
 				Console::OnLinked();
+				Arsenal::OnLinked();
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}
@@ -537,7 +537,6 @@ namespace chiefrim::Puppet
 			Combat::PerFrame(a_player, a_delta);
 			Lighting::Update(a_player);
 			Lighting::UpdateFlashlight(a_player);
-			Caches::Update(a_player);
 			if (Settings::SkyrimMoves() || handedOff) {
 				// handed off, Skyrim moves the player whatever the mode, and Chief follows
 				PublishPlayer(a_player);

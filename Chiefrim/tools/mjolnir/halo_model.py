@@ -85,6 +85,9 @@ def uncompress_vector(packed):
 
 def read_model(cache, name, lod):
 	model = cache.tag("mode", name)
+	# the model's base map scale (0x30): its texture coordinates times it, as
+	# the vertex shader scales them (the sniper rifle's are 1.07 by 1.99)
+	u_scale, v_scale = (scale or 1.0 for scale in cache.unpack("<2f", model, 0x30))
 	nodes = []
 	for address in cache.block(model, 0xB8, 0x9C):
 		_, _, parent = cache.unpack("<3h", address, 32)
@@ -122,7 +125,7 @@ def read_model(cache, name, lod):
 			vertices.append({
 				"position": [x, y, z],
 				"normal": uncompress_vector(normal),
-				"uv": [(2 * u + 1) / 65535, (2 * v + 1) / 65535],
+				"uv": [u_scale * (2 * u + 1) / 65535, v_scale * (2 * v + 1) / 65535],
 				"nodes": [node0 // 3, node1 // 3 if node1 != 0xFD else -1],
 				"weights": [w0, 1 - w0 if node1 != 0xFD else 0],
 			})
@@ -205,17 +208,30 @@ def unswizzle(raw, width, height, depth):
 	return out
 
 
+# bytes per texel of the uncompressed formats
+DEPTHS = {0: 1, 1: 1, 2: 1, 3: 2, 6: 2, 8: 2, 9: 2, 10: 4, 11: 4}
+
+
+def level_size(width, height, format):
+	if format in (14, 15, 16):
+		return max(1, width // 4) * max(1, height // 4) * (8 if format == 14 else 16)
+	return width * height * DEPTHS[format]
+
+
 def decode_bitmap(cache, name, index=0):
 	group = cache.tag("bitm", name)
 	bitmap = cache.block(group, 96, 0x30)[index]
 	_, width, height, _, type, format, flags, _, _, _, _, start = cache.unpack("<I5hH2h2hi", bitmap)
-	if format in (14, 15, 16):
-		raw = cache.data[start:start + max(1, width // 4) * max(1, height // 4) * (8 if format == 14 else 16)]
-		return width, height, decode_dxt(raw, width, height, format)
-	depth = {0: 1, 1: 1, 2: 1, 3: 2, 6: 2, 8: 2, 9: 2, 10: 4, 11: 4}.get(format)
-	if depth is None:
+	if format not in (14, 15, 16) and format not in DEPTHS:
 		raise ValueError(f"{name}: bitmap format {format} not handled")
-	raw = cache.data[start:start + width * height * depth]
+	return width, height, decode_level(cache.data[start:start + level_size(width, height, format)], width, height, format, flags)
+
+
+def decode_level(raw, width, height, format, flags):
+	"""A level's texels, in its format, to RGBA rows."""
+	if format in (14, 15, 16):
+		return decode_dxt(raw, width, height, format)
+	depth = DEPTHS[format]
 	if flags & (1 << 3):
 		raw = unswizzle(raw, width, height, depth)
 	pixels = bytearray(width * height * 4)
@@ -237,21 +253,21 @@ def decode_bitmap(cache, name, index=0):
 				pixels[4 * p:4 * p + 4] = bytes([((c >> 10) & 31) * 255 // 31, ((c >> 5) & 31) * 255 // 31, (c & 31) * 255 // 31, 255 if c >> 15 else 0])
 			else:
 				pixels[4 * p:4 * p + 4] = bytes([((c >> s) & 15) * 17 for s in (8, 4, 0, 12)])
-	return width, height, pixels
+	return pixels
 
 
 def decode_cube(cache, name, index=0):
 	"""A cube map's six faces (+x, -x, +y, -y, +z, -z, in Halo's frame), as
-	RGBA rows. On Xbox each face is its mip chain, padded to 128 bytes."""
+	RGBA rows. On Xbox each face is its mip chain, padded to 128 bytes (an
+	uncompressed one's levels each swizzled)."""
 	group = cache.tag("bitm", name)
 	bitmap = cache.block(group, 96, 0x30)[index]
 	_, width, height, _, type, format, flags, _, _, mipmaps, _, start = cache.unpack("<I5hH2h2hi", bitmap)
-	if type != 2 or format not in (14, 15, 16):
-		raise ValueError(f"{name}: not a DXT cube map (type {type}, format {format})")
-	block = 8 if format == 14 else 16
-	levels = [max(1, (width >> n) // 4) * max(1, (height >> n) // 4) * block for n in range(mipmaps + 1)]
+	if type != 2 or (format not in (14, 15, 16) and format not in DEPTHS):
+		raise ValueError(f"{name}: not a cube map in a format handled (type {type}, format {format})")
+	levels = [level_size(max(1, width >> n), max(1, height >> n), format) for n in range(mipmaps + 1)]
 	face = (sum(levels) + 127) // 128 * 128
-	return width, height, [decode_dxt(cache.data[start + f * face:start + f * face + levels[0]], width, height, format) for f in range(6)]
+	return width, height, [decode_level(cache.data[start + f * face:start + f * face + levels[0]], width, height, format, flags) for f in range(6)]
 
 
 def write_png(path, width, height, rgba):
