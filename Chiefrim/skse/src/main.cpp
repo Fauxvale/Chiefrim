@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "Arsenal.h"
 #include "Caches.h"
 #include "Camera.h"
 #include "CoSave.h"
@@ -41,6 +42,7 @@ namespace
 			chiefrim::Handoff::Install();
 			chiefrim::Lighting::Install();
 			chiefrim::Caches::Install();
+			chiefrim::Arsenal::Install();
 		}
 	}
 }

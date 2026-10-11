@@ -383,7 +383,8 @@ class Nif:
 			for triangle in copy:
 				writer.pack("3H", *triangle)
 
-	# ---- shading: BSLightingShaderProperty, BSShaderTextureSet
+	# ---- shading: BSLightingShaderProperty, BSEffectShaderProperty, NiAlphaProperty,
+	# BSShaderTextureSet
 
 	def parse_BSLightingShaderProperty(self, reader, block):
 		block["shader_type"] = reader.one("I")
@@ -408,6 +409,35 @@ class Nif:
 		if len(floats) != SHADER_TYPE_FLOATS.get(block["shader_type"], 0):
 			raise ValueError(f"shader type {block['shader_type']} takes {SHADER_TYPE_FLOATS.get(block['shader_type'], 0)} floats")
 		writer.pack(f"{len(floats)}f", *floats)
+
+	def parse_BSEffectShaderProperty(self, reader, block):
+		"""Skyrim SE's (Bethesda version 100): an unlit shader of one texture,
+		blended as its NiAlphaProperty says (a glow, added)."""
+		self.object_net(reader, block)
+		block["flags1"], block["flags2"] = reader.unpack("II")
+		block["uv_offset"], block["uv_scale"] = reader.unpack("2f"), reader.unpack("2f")
+		block["source_texture"] = reader.string("I")
+		block["texture_clamp_mode"], block["lighting_influence"], block["env_map_min_lod"], block["unknown"] = reader.unpack("4B")
+		block["falloff"] = reader.unpack("4f")  # start and stop angles, start and stop opacities
+		block["base_color"], block["base_color_scale"] = reader.unpack("4f"), reader.one("f")
+		block["soft_falloff_depth"] = reader.one("f")
+		block["greyscale_texture"] = reader.string("I")
+
+	def write_BSEffectShaderProperty(self, writer, block):
+		self.write_object_net(writer, block)
+		writer.pack("II2f2f", block["flags1"], block["flags2"], *block["uv_offset"], *block["uv_scale"])
+		writer.string("I", block["source_texture"])
+		writer.pack("4B4f", block["texture_clamp_mode"], block["lighting_influence"], block["env_map_min_lod"], block["unknown"], *block["falloff"])
+		writer.pack("4fff", *block["base_color"], block["base_color_scale"], block["soft_falloff_depth"])
+		writer.string("I", block["greyscale_texture"])
+
+	def parse_NiAlphaProperty(self, reader, block):
+		self.object_net(reader, block)
+		block["flags"], block["threshold"] = reader.unpack("HB")
+
+	def write_NiAlphaProperty(self, writer, block):
+		self.write_object_net(writer, block)
+		writer.pack("HB", block["flags"], block["threshold"])
 
 	def parse_BSShaderTextureSet(self, reader, block):
 		block["textures"] = [reader.string("I") for _ in range(reader.one("I"))]

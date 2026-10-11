@@ -777,6 +777,24 @@ to lie on, and before the tower's collision arrived found the ground. It looks 1
 units) now, and waits for the chest's own. The log also names each location the player enters and
 whether it's a camp or fort (and its decision), for a fort that logged nothing.
 
+**Loot rework (branch `loot-rework`, 2026-10-10, prototype): Halo's weapons as Skyrim items,** to
+replace the caches. `tools/mjolnir/weapons.py` turns a weapon's world model (its weap's model, lod
+0) into a Skyrim world model, as `ground.py` does the armor's: one unskinned shape per Halo shader
+(a model shader baked as the armor's, its cube map as Skyrim's environment map; a chicago shader as
+its first map in Skyrim's effect shader, added, as the Dwarven staff's crystal glows), upright on
+the ground, its muzzle to +y, in a convex hull on the Iron Dagger's rigid body made heavier and
+duller (20 kg, restitution 0.1, friction 0.8, damped: in game a dagger's skittered). `plugin.py`
+makes each a WEAP in `ChiefrimMjolnir.esp` from the Iron Dagger's (no damage, only
+`VendorItemWeapon` of its keywords), at a fixed form ID (the needler: 900), and its first-person
+model a STAT of the same NIF (980): the inventory shows a weapon by that one (without it, it went on
+showing the item looked at before). `skse/src/Arsenal.cpp` watches the player's equips: one of these hands
+the weapon to Chief (`CR_MSG_GIVE_WEAPON`, by its tag) and leaves the inventory; while Chiefrim is
+off or unlinked it is unequipped again and kept. So far: the needler alone, placed by hand
+(`player.placeatme`). To do: the weapon Chief lets go of (a third, a swap, a drop) back as an item
+rather than in Halo's world; ammunition (Halo's give is a full one); the other weapons (several
+nodes); Halo's weapons in Skyrim's leveled lists (from the plugin at kDataLoaded); the caches
+removed.
+
 ## 9. Rendering
 
 Skyrim renders the world. Halo renders **only its own things**, offscreen, at Skyrim's resolution,

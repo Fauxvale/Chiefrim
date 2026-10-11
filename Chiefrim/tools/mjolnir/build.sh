@@ -1,6 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Builds the Mjolnir armor from the user's own Halo map and Skyrim:
+# Builds the Mjolnir armor and Halo's weapons (as Skyrim items) from the
+# user's own Halo map and Skyrim:
 # build/mjolnir/Data/ (meshes, textures, ChiefrimMjolnir.esp), and the same
 # as a mod archive for a mod manager, build/dist/ChiefrimMjolnir-local.zip.
 # Nothing it writes goes in the repo (build/ is git-ignored), and none of it
@@ -19,6 +20,7 @@ python3 "$here/fit.py" --skyrim "$skyrim"
 python3 "$here/armor.py" --skyrim "$skyrim"
 python3 "$here/ground.py" --skyrim "$skyrim"
 python3 "$here/textures.py"
+python3 -I "$here/weapons.py" "$map" --skyrim "$skyrim"
 python3 "$here/plugin.py" --skyrim "$skyrim"
 zip="$build/dist/ChiefrimMjolnir-local.zip"
 mkdir -p "$build/dist"
