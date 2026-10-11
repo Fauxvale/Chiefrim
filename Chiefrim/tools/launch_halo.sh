@@ -38,6 +38,9 @@
 # Skyrim shows Halo's frames, and on the discrete GPU a Halo window opening
 # over a running Skyrim froze it until the window was minimized.
 # CHIEFRIM_HALO_SHOW_WINDOW=1 shows it.
+#
+# Chief's shield flares on his first-person arms too, as on his body
+# (OpenCE's display.viewmodel_shield): HALO_VIEWMODEL_SHIELD=false turns it off.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 maps=${HALO_MAPS:-"$root/../HaloProjects/Halo-CE-Universal/maps"}
@@ -86,7 +89,7 @@ start_halo() {
 	env CHIEFRIM=1 CHIEFRIM_DUMP_DIR="$root/build/collision-dumps" \
 		HALO_DATA_ROOT="$data" HALO_SAVE_ROOT="$root/build/halo-saves" \
 		HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_FULLSCREEN=0 \
-		HALO_TEST_INPUT="$bot" $window_env $gpu_env \
+		HALO_TEST_INPUT="$bot" HALO_VIEWMODEL_SHIELD="${HALO_VIEWMODEL_SHIELD:-true}" $window_env $gpu_env \
 		${CHIEFRIM_HALO_WRAPPER:-} "$halo" > "$data/halo.out" 2>&1 &
 	halo_pid=$!
 	if [ -z "$steam" ]; then
