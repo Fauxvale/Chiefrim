@@ -39,6 +39,7 @@ namespace chiefrim::Overlay
 			float depth[4];       // Skyrim's near, far, 1 if its depth is reversed, Skyrim units per Halo world unit
 			float now[4][4];      // Skyrim's camera now: forward, up, right (xyz), and its tangents (x, y)
 			float halo[4][4];     // the camera Halo's frame was drawn through, and Halo's tangents
+			float haloEye[4];     // where that camera was, from where Skyrim's is now (Skyrim units)
 			// Skyrim's grade of its own picture (its image space), for Halo's
 			float grade[4];       // saturation, brightness, contrast, strength (0: none)
 			float tint[4];        // colour, amount
@@ -48,6 +49,7 @@ namespace chiefrim::Overlay
 			float fogPlanes[4];   // where it starts and is full (Skyrim units), 1 if on
 			float look[4];        // Chief's arms and weapon: brightness, saturation, highlights' knee, 1 if on
 			float lookScene[4];   // matched to Skyrim's picture: shadow lift, exposure's least and most, 1 if metered
+			float lookDay[4];     // the key from which highlights may go to white (0: the picture's brightest only)
 		};
 
 		// A camera Skyrim published, for mapping Halo's frame onto the camera
@@ -55,7 +57,7 @@ namespace chiefrim::Overlay
 		struct PublishedCamera
 		{
 			std::uint32_t frame = 0;
-			RE::NiPoint3  forward, up, right;
+			RE::NiPoint3  eye, forward, up, right;
 			float         tangentX = 0.0f, tangentY = 0.0f;
 		};
 		constexpr std::uint32_t kCameraRing = 64;
@@ -132,9 +134,9 @@ namespace chiefrim::Overlay
 		constexpr char kShader[] = R"(
 cbuffer Params : register(b0)
 {
-	float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4];
+	float4 depthParams; float4 nowBasis[4]; float4 haloBasis[4]; float4 haloEye;
 	float4 grade; float4 tint; float4 fade; float4 fogNear; float4 fogFar; float4 fogPlanes;
-	float4 look; float4 lookScene;
+	float4 look; float4 lookScene; float4 lookDay;
 };
 Texture2D picture : register(t0);
 Texture2D<float> haloDepth : register(t1);
@@ -153,21 +155,29 @@ VSOut VSMain(uint id : SV_VertexID)
 	o.uv = uv;
 	return o;
 }
+// How much of Halo's premultiplied colour c to take as covering: its alpha,
+// or more where it adds light beyond what it covers (a muzzle flash, sparks:
+// bright, covering nothing), so that light is toned as a colour, not cut to
+// its coverage.
+float Covering(float4 c)
+{
+	return max(c.a, max(c.r, max(c.g, c.b)));
+}
 // Skyrim's grade, as its HDR shader makes it after the tone map: saturation,
 // the tint, brightness and contrast, then a fade. On Halo's premultiplied
 // colour, by the amount a_share of it that is Skyrim's world (not the HUD).
 float4 Grade(float4 c, float a_share)
 {
-	float w = a_share * grade.w;
-	if (w <= 0 || c.a <= 0.002)
+	float w = a_share * grade.w, a = Covering(c);
+	if (w <= 0 || a <= 0.002)
 		return c;
-	float3 u = c.rgb / c.a;
+	float3 u = c.rgb / a;
 	float  luminance = dot(u, float3(0.2125, 0.7154, 0.0721));
 	float3 g = lerp(luminance.xxx, u, grade.x);
 	g = lerp(g, tint.rgb * luminance, tint.a);
 	g = grade.z * (grade.y * g - 0.5) + 0.5;
 	g = lerp(g, fade.rgb, fade.a);
-	return float4(lerp(c.rgb, saturate(g) * c.a, w), c.a);
+	return float4(lerp(c.rgb, saturate(g) * a, w), c.a);
 }
 static const float3 kLuma = float3(0.2125, 0.7154, 0.0721);
 // Skyrim's picture, before Halo's layers, metered from a small mip of it:
@@ -208,32 +218,40 @@ float4 PSMeter(VSOut i) : SV_Target
 // brightness alone (their colour is the light's, from Halo): the
 // saturation; an exposure that follows the picture's key (as an eye adapts);
 // the highlights rolled off towards the picture's brightest (no shine above
-// the sky's); and the darks lifted by a share of the picture's shadows'
+// the sky's), or towards white in daylight (from half lookDay.x's key to it:
+// the meter's brightest is of a picture 64 texels across, under the sky's
+// and the sun's glints, and outside in game it held the MA5B's chrome at
+// 0.4 to 0.6, grey); and the darks lifted by a share of the picture's shadows'
 // brightness, in grey (nothing at night). By the amount a_share of the
 // pixel that is the weapon.
+float Daylight(float a_key)
+{
+	return lookDay.x > 0 ? saturate((a_key - 0.5 * lookDay.x) / (0.5 * lookDay.x)) : 0;
+}
 float4 Look(float4 c, float a_share)
 {
-	if (look.w <= 0 || a_share <= 0 || c.a <= 0.002)
+	float a = Covering(c);
+	if (look.w <= 0 || a_share <= 0 || a <= 0.002)
 		return c;
 	float key = 0.3, ceiling = 1, shadow = 0;
 	if (lookScene.w > 0)
 	{
 		float4 m = meter.Load(int3(0, 0, 0));
 		key = m.x;
-		ceiling = clamp(m.y, 0.4, 1);
+		ceiling = clamp(max(m.y, Daylight(key)), 0.4, 1);
 		// no more than a snowy forest's shadows (0.21): a picture of sky
 		// alone has its shadows at the sky's brightness
 		shadow = clamp(m.z, 0, 0.25) * lookScene.x;
 	}
 	float  exposure = lookScene.w > 0 ? clamp(sqrt(key / 0.3), lookScene.y, lookScene.z) : 1;
-	float3 u = c.rgb / c.a;
+	float3 u = c.rgb / a;
 	float3 g = max(lerp(dot(u, kLuma).xxx, u, look.y), 0) * exposure * look.x;
 	float  l = dot(g, kLuma);
 	float  k = look.z * ceiling, room = max(ceiling - k, 1e-3);
 	if (l > k)
 		g *= (k + room * (1 - exp(-(l - k) / room))) / l;
 	g = shadow + (1 - shadow) * g;
-	return float4(lerp(c.rgb, saturate(g) * c.a, a_share), c.a);
+	return float4(lerp(c.rgb, saturate(g) * a, a_share), c.a);
 }
 float4 PSScreen(VSOut i) : SV_Target
 {
@@ -247,26 +265,71 @@ float SkyrimViewDepth(float d)
 	return depthParams.z > 0.5 ? n * f / (n + d * (f - n)) : n * f / (f - d * (f - n));
 }
 // The world layer was drawn through an older camera (haloBasis: forward, up,
-// right, tangents); this pixel's view ray, from the camera of the moment
-// (nowBasis), is where in Halo's picture to look. Exact for turning; walking
-// leaves a parallax of a frame's step.
+// right, tangents; haloEye: where it was, from this one), a frame or two
+// behind. This pixel's point lies along its view ray from the camera of the
+// moment (nowBasis): a point at view depth t is ray * t. Once the camera has
+// moved, where that point is in Halo's picture depends on t. So the ray is
+// marched through Halo's depth, from near to Skyrim's own surface there
+// (spaced evenly on the screen, by 1/t, about kStepPixels apart: as many
+// steps as the move can shift a point, at most kMaxSteps; one standing
+// still), to the first place Halo drew something at or in front of it,
+// which is then refined (as far along as Halo's depth there puts it).
+// Nothing on the way: on Skyrim's surface (Halo's decals lie on it). What
+// moves with the camera (the weapon's muzzle flash) is in the screen layer,
+// not here. Halo's depth is along its forward; cleared to 1e30 where it drew
+// nothing.
+static const float kNear = 16.0, kStepPixels = 3.0, kMaxSteps = 64.0;
+// where the point at view depth a_t is in Halo's picture, its depth along
+// Halo's forward (a_ahead) and Halo's own there (a_halo), Skyrim units
+float2 HaloAt(float3 a_ray, float a_t, out float a_ahead, out float a_halo)
+{
+	float3 p = a_ray * a_t - haloEye.xyz;
+	a_ahead = dot(p, haloBasis[0].xyz);
+	float2 h = float2(dot(p, haloBasis[2].xyz), dot(p, haloBasis[1].xyz)) / max(a_ahead, 1e-4) / haloBasis[3].xy;
+	float2 uv = float2(h.x * 0.5 + 0.5, 0.5 - h.y * 0.5);
+	a_halo = haloDepth.SampleLevel(point_clamp, uv, 0) * depthParams.w;
+	return uv;
+}
 float4 PSWorld(VSOut i) : SV_Target
 {
 	float2 ndc = float2(i.uv.x * 2 - 1, 1 - i.uv.y * 2);
 	float3 ray = nowBasis[0].xyz + ndc.x * nowBasis[3].x * nowBasis[2].xyz + ndc.y * nowBasis[3].y * nowBasis[1].xyz;
-	float  ahead = dot(ray, haloBasis[0].xyz);
-	if (ahead <= 1e-4)
+	float  along = dot(ray, haloBasis[0].xyz);  // Halo's depth per unit of t, from a still eye
+	float  back = dot(haloEye.xyz, haloBasis[0].xyz);
+	if (along <= 1e-4)
 		discard;
-	float2 h = float2(dot(ray, haloBasis[2].xyz), dot(ray, haloBasis[1].xyz)) / ahead / haloBasis[3].xy;
-	if (any(abs(h) > 1))
+	float skyrim = SkyrimViewDepth(skyrimDepth.SampleLevel(point_clamp, i.uv, 0));
+	float t = skyrim, ahead, halo;
+	float near = min(kNear, skyrim);
+	uint  width, height;
+	picture.GetDimensions(width, height);
+	float sweep = 0.5 * max(width, height) * length(haloEye.xyz) * (1.0 / near - 1.0 / skyrim) / min(haloBasis[3].x, haloBasis[3].y);
+	int   steps = (int)clamp(ceil(sweep / kStepPixels), 1.0, kMaxSteps);
+	[loop] for (int k = 0; k <= steps; ++k)
+	{
+		float tk = 1.0 / lerp(1.0 / near, 1.0 / skyrim, k / (float)steps);
+		HaloAt(ray, tk, ahead, halo);
+		if (ahead > 1e-3 && halo <= ahead * 1.003 + 4.0)
+		{
+			t = tk;
+			break;
+		}
+	}
+	[unroll] for (int r = 0; r < 3; ++r)
+	{
+		HaloAt(ray, t, ahead, halo);
+		if (ahead <= 1e-3 || !(halo < 1e7))
+			break;
+		t = (halo + back) / along;
+	}
+	float2 uv = HaloAt(ray, t, ahead, halo);
+	if (ahead <= 1e-3 || any(abs(uv * 2 - 1) > 1))
 		discard;
-	float2 uv = float2(h.x * 0.5 + 0.5, 0.5 - h.y * 0.5);
 	float4 c = picture.Sample(linear_clamp, uv);
 	if (all(c == 0))
 		discard;
-	// Halo's depth is along its forward; along this camera's: the same point
-	float halo = haloDepth.SampleLevel(point_clamp, uv, 0) * depthParams.w / ahead;
-	float skyrim = SkyrimViewDepth(skyrimDepth.SampleLevel(point_clamp, i.uv, 0));
+	// Halo's depth there, along this camera's forward from this eye
+	halo = (halo + back) / along;
 	// a little slack: Halo's decals lie on Skyrim's own surfaces
 	if (halo > skyrim * 1.003 + 4.0)
 		discard;
@@ -552,11 +615,12 @@ float4 PSWorld(VSOut i) : SV_Target
 			// Chief's arms and weapon, before the grade (the HUD isn't touched)
 			float weaponBrightness = 1.0f;   // [Grade] fWeaponBrightness
 			float weaponSaturation = 0.9f;   // [Grade] fWeaponSaturation
-			float weaponHighlights = 0.6f;   // [Grade] fWeaponHighlights: the knee, of the picture's brightest (1: none)
+			float weaponHighlights = 0.7f;   // [Grade] fWeaponHighlights: the knee, of the picture's brightest (1: none)
 			bool  matchScene = true;         // [Grade] bWeaponMatchScene: metered from Skyrim's picture
 			float shadowLift = 0.35f;        // [Grade] fWeaponShadowLift: of the picture's shadows' colour
 			float exposureMin = 0.5f;        // [Grade] fWeaponExposureMin: in the dark
 			float exposureMax = 1.1f;        // [Grade] fWeaponExposureMax: in daylight
+			float daylightKey = 0.22f;       // [Grade] fWeaponDaylightKey: highlights to white from this key (0: never)
 		};
 
 		const GradeConfig& Grading()
@@ -566,11 +630,12 @@ float4 PSWorld(VSOut i) : SV_Target
 				std::clamp(Settings::ReadFloat(L"Grade", L"fContrast", 0.25f), 0.0f, 1.0f),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponBrightness", 1.0f), 0.0f, 2.0f),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponSaturation", 0.9f), 0.0f, 2.0f),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponHighlights", 0.6f), 0.0f, 1.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponHighlights", 0.7f), 0.0f, 1.0f),
 				Settings::ReadBool(L"Grade", L"bWeaponMatchScene", true),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponShadowLift", 0.35f), 0.0f, 1.0f),
 				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMin", 0.5f), 0.1f, 4.0f),
-				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMax", 1.1f), 0.1f, 4.0f) };
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponExposureMax", 1.1f), 0.1f, 4.0f),
+				std::clamp(Settings::ReadFloat(L"Grade", L"fWeaponDaylightKey", 0.22f), 0.0f, 1.0f) };
 			return config;
 		}
 
@@ -628,6 +693,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			a_params.lookScene[1] = std::min(config.exposureMin, config.exposureMax);
 			a_params.lookScene[2] = config.exposureMax;
 			a_params.lookScene[3] = s.metered ? 1.0f : 0.0f;
+			a_params.lookDay[0] = config.daylightKey;
 			if (!config.enabled) {
 				return;
 			}
@@ -715,6 +781,12 @@ float4 PSWorld(VSOut i) : SV_Target
 				const bool  known = s.haloCamera && then.frame == s.haloCamera && s.haloTangentX > 0.0f && s.haloTangentY > 0.0f;
 				PutBasis(p->halo, known ? then : s.current, known ? s.haloTangentX : s.current.tangentX,
 					known ? s.haloTangentY : s.current.tangentY);
+				if (known) {
+					const auto shift = then.eye - s.current.eye;
+					p->haloEye[0] = shift.x;
+					p->haloEye[1] = shift.y;
+					p->haloEye[2] = shift.z;
+				}
 				++(known ? s.reprojected : s.unknownCamera);
 				s.context->Unmap(s.params, 0);
 			}
@@ -806,7 +878,8 @@ float4 PSWorld(VSOut i) : SV_Target
 							std::min(config.exposureMin, config.exposureMax), config.exposureMax);
 						logger::info("overlay: the weapon's look: Skyrim's picture's key {:.3f}, brightest {:.3f}, shadows {:.3f}; exposure {:.2f},"
 									 " highlights to {:.2f}",
-							texels[0], texels[1], texels[2], exposure * config.weaponBrightness, std::clamp(texels[1], 0.4f, 1.0f));
+							texels[0], texels[1], texels[2], exposure * config.weaponBrightness,
+							std::clamp(std::max(texels[1], config.daylightKey > 0.0f ? std::clamp((texels[0] - 0.5f * config.daylightKey) / (0.5f * config.daylightKey), 0.0f, 1.0f) : 0.0f), 0.4f, 1.0f));
 					}
 					context->Unmap(s.meterStaging, 0);
 					s.stagingPending = false;
@@ -1193,6 +1266,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			s.cameraPending = out.frame;
 			PublishedCamera kept;
 			kept.frame = out.frame;
+			kept.eye = { out.eye.x, out.eye.y, out.eye.z };
 			kept.forward = { out.forward.x, out.forward.y, out.forward.z };
 			kept.up = { out.up.x, out.up.y, out.up.z };
 			kept.right = kept.forward.Cross(kept.up);  // screen right (Z up, right-handed), as Halo's view has it

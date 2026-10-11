@@ -20,7 +20,8 @@ namespace chiefrim::Lighting
 			float shadowReach = 16384.0f;  // how far towards the sun a shadow's caster is looked for
 			float shadowSpread = 12.0f;    // the rays around the eye, apart
 			float skyReach = 3000.0f;      // how far up a roof over the eye is looked for
-			float reflectionMatch = 2.5f;  // [Lighting] fReflectionMatch: a reflection's most, of the picture's key (0: no cap)
+			float reflectionMatch = 6.25f; // [Lighting] fReflectionMatch: a reflection's most, per the picture's key over fReflectionDark (0: no cap)
+			float reflectionDark = 0.06f;  // [Lighting] fReflectionDark: the key under which it's the least
 			float reflectionMin = 0.15f;   // [Lighting] fReflectionMin: the least that cap goes
 		} config;
 
@@ -179,7 +180,8 @@ namespace chiefrim::Lighting
 		config.flashlight = Settings::ReadBool(L"Flashlight", L"bEnabled", true);
 		config.flashBrightness = Settings::ReadFloat(L"Flashlight", L"fBrightness", 1.5f);
 		config.flashReach = Settings::ReadFloat(L"Flashlight", L"fReach", 1.0f);
-		config.reflectionMatch = std::max(Settings::ReadFloat(L"Lighting", L"fReflectionMatch", 2.5f), 0.0f);
+		config.reflectionMatch = std::max(Settings::ReadFloat(L"Lighting", L"fReflectionMatch", 6.25f), 0.0f);
+		config.reflectionDark = std::clamp(Settings::ReadFloat(L"Lighting", L"fReflectionDark", 0.06f), 0.0f, 1.0f);
 		config.reflectionMin = std::clamp(Settings::ReadFloat(L"Lighting", L"fReflectionMin", 0.15f), 0.0f, 1.0f);
 	}
 
@@ -248,10 +250,13 @@ namespace chiefrim::Lighting
 		// What a shiny weapon reflects is its surroundings, as Skyrim's picture
 		// shows them: in a dim cabin the MA5B shone near white by the fire's
 		// light (the reflection's strength is the light's, at its most from
-		// about half of Skyrim's daylight), where the room's brightest were 0.3
+		// about half of Skyrim's daylight), where the room's brightest were 0.3.
+		// The cabin's key 0.1 gives 0.25; outside, keys from 0.22 (an autumn
+		// day's; at 2.5 times the key it was capped to 0.54 to 0.74 there,
+		// the chrome grey) none
 		float key = 0.0f;
 		if (config.reflectionMatch > 0.0f && Overlay::Surroundings(key)) {
-			message.reflection_cap = std::clamp(key * config.reflectionMatch, std::max(config.reflectionMin, 0.01f), 1.0f);
+			message.reflection_cap = std::clamp((key - config.reflectionDark) * config.reflectionMatch, std::max(config.reflectionMin, 0.01f), 1.0f);
 		}
 
 		if (!Link::Get().PushRaw(CR_MSG_LIGHTING, &message, sizeof(message))) {
