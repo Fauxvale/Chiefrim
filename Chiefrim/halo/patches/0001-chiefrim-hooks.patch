@@ -746,7 +746,7 @@ index 42775183..ab3ca026 100644
  			{
  				struct physics_instance instance;
 diff --git a/source/render/render.c b/source/render/render.c
-index dc251459..cd512776 100644
+index dc251459..ed669fc5 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
 @@ -89,6 +89,8 @@ symbols in this file:
@@ -768,7 +768,7 @@ index dc251459..cd512776 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -327,13 +332,69 @@ static void render_window(
+@@ -327,13 +332,71 @@ static void render_window(
  	parameters.rasterizer_target = rasterizer_target;
  	parameters.has_mirror = has_mirror;
  	parameters.window_index = render.window_index;
@@ -820,9 +820,11 @@ index dc251459..cd512776 100644
 +		rasterizer_transparent_geometry_stop();
 +		chiefrim_overlay_world_done();
 +
-+		/* the screen layer: the first-person weapon and the HUD, over all */
++		/* the screen layer: the first-person weapon and what's attached to
++		it (its muzzle flash), and the HUD, over all */
 +		chiefrim_set_render_layer(CHIEFRIM_LAYER_SCREEN);
 +		render_objects();
++		render_particles();
 +		rasterizer_transparent_geometry_draw(TRUE);
 +		rasterizer_transparent_geometry_draw(FALSE);
 +		rasterizer_transparent_geometry_stop();
@@ -839,7 +841,7 @@ index dc251459..cd512776 100644
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -542,7 +603,7 @@ static void render_player_frame(
+@@ -542,7 +605,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  
@@ -930,6 +932,36 @@ index dad616be..f12b20d2 100644
  		{
  			interpolate_real_rgb_color(
  				&lighting->ambient_color,
+diff --git a/source/render/render_particles.c b/source/render/render_particles.c
+index 9ef213c0..36a3a3c8 100644
+--- a/source/render/render_particles.c
++++ b/source/render/render_particles.c
+@@ -25,6 +25,7 @@ symbols in this file:
+ #include "render.h"
+ #include "render_cameras_internal.h"
+ #include "render_particles.h"
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ #include "render_sprite.h"
+ #include "tag_files/tag_groups.h"
+ #include "units/unit_definitions.h"
+@@ -158,8 +159,15 @@ void render_particles(
+ 			struct particle_datum *particle = particle_get(particle_index);
+ 			boolean owned_by_local_player =
+ 				particle->local_player_index == local_player_index;
+-
+-			if (render_location_visible(&particle->location) &&
++			/* CHIEFRIM: in overlay mode, what's attached to the first-person
++			weapon (its muzzle flash) moves with it: drawn with it in the
++			screen layer, the rest in the world layer (render.c, docs §9) */
++			boolean on_weapon = owned_by_local_player &&
++				TEST_FLAG(particle->flags, _particle_datum_attached_to_local_player_bit);
++
++			if ((chiefrim_overlay_layer() == CHIEFRIM_LAYER_ALL ||
++					on_weapon == (chiefrim_overlay_layer() == CHIEFRIM_LAYER_SCREEN)) &&
++				render_location_visible(&particle->location) &&
+ 				(!TEST_FLAG(
+ 					particle->flags,
+ 					_particle_datum_dont_draw_first_person_bit) ||
 diff --git a/source/scenario/scenario.c b/source/scenario/scenario.c
 index ff88903b..5dd8fe66 100644
 --- a/source/scenario/scenario.c

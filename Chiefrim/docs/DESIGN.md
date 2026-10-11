@@ -857,6 +857,46 @@ using the camera Skyrim is about to use. It draws three layers:
   compared along the ray). Exact for turning, and for any field of view mismatch; walking leaves a
   frame's parallax. Skyrim no longer waits (`fWaitMs` 0); Checked under Proton with DXVK: a marker
   at the centre of Halo's frame lands at column 69-70 of 160 after a 10 degree turn (70.2 expected).
+- **Reprojection of a move (2026-10-10).** In game the frame's parallax showed: walking towards a
+  wall, Halo's bullet holes sank into it (drawn from an eye a frame or two back, they were further
+  than Skyrim's wall and failed its depth test) and settled when the player stopped; strafing, they
+  trailed. Skyrim now keeps each camera's eye too, and the world-layer shader marches each pixel's
+  view ray from the camera of the moment through Halo's depth, from 16 units to Skyrim's own
+  surface there (even on the screen, a step per 3 pixels the move can shift a point, at most 64;
+  one standing still), to the first thing Halo drew at or in front of it, and refines its distance
+  (three steps); nothing on the way, it takes Skyrim's surface (a decal's). The point is then
+  looked up from the eye Halo drew from. In game this held the holes on the wall, at a playable
+  frame rate.
+- **The muzzle flash moves with the weapon (2026-10-10).** Firing while moving, holes and muzzle
+  flashes still warped. The weapon's muzzle effect (particles attached to the first-person weapon:
+  smoke and flash at the barrel) was in the world layer, where it was drawn in mid-air near the
+  crosshair, away from the barrel, and its depth (62 units on, over 8% of the screen offline) set
+  the depth of the holes behind it; the shader's first answer, leaving what lay within 96 units
+  of the eye unmoved, half-moved what lay between. Now `render_particles` draws what's attached
+  to the first-person weapon in the screen layer, after the weapon, and the rest in the world
+  layer; the shader moves everything. Offline (`fake_skyrim.py --terrain --pitch -35 --fire-at`):
+  the smoke at the barrel in the screen layer; the world layer's depth, firing, from 166 units on
+  over 1.7% (the impacts). On a numpy port of the shader (a wall 300 units ahead with a hole, a
+  projectile at 150, a casing at 30, the eye 10 units on): walking forward or strafing, each in
+  place (the casing 1.5 pixels off, from 80); standing or turning, as before. Compiles with
+  Proton's `D3DCompile` (vkd3d-shader).
+  In game the holes held; the flash still looked wrong now and then: a grey patch over it. The
+  look (and the grade) took each pixel's colour over its alpha and cut the result back to its
+  alpha, right for the opaque weapon but not for light: an additive flash adds colour where it
+  covers almost nothing, so it came out at its alpha, grey. Both now take the larger of the alpha
+  and the colour as what covers. On 40 raw flash frames offline (daylight's meter): the flash
+  0.74 bright as Halo draws it, 0.38 toned before (its darkest tenth 0.11), 0.66 now (0.38).
+  (Leaving the particles out of the weapon's share doesn't work from `render_particles`: Halo
+  draws its sprites later, with the weapon's own transparent parts.)
+- **The chrome's shine in daylight (2026-10-10).** Outside on an autumn day the MA5B's shine
+  read grey. The log had the picture's key at 0.22 to 0.34, so the reflection cap (2.5 times the
+  key) held Halo's reflection to 0.54 to 0.74, and the meter's brightest (of a picture 64 texels
+  across) at 0.41 to 0.73, which the highlights rolled off to from 0.6 of it. The cap is now
+  `(key - fReflectionDark 0.06) x fReflectionMatch 6.25`: the cabin's 0.1 still 0.25, none from
+  0.22. The highlights may go to white from half of `[Grade] fWeaponDaylightKey` (0.22) to it,
+  their knee at 0.7 (`fWeaponHighlights`). On the MA5B's raw pixels offline, toned and graded with
+  the log's numbers: the shine (its top 5%) 0.59 before, 0.88 now; at the dimmer moment (key
+  0.22, brightest 0.41) 0.42 and 0.83; the cabin's 0.31 either way.
 - **Checked offline** (fake Skyrim, `--fire-at`, `--pitch`, `--speed 0`): frames name the camera
   they were drawn through; muzzle flash, smoke, sparks and bullet holes are in the world layer; a
   camera 120 units up looking 60 degrees down puts the holes at 123-146 units (120 / sin 60 = 139).
