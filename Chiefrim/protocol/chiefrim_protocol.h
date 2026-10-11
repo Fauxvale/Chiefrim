@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 29u
+#define CR_PROTOCOL_VERSION 32u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -317,8 +317,8 @@ vehicles); docs §10. */
 #define CR_MSG_CONSOLE       0x11u /* H->S: a line for Skyrim's console, answering a console command (cr_msg_log; protocol 19) */
 #define CR_MSG_DEBUG         0x12u /* S->H: debug drawing on or off (protocol 19) */
 #define CR_MSG_SHOT          0x13u /* H->S: a projectile's way this tick: Skyrim's destructible objects on it are hurt (protocol 23) */
-#define CR_MSG_CACHE_PLACE   0x14u /* S->H: a weapon cache: a weapon lying in Skyrim's world (protocol 24) */
-#define CR_MSG_CACHE_TAKEN   0x15u /* H->S: Chief picked a cache's weapon up (protocol 24) */
+/* 0x14, 0x15: the weapon caches' (protocol 24 to 29), gone with them in 30:
+Halo's weapons are Skyrim's items, found as its loot (docs §8.4) */
 #define CR_MSG_WEAPON_RETURNED 0x16u /* H->S: a weapon Chief let go of, or one he couldn't take, back to Skyrim as an item (protocol 29) */
 #define CR_MSG_ARSENAL       0x17u /* S->H: the weapons Skyrim has items for, on linking (protocol 29) */
 
@@ -469,10 +469,17 @@ for its world, then:
 - Else he takes it, and it is in his hands; with two already, the one he
   had selected goes back.
 - He can't (no Chief, dead, not a weapon of the host map): it goes back
-  whole (CR_RETURNED_REFUSED). */
+  whole (CR_RETURNED_REFUSED).
+
+CR_GIVE_GRENADES (protocol 31): with CR_GIVE_ITEM, grenades: weapon.tag is
+a grenade type's equipment (the game globals' grenade item: "weapons\frag
+grenade\frag grenade") and count how many Skyrim took out of the
+inventory. Chief takes as many as he has room for (the globals' maximum);
+the rest go back (CR_RETURNED_LEFTOVER, its count; taken those he took). */
 #define CR_WEAPON_NAME_LENGTH 64u
 #define CR_GIVE_LIST 0x0001u /* give nothing: list the weapons Chief may have, on the console */
 #define CR_GIVE_ITEM 0x0002u /* from a Skyrim item: weapon and item, not index and name */
+#define CR_GIVE_GRENADES 0x0004u /* with CR_GIVE_ITEM: count grenades of weapon.tag's type (protocol 31) */
 typedef struct cr_msg_give_weapon
 {
 	cr_msg_header header;
@@ -481,7 +488,7 @@ typedef struct cr_msg_give_weapon
 	char     name[CR_WEAPON_NAME_LENGTH];
 	/* protocol 29 */
 	uint32_t item;         /* Skyrim's form ID of the item, sent back with it */
-	uint32_t reserved;
+	uint32_t count;        /* CR_GIVE_GRENADES: how many (protocol 31) */
 	cr_chief_weapon weapon;
 } cr_msg_give_weapon;
 
@@ -493,26 +500,40 @@ drops it, and isn't returned). */
 #define CR_RETURNED_DROPPED  1u /* Chief let go of it: a swap, a third weapon, one of the same taking its place */
 #define CR_RETURNED_LEFTOVER 2u /* given to one of the same: the rounds his had no room for (taken: those it had room for; an empty tag: none left, nothing comes back) */
 #define CR_RETURNED_REFUSED  3u /* he couldn't take it */
+/* (protocol 31) a proxy's kit as its actor died (a gun, a grenade type's):
+Skyrim drops it by the actor (item: the actor's reference form ID) */
+#define CR_RETURNED_LOOT     4u
 typedef struct cr_msg_weapon_returned
 {
 	cr_msg_header   header;
 	uint32_t        reason;  /* CR_RETURNED_* */
-	uint32_t        item;    /* the give's item (0: one he let go of) */
-	int32_t         taken;   /* CR_RETURNED_LEFTOVER: the rounds his weapon took */
-	uint32_t        reserved;
-	cr_chief_weapon weapon;
+	uint32_t        item;    /* the give's item (0: one he let go of); CR_RETURNED_LOOT: the actor */
+	int32_t         taken;   /* CR_RETURNED_LEFTOVER: the rounds his weapon took (grenades: those he took) */
+	uint32_t        count;   /* (protocol 31) how many come back: 1 for a weapon, grenades' count */
+	cr_chief_weapon weapon;  /* a grenade's: its tag (the equipment's), no rounds */
 } cr_msg_weapon_returned;
 
 /* CR_MSG_ARSENAL (protocol 29): Halo's weapons Skyrim has items for, by tag
 path, sent on linking. Only these go back when Chief lets go of them; any
-other stays in Halo's world, as before. */
+other stays in Halo's world, as before. Grenade types' equipment too
+(protocol 31): a dying proxy's grenades of those go to Skyrim (any other
+falls in Halo's world). */
 #define CR_ARSENAL_MAX 16u
+/* (protocol 32) what a proxy carries, so drops as its actor dies: a
+person's proxy a gun by weapon_chance, and 1 grenade by grenade_chance[0],
+2 by grenade_chance[1] (else none), a type at random; a creature's
+(not CR_ACTOR_PERSON) nothing, unless CR_ARSENAL_CREATURES_DROP (1 or 2
+grenades). Until this comes, Halo's own: 1/3, 0.2 and 0.1, none */
+#define CR_ARSENAL_CREATURES_DROP 0x0001u
 typedef struct cr_msg_arsenal
 {
 	cr_msg_header header;
 	uint32_t count;
-	uint32_t reserved;
+	uint32_t flags;          /* CR_ARSENAL_* (protocol 32) */
 	char     tags[CR_ARSENAL_MAX][CR_WEAPON_TAG_LENGTH];
+	float    weapon_chance;      /* protocol 32 */
+	float    grenade_chance[2];
+	uint32_t reserved;
 } cr_msg_arsenal;
 
 /* Debug drawing in Halo's overlay (protocol 19, the console's "chiefrim
@@ -616,35 +637,6 @@ typedef struct cr_msg_chief_state
 	cr_msg_header  header;
 	cr_chief_state state;
 } cr_msg_chief_state;
-
-/* Weapon caches (protocol 24, docs §8.4): Skyrim chooses where weapons lie
-in its bandit camps and forts, keeps them in its co-save, and has Halo lay
-each down in the world it is in now (its world_context generation; a
-message for another world is dropped, as a new world erases Halo's loose
-objects and Skyrim sends its caches again). Halo drops it onto what lies
-below the position (once its collision has it) and reports the cache taken
-when Chief picks the weapon up. */
-typedef struct cr_msg_cache_place
-{
-	cr_msg_header header;
-	uint32_t id;           /* Skyrim's, for the taken report */
-	uint32_t generation;   /* the world_context it is for */
-	cr_vec3  position;     /* Skyrim units: above where it lies */
-	float    yaw;          /* radians from +x, counterclockwise: which way it points */
-	char     weapon[CR_WEAPON_TAG_LENGTH]; /* a tag path or its last part, NUL-terminated */
-	/* protocol 25: its ammunition, scarce: its magazine loaded, and this
-	share (0..1) of the spare rounds one in the map has; an energy weapon's
-	battery is spent by as much as it falls short */
-	float    spare;
-	uint32_t reserved;
-} cr_msg_cache_place;
-
-typedef struct cr_msg_cache_taken
-{
-	cr_msg_header header;
-	uint32_t id;
-	uint32_t reserved[3];
-} cr_msg_cache_taken;
 
 typedef struct cr_msg_hello
 {
@@ -1003,11 +995,9 @@ CR_STATIC_ASSERT(sizeof(cr_msg_player_died) == 16, "cr_msg_player_died");
 CR_STATIC_ASSERT(sizeof(cr_msg_chief_heal) == 16, "cr_msg_chief_heal");
 CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
 CR_STATIC_ASSERT(sizeof(cr_msg_shot) == 40, "cr_msg_shot");
-CR_STATIC_ASSERT(sizeof(cr_msg_cache_place) == 104, "cr_msg_cache_place");
-CR_STATIC_ASSERT(sizeof(cr_msg_cache_taken) == 24, "cr_msg_cache_taken");
 CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 24 + CR_WEAPON_NAME_LENGTH + 80, "cr_msg_give_weapon");
 CR_STATIC_ASSERT(sizeof(cr_msg_weapon_returned) == 24 + 80, "cr_msg_weapon_returned");
-CR_STATIC_ASSERT(sizeof(cr_msg_arsenal) == 16 + CR_ARSENAL_MAX * CR_WEAPON_TAG_LENGTH, "cr_msg_arsenal");
+CR_STATIC_ASSERT(sizeof(cr_msg_arsenal) == 16 + CR_ARSENAL_MAX * CR_WEAPON_TAG_LENGTH + 16, "cr_msg_arsenal");
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");

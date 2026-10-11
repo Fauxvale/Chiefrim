@@ -24,6 +24,20 @@ first-person model (WNAM, a static) is what the inventory shows it as, so
 each has one (made from the dagger's, its own NIF again); equipping one
 hands it to Chief, so it is never held.
 
+Halo's weapons as loot (docs §8.4): leveled lists (LVLI) of them by
+weight, light, medium and heavy (as the caches had them), and grenades;
+those a chest draws on: an ordinary one's (light, medium or grenades) and
+a boss chest's (heavy or medium, now and then light or grenades); and a
+merchant's (a weapon; grenades). And form lists (FLST) of what they
+go in, from the user's own Skyrim.esm: its treasure chests (a container
+Treas*, with the Thieves Guild's loot as a treasure chest has: not a
+merchant's or a quest's), boss chests (with LItemSpecialLoot100) apart.
+The plugin overrides none of Skyrim's records: skse/src/Loot.cpp adds the
+lists to those chests, and to merchants' (a blacksmith's, a general
+store's: with Skyrim's weapons for sale), as the game loads, at the chances
+Chiefrim.ini gives them. (An enemy Chief fights falls with its Halo proxy's gun and grenades,
+skse/src/Arsenal.cpp.)
+
 Usage: tools/mjolnir/plugin.py [--skyrim DATA_DIR] [--dir build/mjolnir]
 """
 import argparse
@@ -53,6 +67,7 @@ PIECES = [
 DESCRIPTION = "MJOLNIR Mark V powered assault armor."
 WEAPON_TEMPLATE = "IronDagger"
 WEAPON_DESCRIPTION = "A weapon of Halo's. Equip it to hand it to Master Chief."
+GRENADE_DESCRIPTION = "A grenade of Halo's. Equip it to hand Master Chief as many as he can carry."
 VENDOR_ITEM_WEAPON = 0x0008F958
 # the dagger's that a weapon Chief holds has no use for: its texture
 # hashes, its first-person model, its keywords (replaced)
@@ -61,6 +76,33 @@ WEAPON_LEFT_OUT = ("MODT", "KSIZ", "KWDA")
 FIRST_PERSON_TEMPLATE = "1stPersonIronDagger"
 # the templates' models' texture hashes (optional; they'd be Daedric's)
 TEXTURE_HASHES = ("MO2T", "MO3T", "MO4T", "MO5T")
+# Halo's loot (skse/src/Loot.cpp has these form IDs): per leveled list, its
+# form ID, editor ID, chance none (Chiefrim.ini's chances replace a
+# container's), its flags (LVLF: 1, from all levels up to the player's; 2,
+# each of a count drawn apart; a grenades' count is of one kind, so not)
+# and its entries, a weapon's key or a list's form ID, or either with a
+# count, as often as each is to come; each from level 1, one of them
+EACH = 0x3
+LOOT = [
+	(0xA00, "ChiefrimLootLight", 0, EACH, ["needler", "assault_rifle", "pistol", "plasma_pistol"]),
+	(0xA01, "ChiefrimLootMedium", 0, EACH, ["shotgun", "plasma_rifle"]),
+	(0xA02, "ChiefrimLootHeavy", 0, EACH, ["sniper_rifle", "rocket_launcher"]),
+	(0xA05, "ChiefrimLootGrenades", 0, 0x1, [("frag_grenade", 1), ("frag_grenade", 2), ("plasma_grenade", 1), ("plasma_grenade", 2)]),
+	# a third each light, medium, grenades
+	(0xA03, "ChiefrimLootChest", 88, EACH, [0xA00, 0xA00, 0xA01, 0xA01, 0xA05, 0xA05]),
+	# a third heavy, a third medium, a sixth light, a sixth grenades
+	(0xA04, "ChiefrimLootBossChest", 60, EACH, [0xA02, 0xA02, 0xA01, 0xA01, 0xA00, 0xA05]),
+	# a merchant's (a blacksmith's, a general store's), as its stock comes
+	# in: a weapon (light two times in three, else medium), and grenades
+	(0xA06, "ChiefrimLootVendorWeapon", 75, EACH, [0xA00, 0xA00, 0xA01]),
+	(0xA07, "ChiefrimLootVendorGrenades", 65, 0x1, [("frag_grenade", 2), ("frag_grenade", 4), ("plasma_grenade", 2), ("plasma_grenade", 4)]),
+]
+# the form lists: of ordinary treasure chests, boss chests, merchants'
+# chests (a blacksmith's or a general store's: with its weapons)
+CHESTS, BOSS_CHESTS, VENDORS = 0xA10, 0xA11, 0xA12
+TREASURE_MARK = "TGLootProwlersProfit"
+VENDOR_MARKS = ("LItemBlacksmithWeapon75", "LItemMiscVendorWeapon75")
+BOSS_MARK = "LItemSpecialLoot100"
 
 
 def zstring(text):
@@ -88,14 +130,14 @@ def weapon_records(plugin, data_dir):
 		low = [int(min(p[i] for p in points) // 1) for i in range(3)]
 		high = [-int(-max(p[i] for p in points) // 1) for i in range(3)]
 		weapon = Record("WEAP", 0x01000000 | form_id, subrecords=[(t, d) for t, d in template.subrecords if t not in WEAPON_LEFT_OUT])
-		weapon.set("EDID", zstring(f"Chiefrim{key.title()}"))
+		weapon.set("EDID", zstring(f"Chiefrim{weapons.editor_name(name)}"))
 		weapon.set("OBND", struct.pack("<6h", *low, *high))
 		weapon.set("FULL", zstring(name))
 		model_path = zstring(f"{weapons.MESHES.split(chr(92), 1)[1]}\\{key}.nif")
 		weapon.set("MODL", model_path)
 		static = Record("STAT", 0x01000000 | form_id + weapons.INVENTORY_ID,
 			subrecords=[(t, d) for t, d in static_template.subrecords if t != "MODT"])
-		static.set("EDID", zstring(f"1stPersonChiefrim{key.title()}"))
+		static.set("EDID", zstring(f"1stPersonChiefrim{weapons.editor_name(name)}"))
 		static.set("OBND", struct.pack("<6h", *low, *high))
 		static.set("MODL", model_path)
 		statics.append(static)
@@ -103,14 +145,50 @@ def weapon_records(plugin, data_dir):
 		# the keywords go after the equip type and its impacts, as the dagger's did
 		index = next(i for i, (t, _) in enumerate(weapon.subrecords) if t == "DESC")
 		weapon.subrecords[index:index] = [("KSIZ", struct.pack("<I", 1)), ("KWDA", struct.pack("<I", VENDOR_ITEM_WEAPON))]
-		weapon.set("DESC", zstring(WEAPON_DESCRIPTION))
+		weapon.set("DESC", zstring(GRENADE_DESCRIPTION if key.endswith("_grenade") else WEAPON_DESCRIPTION))
 		weapon.set("DATA", struct.pack("<IfH", value, weight, 0))
 		records.append(weapon)
 	return records, statics
 
 
+def loot_records(plugin):
+	"""The loot's leveled lists, and the form lists of where it goes."""
+	ours = {key: 0x01000000 | form_id for key, _, _, form_id, *_ in weapons.WEAPONS}
+	lists = []
+	for form_id, editor_id, chance_none, flags, entries in LOOT:
+		record = Record("LVLI", 0x01000000 | form_id)
+		record.set("EDID", zstring(editor_id))
+		record.set("OBND", bytes(12))
+		record.set("LVLD", bytes([chance_none]))
+		record.set("LVLF", bytes([flags]))
+		record.set("LLCT", bytes([len(entries)]))
+		for entry in entries:
+			entry, count = entry if isinstance(entry, tuple) else (entry, 1)
+			target = ours[entry] if isinstance(entry, str) else 0x01000000 | entry
+			record.subrecords.append(("LVLO", struct.pack("<HHIHH", 1, 0, target, count, 0)))
+		lists.append(record)
+	marks = {name: plugin.find("LVLI", name).form_id for name in (TREASURE_MARK, BOSS_MARK, *VENDOR_MARKS)}
+	vendor_marks = {marks[name] for name in VENDOR_MARKS}
+	chests, bosses, vendors = [], [], []
+	for container in plugin.groups["CONT"]:
+		held = {struct.unpack("<I", data[:4])[0] for kind, data in container.subrecords if kind == "CNTO"}
+		editor_id = container.editor_id or ""
+		if editor_id.startswith("Treas") and marks[TREASURE_MARK] in held:
+			(bosses if marks[BOSS_MARK] in held else chests).append(container.form_id)
+		elif "Merchant" in editor_id and held & vendor_marks:
+			vendors.append(container.form_id)
+	forms = []
+	for form_id, editor_id, members in ((CHESTS, "ChiefrimLootChests", chests), (BOSS_CHESTS, "ChiefrimLootBossChests", bosses),
+			(VENDORS, "ChiefrimLootVendors", vendors)):
+		record = Record("FLST", 0x01000000 | form_id)
+		record.set("EDID", zstring(editor_id))
+		record.subrecords += [("LNAM", struct.pack("<I", member)) for member in members]
+		forms.append(record)
+	return lists, forms
+
+
 def build(skyrim, data_dir):
-	plugin = Plugin(Path(skyrim) / "Skyrim.esm", ["ARMO", "ARMA", "WEAP", "STAT"])
+	plugin = Plugin(Path(skyrim) / "Skyrim.esm", ["ARMO", "ARMA", "WEAP", "STAT", "LVLI", "CONT"])
 	armors, addons = [], []
 	next_id = FIRST_ID
 	for piece, template, name, nif, addon_slots, extra_slots in PIECES:
@@ -157,17 +235,19 @@ def build(skyrim, data_dir):
 		armors.append(armor)
 
 	weapon_list, statics = weapon_records(plugin, data_dir)
-	next_id = max([next_id] + [(r.form_id & 0xFFFFFF) + 1 for r in weapon_list + statics])
+	loot, form_lists = loot_records(plugin)
+	ours = weapon_list + statics + loot + form_lists
+	next_id = max([next_id] + [(r.form_id & 0xFFFFFF) + 1 for r in ours])
 	esp = Plugin()
 	esp.header = Record("TES4", 0, subrecords=[
-		("HEDR", struct.pack("<fiI", 1.71, len(armors) + len(addons) + len(weapon_list) + len(statics), next_id)),
+		("HEDR", struct.pack("<fiI", 1.71, len(armors) + len(addons) + len(ours), next_id)),
 		("CNAM", zstring("Chiefrim")),
 		("SNAM", zstring("Master Chief's Mjolnir armor and Halo's weapons, ported from Halo CE by Chiefrim's tools.")),
 		("MAST", zstring("Skyrim.esm")),
 		("DATA", struct.pack("<Q", 0)),
 	])
 	# in Skyrim's order of top groups
-	esp.groups = {"ARMO": armors, "STAT": statics, "WEAP": weapon_list, "ARMA": addons}
+	esp.groups = {"ARMO": armors, "STAT": statics, "WEAP": weapon_list, "LVLI": loot, "FLST": form_lists, "ARMA": addons}
 	return esp
 
 
@@ -188,6 +268,12 @@ def main():
 		print(f"{weapon.form_id & 0xFFFFFF:06X} {weapon.editor_id}: {weapon.get('FULL')[:-1].decode()}"
 			f" ({weapon.get('MODL')[:-1].decode()}), {value} gold, {weight:g} weight,"
 			f" inventory model {struct.unpack('<I', weapon.get('WNAM'))[0] & 0xFFFFFF:06X}")
+	for loot in check.groups["LVLI"]:
+		entries = [struct.unpack("<HHIHH", data) for kind, data in loot.subrecords if kind == "LVLO"]
+		print(f"{loot.form_id & 0xFFFFFF:06X} {loot.editor_id}: {loot.get('LVLD')[0]}% none, "
+			+ ", ".join(f"{e[2] & 0xFFFFFF:03X}" + (f" x{e[3]}" if e[3] > 1 else "") for e in entries))
+	for form_list in check.groups["FLST"]:
+		print(f"{form_list.form_id & 0xFFFFFF:06X} {form_list.editor_id}: {len(form_list.all('LNAM'))} forms")
 	print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 

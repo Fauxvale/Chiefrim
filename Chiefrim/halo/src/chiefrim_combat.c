@@ -23,11 +23,12 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
   his body, on the scale of Skyrim's damage to him.
 - WEAPONS: CR_MSG_GIVE_WEAPON gives Chief one of the map's weapons, listed
   in the log at start (debug, docs §8.4): the next (the debug key), or one
-  by name (the console's "chiefrim give"), answered on Skyrim's console. Each person's proxy carries one of a few
-  sidearms and a type of grenade, at random, which it drops when its actor
-  dies (Skyrim lists the newly dead a moment, CR_ACTOR_DEAD): Chief's loot.
-  An animal's, a draugr's or another creature's (not CR_ACTOR_PERSON)
-  carries only 1 or 2 grenades.
+  by name (the console's "chiefrim give"), answered on Skyrim's console. A person's proxy
+  carries, by chance (Skyrim's odds, CR_MSG_ARSENAL), one of a few sidearms
+  and 0 to 2 grenades of a type, which it drops when its actor dies (Skyrim
+  lists the newly dead a moment, CR_ACTOR_DEAD): Chief's loot. An animal's,
+  a draugr's or another creature's (not CR_ACTOR_PERSON) carries nothing
+  (unless Skyrim says creatures drop: 1 or 2 grenades).
 - MOTION TRACKER: a proxy shows as Halo shows a unit, while its actor moves
   (measured from where Skyrim puts it) or attacks (CR_ACTOR_ATTACKING, as a
   unit firing shows): red if it is hostile to the player (CR_ACTOR_HOSTILE),
@@ -72,8 +73,7 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 #define CHIEFRIM_HEAD_FRACTION    0.92f /* a Skyrim person's head centre, of its height, when Skyrim doesn't say */
 #define CHIEFRIM_HEAD_RADIUS      0.07f /* world units at scale 1: a head, around its marker (Chief's helmet is ~0.13 tall) */
 #define CHIEFRIM_HEADSHOT_FLAG    0x0002u /* damage.c's _damage_can_cause_headshots_bit (a pistol's, a sniper's bullet) */
-#define CHIEFRIM_PROXY_GRENADES   2       /* when its biped carries none of its own */
-#define CHIEFRIM_CREATURE_GRENADES 2      /* a creature's proxy carries 1 to this many, and no gun */
+#define CHIEFRIM_CREATURE_GRENADES 2      /* with creatures dropping (CR_ARSENAL_CREATURES_DROP): 1 to this many, and no gun */
 #define CHIEFRIM_PROXY_HITBOXES   CR_HITBOXES_PER_ACTOR
 #define CHIEFRIM_HEAD_SLACK       1.25f   /* a headshot's reach, of the head shape's radius */
 #define CHIEFRIM_SPEED_TICKS      6       /* a proxy's speed is measured over this many ticks (0.2 s) */
@@ -425,7 +425,8 @@ boolean chiefrim_weapon_carried(char const *name)
 	return TRUE;
 }
 
-/* its actor died: its weapon and grenades fall where it stands, at once. A
+/* its actor died: its weapon and grenades fall where it stands, at once (as
+Skyrim items, by its actor, those Skyrim has items for). A
 dying unit drops its grenades as it dies but its weapon partway through its
 death animation, and a proxy is gone the next frame (no gun ever fell) */
 static void chiefrim_proxy_drop_kit(struct chiefrim_proxy *proxy)
@@ -435,6 +436,9 @@ static void chiefrim_proxy_drop_kit(struct chiefrim_proxy *proxy)
 	if (proxy->object_index == NONE || !object_try_and_get(proxy->object_index))
 		return;
 	unit = unit_get(proxy->object_index);
+	/* what Skyrim has items for goes to Skyrim, by its actor; the rest falls
+	here, as before */
+	chiefrim_inventory_loot(proxy->form_id, proxy->object_index);
 	unit->unit.weapon_drop_delay_ticks = 0;
 	if (!TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
 		unit_died(proxy->object_index, FALSE); /* Skyrim's kill: its grenades and weapons */
@@ -466,50 +470,80 @@ static void chiefrim_proxy_delete(struct chiefrim_proxy *proxy)
 	proxy->hitbox_count = 0;
 }
 
-/* a person's proxy: one of the proxy weapons in place of its biped's own,
-and its grenades all of one type, both at random (what it drops when it
-dies). Anything else's (an animal, a draugr, a troll: not ActorTypeNPC,
-CR_ACTOR_PERSON) carries no gun, only 1 or 2 grenades of a type at random */
+static real chiefrim_roll(void)
+{
+	return (real)rand() / ((real)RAND_MAX + 1.f);
+}
+
+/* its weapons gone, the one in its hand too (unit_delete_all_weapons keeps
+that one): out of its hand Halo's way, then deleted */
+static void chiefrim_proxy_disarm(long object_index)
+{
+	struct unit_datum *unit = unit_get(object_index);
+	long held = unit_inventory_get_weapon(object_index, unit->unit.current_weapon_index);
+
+	if (held != NONE)
+	{
+		unit->unit.weapon_drop_delay_ticks = 0;
+		if (!unit_drop_current_weapon(object_index, TRUE))
+		{
+			unit->unit.weapon_object_indices[unit->unit.current_weapon_index] = NONE;
+			unit->unit.current_weapon_index = NONE;
+			unit->unit.desired_weapon_index = NONE;
+		}
+		if (object_try_and_get(held))
+			object_delete(held);
+	}
+	unit_delete_all_weapons(object_index);
+}
+
+/* what a proxy carries, and drops when its actor dies (Skyrim's odds,
+CR_MSG_ARSENAL). A person's (ActorTypeNPC, CR_ACTOR_PERSON): one of the
+proxy weapons in place of its biped's own by the weapon chance (else none),
+and 1 or 2 grenades of a type at random by theirs (else none). Anything
+else's (an animal, a draugr, a troll) nothing: a wolf carries no grenades
+(unless creatures drop: 1 or 2, no gun) */
 static void chiefrim_proxy_arm(long object_index, boolean person)
 {
 	struct unit_datum *unit = unit_get(object_index);
+	real weapon_chance, one_grenade, two_grenades, roll;
+	boolean creatures;
 	short grenades = 0, type;
+	long weapon = NONE;
 
+	chiefrim_inventory_odds(&weapon_chance, &one_grenade, &two_grenades, &creatures);
 	for (type = 0; type < NUMBER_OF_UNIT_GRENADE_TYPES; type++)
-	{
-		grenades += MAX(unit->unit.grenade_counts[type], 0);
 		unit->unit.grenade_counts[type] = 0;
-	}
-	if (!person)
-		grenades = (short)(1 + rand() % CHIEFRIM_CREATURE_GRENADES);
-	unit->unit.grenade_counts[rand() % NUMBER_OF_UNIT_GRENADE_TYPES] = (char)(grenades > 0 ? grenades : CHIEFRIM_PROXY_GRENADES);
-
-	if (!person)
+	if (person)
 	{
-		unit_delete_all_weapons(object_index);
-		if (combat.proxies_armed++ < 6)
-			error(_error_silent, "chiefrim: a creature's proxy carries no gun and %d %s grenades",
-				unit->unit.grenade_counts[0] + unit->unit.grenade_counts[1], unit->unit.grenade_counts[0] ? "frag" : "plasma");
+		roll = chiefrim_roll();
+		grenades = roll < two_grenades ? 2 : roll < two_grenades + one_grenade ? 1 : 0;
 	}
-	else if (combat.proxy_weapon_count > 0)
+	else if (creatures)
+	{
+		grenades = (short)(1 + rand() % CHIEFRIM_CREATURE_GRENADES);
+	}
+	if (grenades > 0)
+		unit->unit.grenade_counts[rand() % NUMBER_OF_UNIT_GRENADE_TYPES] = (char)grenades;
+
+	chiefrim_proxy_disarm(object_index); /* its biped's own weapon goes, whatever it carries */
+	if (person && combat.proxy_weapon_count > 0 && chiefrim_roll() < weapon_chance)
 	{
 		struct object_placement_data data;
-		long weapon;
 
 		object_placement_data_new(&data, combat.proxy_weapons[rand() % combat.proxy_weapon_count], object_index);
 		object_get_origin(object_index, &data.position);
 		weapon = object_new(&data);
-		/* replacing: its biped's own weapon goes */
 		if (weapon != NONE && !unit_add_weapon_to_inventory(object_index, weapon, _unit_add_weapon_replace))
 		{
 			object_delete(weapon);
 			weapon = NONE;
 		}
-		if (combat.proxies_armed++ < 6)
-			error(_error_silent, "chiefrim: a proxy carries %s and %d %s grenades",
-				weapon != NONE ? tag_get_name(object_get(weapon)->definition_index) : "nothing (its weapon wasn't taken)",
-				unit->unit.grenade_counts[0] + unit->unit.grenade_counts[1], unit->unit.grenade_counts[0] ? "frag" : "plasma");
 	}
+	if (combat.proxies_armed++ < 6)
+		error(_error_silent, "chiefrim: a %s's proxy carries %s and %d %s grenades", person ? "person" : "creature",
+			weapon != NONE ? tag_get_name(object_get(weapon)->definition_index) : "no gun",
+			unit->unit.grenade_counts[0] + unit->unit.grenade_counts[1], unit->unit.grenade_counts[0] ? "frag" : "plasma");
 }
 
 static long chiefrim_proxy_new(cr_actor const *actor, real_point3d const *position, real_vector3d const *forward)

@@ -223,7 +223,6 @@ static void chiefrim_apply_world(void)
 		old collision was. A load or a door leaves them behind, as Skyrim's
 		world would; Chief keeps what he carries */
 		chiefrim_clear_level_objects(chiefrim_local_unit(), "a new world: left behind");
-		chiefrim_caches_forget(); /* their weapons too: Skyrim sends this world's */
 		error(_error_silent, "chiefrim: %ld decals left behind", decals_expire_all());
 	}
 	chiefrim_world_generation(world.generation);
@@ -321,7 +320,6 @@ static void chiefrim_pump_events(void)
 			chiefrim.skyrim_pid = hello->pid;
 			error(_error_silent, "chiefrim: linked to Skyrim (pid %u, %s)", hello->pid, hello->build);
 			chiefrim_inventory_linked();
-			chiefrim_caches_forget(); /* a new Skyrim side sends its own */
 			chiefrim_flashlight_linked();
 			chiefrim_say_hello();
 			break;
@@ -353,9 +351,6 @@ static void chiefrim_pump_events(void)
 			break;
 		case CR_MSG_ARSENAL:
 			chiefrim_inventory_arsenal((cr_msg_arsenal const *)buffer);
-			break;
-		case CR_MSG_CACHE_PLACE:
-			chiefrim_caches_message((cr_msg_cache_place const *)buffer);
 			break;
 		case CR_MSG_KEY_NAMES:
 			chiefrim_key_names_set((cr_msg_key_names const *)buffer);
@@ -1455,8 +1450,6 @@ void chiefrim_frame(void)
 		chiefrim_combat_update(chiefrim_local_unit(), chiefrim.world.origin);
 	if (chiefrim.linked)
 		chiefrim_inventory_update(chiefrim_local_unit(), chiefrim.world_valid, chiefrim_combat_chief_dead());
-	if (chiefrim.linked && chiefrim.world_valid)
-		chiefrim_caches_update(chiefrim_local_unit(), chiefrim.world_generation, chiefrim.world.origin);
 	if (chiefrim.linked)
 		chiefrim_flashlight_update(chiefrim_local_unit());
 	if (chiefrim.placement_pending && chiefrim_skyrim_drives())

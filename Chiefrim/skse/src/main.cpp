@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Arsenal.h"
-#include "Caches.h"
 #include "Camera.h"
 #include "CoSave.h"
 #include "Combat.h"
@@ -8,6 +7,7 @@
 #include "Handoff.h"
 #include "Hud.h"
 #include "Lighting.h"
+#include "Loot.h"
 #include "Input.h"
 #include "Overlay.h"
 #include "Puppet.h"
@@ -41,8 +41,8 @@ namespace
 			chiefrim::Hud::Install();
 			chiefrim::Handoff::Install();
 			chiefrim::Lighting::Install();
-			chiefrim::Caches::Install();
 			chiefrim::Arsenal::Install();
+			chiefrim::Loot::Install();
 		}
 	}
 }

@@ -41,12 +41,14 @@ Halo's weapons as Skyrim items (docs §8.4, protocol 29):
 #include "cache/cache_files.h"
 #include "cseries/cseries_windows.h"
 #include "cseries/errors.h"
+#include "game/game_globals.h"
 #include "game/players.h"
 #include "items/items.h"
 #include "interface/first_person_weapons.h"
 #include "items/weapon_definitions.h"
 #include "items/weapons.h"
 #include "objects/objects.h"
+#include "scenario/scenario.h"
 #include "tag_files/tag_files.h"
 #include "units/units.h"
 
@@ -77,6 +79,7 @@ static struct
 	long released[CHIEFRIM_RELEASED_MAX]; /* his weapons let go of, gone to Skyrim: to delete */
 	long released_count;
 	cr_msg_arsenal arsenal;    /* the weapons Skyrim has items for */
+	boolean arsenal_heard;     /* and the proxies' odds (else Halo's own) */
 } inventory;
 
 /* ---------- private code */
@@ -315,7 +318,7 @@ static void chiefrim_inventory_apply(long chief, cr_chief_state const *state)
 
 /* ---------- Halo's weapons as Skyrim items */
 
-static void chiefrim_weapon_return(uint32_t reason, uint32_t item, long taken, cr_chief_weapon const *weapon)
+static void chiefrim_weapon_return(uint32_t reason, uint32_t item, long taken, long count, cr_chief_weapon const *weapon)
 {
 	struct cr_shared *shm = chiefrim_shared();
 	cr_msg_weapon_returned message;
@@ -326,6 +329,7 @@ static void chiefrim_weapon_return(uint32_t reason, uint32_t item, long taken, c
 	message.reason = reason;
 	message.item = item;
 	message.taken = (int32_t)taken;
+	message.count = (uint32_t)count;
 	message.weapon = *weapon;
 	if (!cr_ring_push(&shm->to_skyrim, CR_MSG_WEAPON_RETURNED, &message, sizeof(message)))
 		error(_error_silent, "chiefrim: the ring to Skyrim is full: %s isn't returned", weapon->tag);
@@ -427,6 +431,70 @@ static long chiefrim_held_weapon(long chief, long definition_index, short *slot_
 	return NONE;
 }
 
+/* A grenade type's equipment (the game globals' grenade item) */
+static char const *chiefrim_grenade_item(short type)
+{
+	struct game_globals *globals = scenario_get_game_globals();
+	struct game_globals_grenade *grenade;
+
+	if (!globals || !VALID_INDEX(type, MIN(globals->grenades.count, NUMBER_OF_UNIT_GRENADE_TYPES)))
+		return NULL;
+	grenade = TAG_BLOCK_GET_ELEMENT(&globals->grenades, type, struct game_globals_grenade);
+	return grenade->item.index != NONE ? tag_get_name(grenade->item.index) : NULL;
+}
+
+static short chiefrim_grenade_maximum(short type)
+{
+	return TAG_BLOCK_GET_ELEMENT(&scenario_get_game_globals()->grenades, type, struct game_globals_grenade)->maximum_count;
+}
+
+/* The grenade type whose equipment this is (its tag path, or its last
+part), or NONE */
+static short chiefrim_grenade_type(char const *name)
+{
+	size_t length = strlen(name);
+	short type;
+
+	for (type = 0; type < NUMBER_OF_UNIT_GRENADE_TYPES; type++)
+	{
+		char const *path = chiefrim_grenade_item(type);
+		size_t path_length = path ? strlen(path) : 0;
+
+		if (path && (!strcasecmp(path, name) ||
+			(path_length > length && path[path_length - length - 1] == '\\' && !strcasecmp(path + path_length - length, name))))
+		{
+			return type;
+		}
+	}
+	return NONE;
+}
+
+/* grenades from Skyrim items: as many as he has room for; the rest back */
+static void chiefrim_give_grenades(long chief, cr_msg_give_weapon const *give)
+{
+	cr_chief_weapon item = give->weapon;
+	short type;
+	long count = (long)MIN(give->count, 255), take = 0;
+
+	item.tag[CR_WEAPON_TAG_LENGTH - 1] = 0;
+	type = chiefrim_grenade_type(item.tag);
+	if (chief == NONE || !unit_try_and_get(chief) || chiefrim_combat_chief_dead() || type == NONE)
+	{
+		error(_error_silent, "chiefrim: Chief can't take %ld %s (%s); back to Skyrim", count, item.tag,
+			type == NONE ? "not a grenade of the host map" : "no Chief");
+		chiefrim_weapon_return(CR_RETURNED_REFUSED, give->item, 0, count, &item);
+		return;
+	}
+	{
+		struct unit_datum *unit = unit_get(chief);
+
+		take = MIN(count, MAX(chiefrim_grenade_maximum(type) - unit->unit.grenade_counts[type], 0));
+		unit->unit.grenade_counts[type] = (char)(unit->unit.grenade_counts[type] + take);
+	}
+	error(_error_silent, "chiefrim: Chief took %ld of %ld %s from Skyrim", take, count, item.tag);
+	chiefrim_weapon_return(CR_RETURNED_LEFTOVER, give->item, take, count - take, &item);
+}
+
 static void chiefrim_give_item(long chief, cr_msg_give_weapon const *give)
 {
 	cr_chief_weapon item = give->weapon;
@@ -434,13 +502,18 @@ static void chiefrim_give_item(long chief, cr_msg_give_weapon const *give)
 	long tag_index, held_index;
 	short slot;
 
+	if (give->flags & CR_GIVE_GRENADES)
+	{
+		chiefrim_give_grenades(chief, give);
+		return;
+	}
 	item.tag[CR_WEAPON_TAG_LENGTH - 1] = 0;
 	tag_index = chiefrim_weapon_tag(item.tag);
 	if (chief == NONE || !unit_try_and_get(chief) || chiefrim_combat_chief_dead() || tag_index == NONE)
 	{
 		error(_error_silent, "chiefrim: Chief can't take %s (%s); back to Skyrim", item.tag,
 			tag_index == NONE ? "not a weapon of the host map he may have" : "no Chief");
-		chiefrim_weapon_return(CR_RETURNED_REFUSED, give->item, 0, &item);
+		chiefrim_weapon_return(CR_RETURNED_REFUSED, give->item, 0, 1, &item);
 		return;
 	}
 	unit = unit_get(chief);
@@ -454,7 +527,7 @@ static void chiefrim_give_item(long chief, cr_msg_give_weapon const *give)
 			chiefrim_weapon_rounds_left(&item, magazines) ? "; the rest back to Skyrim" : "");
 		if (!chiefrim_weapon_rounds_left(&item, magazines))
 			item.tag[0] = 0; /* all taken: nothing comes back */
-		chiefrim_weapon_return(CR_RETURNED_LEFTOVER, give->item, taken, &item);
+		chiefrim_weapon_return(CR_RETURNED_LEFTOVER, give->item, taken, 1, &item);
 		return;
 	}
 	if (held_index != NONE)
@@ -471,7 +544,7 @@ static void chiefrim_give_item(long chief, cr_msg_give_weapon const *give)
 	slot = chiefrim_inventory_add(chief, &item);
 	if (slot == NONE)
 	{
-		chiefrim_weapon_return(CR_RETURNED_REFUSED, give->item, 0, &item);
+		chiefrim_weapon_return(CR_RETURNED_REFUSED, give->item, 0, 1, &item);
 		return;
 	}
 	unit->unit.desired_weapon_index = slot;
@@ -525,11 +598,81 @@ void chiefrim_weapon_released(long unit_index, long weapon_index)
 	chiefrim_weapon_capture(weapon_index, &weapon);
 	if (!weapon.tag[0] || !chiefrim_arsenal_has(weapon.tag))
 		return; /* no item for it in Skyrim: it stays in Halo's world */
-	chiefrim_weapon_return(CR_RETURNED_DROPPED, 0, 0, &weapon);
+	chiefrim_weapon_return(CR_RETURNED_DROPPED, 0, 0, 1, &weapon);
 	if (inventory.released_count < CHIEFRIM_RELEASED_MAX)
 		inventory.released[inventory.released_count++] = weapon_index;
 	error(_error_silent, "chiefrim: Chief let go of %s (%d/%d rounds, battery %.2f): back to Skyrim", weapon.tag,
 		weapon.rounds_loaded[0], weapon.rounds_total[0], 1.f - weapon.age);
+}
+
+boolean chiefrim_inventory_loot(uint32_t actor, long unit_index)
+{
+	struct unit_datum *unit;
+	cr_chief_weapon weapons[MAXIMUM_WEAPONS_PER_UNIT];
+	short slot, type, weapon_count = 0;
+	boolean all = TRUE, any = FALSE;
+
+	if (!chiefrim_linked() || unit_index == NONE || !unit_try_and_get(unit_index))
+		return FALSE;
+	unit = unit_get(unit_index);
+	/* its weapons, if Skyrim has items for them all (a proxy has one) */
+	for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+	{
+		long weapon_index = unit->unit.weapon_object_indices[slot];
+
+		if (weapon_index == NONE || !weapon_try_and_get(weapon_index))
+			continue;
+		chiefrim_weapon_capture(weapon_index, &weapons[weapon_count]);
+		if (!weapon_can_be_fired(weapon_index) || !weapons[weapon_count].tag[0] || !chiefrim_arsenal_has(weapons[weapon_count].tag))
+			all = FALSE;
+		weapon_count++;
+	}
+	if (weapon_count > 0 && all)
+	{
+		for (slot = 0; slot < weapon_count; slot++)
+		{
+			chiefrim_weapon_return(CR_RETURNED_LOOT, actor, 0, 1, &weapons[slot]);
+			error(_error_silent, "chiefrim: %08X died with %s (%d/%d rounds): to Skyrim", actor, weapons[slot].tag,
+				weapons[slot].rounds_loaded[0], weapons[slot].rounds_total[0]);
+		}
+		/* out of Halo's world: the one in its hand (unit_delete_all_weapons
+		keeps that one) out of its hand Halo's way, then gone; the others */
+		{
+			long held = unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index);
+
+			unit->unit.weapon_drop_delay_ticks = 0;
+			if (held != NONE && !unit_drop_current_weapon(unit_index, TRUE))
+			{
+				unit->unit.weapon_object_indices[unit->unit.current_weapon_index] = NONE;
+				unit->unit.current_weapon_index = NONE;
+				unit->unit.desired_weapon_index = NONE;
+			}
+			if (held != NONE && object_try_and_get(held))
+				object_delete(held);
+			unit_delete_all_weapons(unit_index);
+			/* object_delete marks it, and the objects' update frees it */
+			error(_error_silent, "chiefrim: %08X's weapons out of Halo's world (%s)", actor,
+				held != NONE && object_try_and_get(held) &&
+				!TEST_FLAG(object_header_get(held)->flags, _object_header_being_deleted_bit) ? "its gun is still here!" : "none left");
+		}
+		any = TRUE;
+	}
+	/* its grenades of the types Skyrim has items for */
+	for (type = 0; type < NUMBER_OF_UNIT_GRENADE_TYPES; type++)
+	{
+		char const *name = chiefrim_grenade_item(type);
+		cr_chief_weapon grenade;
+
+		if (unit->unit.grenade_counts[type] <= 0 || !name || !chiefrim_arsenal_has(name))
+			continue;
+		memset(&grenade, 0, sizeof(grenade));
+		strncpy(grenade.tag, name, CR_WEAPON_TAG_LENGTH - 1);
+		chiefrim_weapon_return(CR_RETURNED_LOOT, actor, 0, unit->unit.grenade_counts[type], &grenade);
+		error(_error_silent, "chiefrim: %08X died with %d %s: to Skyrim", actor, unit->unit.grenade_counts[type], name);
+		unit->unit.grenade_counts[type] = 0;
+		any = TRUE;
+	}
+	return any;
 }
 
 void chiefrim_inventory_arsenal(cr_msg_arsenal const *message)
@@ -537,9 +680,30 @@ void chiefrim_inventory_arsenal(cr_msg_arsenal const *message)
 	uint32_t index;
 
 	inventory.arsenal = *message;
+	inventory.arsenal_heard = TRUE;
 	for (index = 0; index < CR_ARSENAL_MAX; index++)
 		inventory.arsenal.tags[index][CR_WEAPON_TAG_LENGTH - 1] = 0;
-	error(_error_silent, "chiefrim: Skyrim has items for %u of Halo's weapons", MIN(message->count, CR_ARSENAL_MAX));
+	error(_error_silent, "chiefrim: Skyrim has items for %u of Halo's weapons; a person's proxy carries a gun by %.2f, "
+		"1 grenade by %.2f, 2 by %.2f; a creature's %s", MIN(message->count, CR_ARSENAL_MAX), message->weapon_chance,
+		message->grenade_chance[0], message->grenade_chance[1],
+		message->flags & CR_ARSENAL_CREATURES_DROP ? "1 or 2 grenades" : "nothing");
+}
+
+void chiefrim_inventory_odds(real *weapon, real *one_grenade, real *two_grenades, boolean *creatures)
+{
+	if (!inventory.arsenal_heard)
+	{
+		/* Halo's own (CR_MSG_ARSENAL's) */
+		*weapon = 1.f / 3.f;
+		*one_grenade = 0.2f;
+		*two_grenades = 0.1f;
+		*creatures = FALSE;
+		return;
+	}
+	*weapon = PIN(inventory.arsenal.weapon_chance, 0.f, 1.f);
+	*one_grenade = PIN(inventory.arsenal.grenade_chance[0], 0.f, 1.f);
+	*two_grenades = PIN(inventory.arsenal.grenade_chance[1], 0.f, 1.f - *one_grenade);
+	*creatures = (inventory.arsenal.flags & CR_ARSENAL_CREATURES_DROP) != 0;
 }
 
 void chiefrim_inventory_give(cr_msg_give_weapon const *message)
@@ -549,7 +713,7 @@ void chiefrim_inventory_give(cr_msg_give_weapon const *message)
 		cr_chief_weapon weapon = message->weapon;
 
 		weapon.tag[CR_WEAPON_TAG_LENGTH - 1] = 0;
-		chiefrim_weapon_return(CR_RETURNED_REFUSED, message->item, 0, &weapon);
+		chiefrim_weapon_return(CR_RETURNED_REFUSED, message->item, 0, message->flags & CR_GIVE_GRENADES ? message->count : 1, &weapon);
 		return;
 	}
 	inventory.gives[inventory.give_count++] = *message;
@@ -564,6 +728,7 @@ void chiefrim_inventory_linked(void)
 	inventory.give_count = 0; /* the Skyrim that sent them is gone */
 	inventory.released_count = 0;
 	inventory.arsenal.count = 0; /* the new one sends its own */
+	inventory.arsenal_heard = FALSE;
 }
 
 void chiefrim_inventory_message(cr_msg_chief_state const *message)
