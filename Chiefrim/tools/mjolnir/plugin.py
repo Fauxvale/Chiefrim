@@ -12,8 +12,8 @@ addon covers the slots its NIF draws (the cuirass's and gauntlets' and
 boots' include the forearms or calves they carry, as Skyrim's do). The
 helmet's NIF is one, not one per end of the weight slider.
 
-The worn NIFs are the armor's world models too, for now: dropped, a piece
-has no collision (nor does it lie flat).
+Each armor's world model (dropped, and in the inventory) is ground.py's
+<piece>_go.nif.
 
 Usage: tools/mjolnir/plugin.py [--skyrim DATA_DIR] [--dir build/mjolnir]
 """
@@ -50,7 +50,7 @@ def zstring(text):
 
 def model(folder, name):
 	# Skyrim's model paths are from meshes\
-	return zstring(f"{MESHES.split(chr(92), 1)[1]}\\{folder}\\{name}.nif")
+	return zstring("\\".join([MESHES.split(chr(92), 1)[1], *([folder] if folder else []), f"{name}.nif"]))
 
 
 def slots(numbers):
@@ -96,7 +96,7 @@ def build(skyrim):
 		# Skyrim.esm's are localized (string IDs); this plugin's aren't
 		armor.set("FULL", zstring(name))
 		armor.set("DESC", zstring(DESCRIPTION))
-		armor.set("MOD2", model("male", nif))
+		armor.set("MOD2", model(None, f"{piece}_go"))
 		body = bytearray(armor.get("BOD2"))
 		current, = struct.unpack_from("<I", body)
 		body[0:4] = struct.pack("<I", current | slots(extra_slots))
@@ -126,8 +126,8 @@ def main():
 	check = Plugin(path)
 	for armor in check.groups["ARMO"]:
 		addon = check.by_id("ARMA", struct.unpack("<I", armor.get("MODL"))[0])
-		print(f"{armor.form_id & 0xFFFFFF:06X} {armor.editor_id}: {armor.get('FULL')[:-1].decode()}, "
-			f"{addon.editor_id} -> {addon.get('MOD2')[:-1].decode()}")
+		print(f"{armor.form_id & 0xFFFFFF:06X} {armor.editor_id}: {armor.get('FULL')[:-1].decode()}"
+			f" ({armor.get('MOD2')[:-1].decode()}), {addon.editor_id} -> {addon.get('MOD2')[:-1].decode()}")
 	print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 
