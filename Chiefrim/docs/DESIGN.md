@@ -1393,8 +1393,9 @@ grenade throws and riders: never seen in Chiefrim.
 **Pin moved to 6399ed9d (2026-10-11).** 81 commits, mostly the web build, Android and co-op
 (unused here); for Chiefrim: the HUD's reticles drawn from the redraws that match the Xbox's
 exactly, a profiling build (CPU recordings for Perfetto), text drawn a string at a time, and
-opt-in looks, all off: `display.viewmodel_shield` (the shield's flare on the first-person arms,
-in the screen layer with them), `display.shield_color`, `display.shield_glow` (a light of Halo's:
+opt-in looks: `display.viewmodel_shield` (the shield's flare on the first-person arms, in the
+screen layer with them; on in Chiefrim, `tools/launch_halo.sh`, as checked in game), and, off,
+`display.shield_color`, `display.shield_glow` (a light of Halo's:
 it lights Halo's things only) and `display.first_person_legs` (not tried here). Seven hooks
 conflicted, each beside an upstream line and kept with it: includes beside the shield glow's,
 the legs' and the profiling build's; `game.c`'s no-AI and no-scripts lines inside the profiling
