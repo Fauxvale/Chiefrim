@@ -1030,3 +1030,31 @@ index 73088440..c3e862fb 100644
  struct game_globals *scenario_get_game_globals(void);
  long global_structure_bsp_tag_index_get(void);
  void scenario_location_award_bonus(struct location *location);
+diff --git a/source/units/units.c b/source/units/units.c
+index 023a4b43..72ead72a 100644
+--- a/source/units/units.c
++++ b/source/units/units.c
+@@ -695,6 +695,7 @@ symbols in this file:
+ #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+ #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
+ #include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* port: the control and animation impulses the host's actors give their
+ units go to the clients' copies (port/linux/game/network_actors.c) */
+@@ -7721,6 +7722,7 @@ boolean unit_drop_current_weapon(
+ 		weapon_put_away(current_weapon_index, immediate))
+ 	{
+ 		first_person_weapon_message_from_unit(unit_index, 13);
++		chiefrim_weapon_released(unit_index, current_weapon_index); /* CHIEFRIM: back to Skyrim as an item */
+ 		unit_drop_item(unit_index, current_weapon_index);
+ 		unit->unit.weapon_object_indices[unit->unit.current_weapon_index] = NONE;
+ 		unit->unit.current_weapon_index = NONE;
+@@ -7753,6 +7755,7 @@ boolean unit_drop_selected_weapon(
+ 	{
+ 		return unit_drop_current_weapon(unit_index, TRUE);
+ 	}
++	chiefrim_weapon_released(unit_index, weapon_index); /* CHIEFRIM: back to Skyrim as an item */
+ 	unit_drop_item(unit_index, weapon_index);
+ 	unit->unit.weapon_object_indices[slot] = NONE;
+ 	unit->unit.desired_weapon_index = unit->unit.current_weapon_index!=NONE ?

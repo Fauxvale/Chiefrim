@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "Link.h"
+#include "Arsenal.h"
 #include "Caches.h"
 #include "CoSave.h"
 #include "Combat.h"
@@ -206,6 +207,9 @@ namespace chiefrim
 				break;
 			case CR_MSG_CACHE_TAKEN:
 				Caches::OnTaken(*reinterpret_cast<const cr_msg_cache_taken*>(buffer));
+				break;
+			case CR_MSG_WEAPON_RETURNED:
+				Arsenal::OnReturned(*reinterpret_cast<const cr_msg_weapon_returned*>(buffer));
 				break;
 			case CR_MSG_CHIEF_STATE:
 				CoSave::OnChiefState(*reinterpret_cast<const cr_msg_chief_state*>(buffer));

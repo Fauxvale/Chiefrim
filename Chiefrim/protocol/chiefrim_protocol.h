@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 28u
+#define CR_PROTOCOL_VERSION 29u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -319,6 +319,8 @@ vehicles); docs §10. */
 #define CR_MSG_SHOT          0x13u /* H->S: a projectile's way this tick: Skyrim's destructible objects on it are hurt (protocol 23) */
 #define CR_MSG_CACHE_PLACE   0x14u /* S->H: a weapon cache: a weapon lying in Skyrim's world (protocol 24) */
 #define CR_MSG_CACHE_TAKEN   0x15u /* H->S: Chief picked a cache's weapon up (protocol 24) */
+#define CR_MSG_WEAPON_RETURNED 0x16u /* H->S: a weapon Chief let go of, or one he couldn't take, back to Skyrim as an item (protocol 29) */
+#define CR_MSG_ARSENAL       0x17u /* S->H: the weapons Skyrim has items for, on linking (protocol 29) */
 
 /* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
@@ -436,19 +438,82 @@ typedef struct cr_msg_flashlight
 	uint32_t reserved[2];
 } cr_msg_flashlight;
 
+/* One of Halo's weapons and its rounds: in Chief's kit (CR_MSG_CHIEF_STATE),
+handed to him from a Skyrim item (CR_MSG_GIVE_WEAPON) and back
+(CR_MSG_WEAPON_RETURNED). */
+#define CR_WEAPON_TAG_LENGTH 64u
+
+typedef struct cr_chief_weapon
+{
+	char     tag[CR_WEAPON_TAG_LENGTH]; /* the weapon's tag path, NUL-terminated; empty: no weapon */
+	int16_t  rounds_total[2];   /* per magazine: its spare rounds, those not loaded (Halo's HUD's "remaining") */
+	int16_t  rounds_loaded[2];  /* and those loaded; negative (S->H): the weapon's own, a new one's */
+	float    age;               /* energy weapons: battery spent, 0..1 */
+	uint32_t reserved;
+} cr_chief_weapon;
+
 /* name (protocol 19, the console's "chiefrim give"): the weapon's tag path or
 its last part ("sniper rifle"), any case; Halo answers on the console. Empty:
 by index, of the host map's weapons as Halo lists them in its log at start
-(wraps); -1: the next after the last given (the debug key). */
+(wraps); -1: the next after the last given (the debug key).
+
+CR_GIVE_ITEM (protocol 29, docs §8.4): the player equipped one of Halo's
+weapons as a Skyrim item, which Skyrim took out of the inventory: weapon is
+it, with its rounds (negative: the weapon's own, a new one's). Halo waits
+for its world, then:
+- Chief carries one of the same: a weapon with magazines gives his its
+  rounds, up to its maximum (as walking over one does in Halo, though the
+  item's loaded rounds count too); what's left of it, if any, goes back
+  (CR_MSG_WEAPON_RETURNED, CR_RETURNED_LEFTOVER). An energy weapon takes
+  the place of his, which goes back (CR_RETURNED_DROPPED).
+- Else he takes it, and it is in his hands; with two already, the one he
+  had selected goes back.
+- He can't (no Chief, dead, not a weapon of the host map): it goes back
+  whole (CR_RETURNED_REFUSED). */
 #define CR_WEAPON_NAME_LENGTH 64u
 #define CR_GIVE_LIST 0x0001u /* give nothing: list the weapons Chief may have, on the console */
+#define CR_GIVE_ITEM 0x0002u /* from a Skyrim item: weapon and item, not index and name */
 typedef struct cr_msg_give_weapon
 {
 	cr_msg_header header;
 	int32_t  index;
 	uint32_t flags;        /* CR_GIVE_* */
 	char     name[CR_WEAPON_NAME_LENGTH];
+	/* protocol 29 */
+	uint32_t item;         /* Skyrim's form ID of the item, sent back with it */
+	uint32_t reserved;
+	cr_chief_weapon weapon;
 } cr_msg_give_weapon;
+
+/* CR_MSG_WEAPON_RETURNED (protocol 29): a weapon back to the player's
+inventory as a Skyrim item, with its rounds. Halo deletes its own: no weapon
+of Chief's (that Skyrim has an item for: CR_MSG_ARSENAL) is left lying in
+Halo's world (an empty one, Halo deletes as it
+drops it, and isn't returned). */
+#define CR_RETURNED_DROPPED  1u /* Chief let go of it: a swap, a third weapon, one of the same taking its place */
+#define CR_RETURNED_LEFTOVER 2u /* given to one of the same: the rounds his had no room for (taken: those it had room for; an empty tag: none left, nothing comes back) */
+#define CR_RETURNED_REFUSED  3u /* he couldn't take it */
+typedef struct cr_msg_weapon_returned
+{
+	cr_msg_header   header;
+	uint32_t        reason;  /* CR_RETURNED_* */
+	uint32_t        item;    /* the give's item (0: one he let go of) */
+	int32_t         taken;   /* CR_RETURNED_LEFTOVER: the rounds his weapon took */
+	uint32_t        reserved;
+	cr_chief_weapon weapon;
+} cr_msg_weapon_returned;
+
+/* CR_MSG_ARSENAL (protocol 29): Halo's weapons Skyrim has items for, by tag
+path, sent on linking. Only these go back when Chief lets go of them; any
+other stays in Halo's world, as before. */
+#define CR_ARSENAL_MAX 16u
+typedef struct cr_msg_arsenal
+{
+	cr_msg_header header;
+	uint32_t count;
+	uint32_t reserved;
+	char     tags[CR_ARSENAL_MAX][CR_WEAPON_TAG_LENGTH];
+} cr_msg_arsenal;
 
 /* Debug drawing in Halo's overlay (protocol 19, the console's "chiefrim
 shapes"): sent when it changes and on linking */
@@ -527,16 +592,6 @@ Skyrim may name one by its last part ("shotgun"), as Chiefrim.ini's
 [Loadout] does: Halo takes the map's weapon whose path ends with it. */
 #define CR_CHIEF_WEAPONS     4u  /* Halo's MAXIMUM_WEAPONS_PER_UNIT */
 #define CR_CHIEF_GRENADES    4u  /* Halo has 2 types; room to grow */
-#define CR_WEAPON_TAG_LENGTH 64u
-
-typedef struct cr_chief_weapon
-{
-	char     tag[CR_WEAPON_TAG_LENGTH]; /* the weapon's tag path, NUL-terminated; empty: no weapon */
-	int16_t  rounds_total[2];   /* per magazine: all its rounds, those loaded too; negative (S->H): */
-	int16_t  rounds_loaded[2];  /* the weapon's own, as one found in the map has them */
-	float    age;               /* energy weapons: battery spent, 0..1 */
-	uint32_t reserved;
-} cr_chief_weapon;
 
 typedef struct cr_chief_state
 {
@@ -950,7 +1005,9 @@ CR_STATIC_ASSERT(sizeof(cr_msg_explosion) == 32, "cr_msg_explosion");
 CR_STATIC_ASSERT(sizeof(cr_msg_shot) == 40, "cr_msg_shot");
 CR_STATIC_ASSERT(sizeof(cr_msg_cache_place) == 104, "cr_msg_cache_place");
 CR_STATIC_ASSERT(sizeof(cr_msg_cache_taken) == 24, "cr_msg_cache_taken");
-CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 16 + CR_WEAPON_NAME_LENGTH, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_give_weapon) == 24 + CR_WEAPON_NAME_LENGTH + 80, "cr_msg_give_weapon");
+CR_STATIC_ASSERT(sizeof(cr_msg_weapon_returned) == 24 + 80, "cr_msg_weapon_returned");
+CR_STATIC_ASSERT(sizeof(cr_msg_arsenal) == 16 + CR_ARSENAL_MAX * CR_WEAPON_TAG_LENGTH, "cr_msg_arsenal");
 CR_STATIC_ASSERT(sizeof(cr_msg_debug) == 16, "cr_msg_debug");
 CR_STATIC_ASSERT(sizeof(cr_msg_flashlight) == 40, "cr_msg_flashlight");
 CR_STATIC_ASSERT(sizeof(cr_msg_key_names) == 8 + 12 * 16, "cr_msg_key_names");

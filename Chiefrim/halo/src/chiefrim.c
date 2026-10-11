@@ -351,6 +351,9 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_CHIEF_RESTORE:
 			chiefrim_inventory_message((cr_msg_chief_state const *)buffer);
 			break;
+		case CR_MSG_ARSENAL:
+			chiefrim_inventory_arsenal((cr_msg_arsenal const *)buffer);
+			break;
 		case CR_MSG_CACHE_PLACE:
 			chiefrim_caches_message((cr_msg_cache_place const *)buffer);
 			break;
@@ -360,9 +363,15 @@ static void chiefrim_pump_events(void)
 		case CR_MSG_DEBUG:
 			chiefrim_combat_debug((cr_msg_debug const *)buffer);
 			break;
+		case CR_MSG_GIVE_WEAPON:
+			if (((cr_msg_give_weapon const *)buffer)->flags & CR_GIVE_ITEM)
+			{
+				chiefrim_inventory_give((cr_msg_give_weapon const *)buffer); /* waits for the world */
+				break;
+			}
+			/* fall through: the console's and the debug key's */
 		case CR_MSG_PLAYER_HURT:
 		case CR_MSG_CHIEF_HEAL:
-		case CR_MSG_GIVE_WEAPON:
 			if (chiefrim.world_valid)
 				chiefrim_combat_message(chiefrim_local_unit(), type, buffer, chiefrim.world.origin);
 			break;

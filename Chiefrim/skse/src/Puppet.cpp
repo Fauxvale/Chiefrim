@@ -2,6 +2,7 @@
 #include "Puppet.h"
 #include "Settings.h"
 
+#include "Arsenal.h"
 #include "Caches.h"
 #include "Camera.h"
 #include "Collision.h"
@@ -468,6 +469,7 @@ namespace chiefrim::Puppet
 				Input::OnLinked();
 				CoSave::OnLinked();
 				Console::OnLinked();
+				Arsenal::OnLinked();
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}

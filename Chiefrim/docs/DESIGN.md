@@ -787,13 +787,37 @@ duller (20 kg, restitution 0.1, friction 0.8, damped: in game a dagger's skitter
 makes each a WEAP in `ChiefrimMjolnir.esp` from the Iron Dagger's (no damage, only
 `VendorItemWeapon` of its keywords), at a fixed form ID (the needler: 900), and its first-person
 model a STAT of the same NIF (980): the inventory shows a weapon by that one (without it, it went on
-showing the item looked at before). `skse/src/Arsenal.cpp` watches the player's equips: one of these hands
-the weapon to Chief (`CR_MSG_GIVE_WEAPON`, by its tag) and leaves the inventory; while Chiefrim is
-off or unlinked it is unequipped again and kept. So far: the needler alone, placed by hand
-(`player.placeatme`). To do: the weapon Chief lets go of (a third, a swap, a drop) back as an item
-rather than in Halo's world; ammunition (Halo's give is a full one); the other weapons (several
-nodes); Halo's weapons in Skyrim's leveled lists (from the plugin at kDataLoaded); the caches
-removed.
+showing the item looked at before).
+
+*Rounds and hand-back (protocol 29, 2026-10-10).* Each item has its rounds in its name, as Halo's HUD
+shows them: "Needler (20/60)" (loaded, spare), "Plasma Rifle (40%)" (battery); one without (found,
+bought) has a new one's. Skyrim keeps the name with the item wherever it goes (dropped, in a chest,
+sold, saved), so a gun's rounds are its own. `skse/src/Arsenal.cpp` watches the player's equips: one
+of these goes to Halo (`CR_MSG_GIVE_WEAPON` with `CR_GIVE_ITEM`: its tag, its rounds) and that
+instance leaves the inventory; while Chiefrim is off or unlinked it is unequipped again and kept.
+Halo (`halo/src/chiefrim_inventory.c`) waits for its world, then:
+- Chief carries one of the same with magazines: his takes the item's rounds, spare then loaded, up
+  to its maximum (Halo's pickup takes only the spare ones and deletes the rest; here none are lost),
+  and what's left comes back as an item (`CR_RETURNED_LEFTOVER`; none left: only the count, for the
+  notice). An energy weapon (its magazine holds no spare rounds: Halo never merges those) takes the
+  place of his, which comes back.
+- Else he takes it into his hands; with two already, the one selected comes back.
+- He can't (no Chief, a weapon he may not carry): it comes back whole (`CR_RETURNED_REFUSED`).
+Every weapon he lets go of (`units.c`: `unit_drop_current_weapon`, `unit_drop_selected_weapon`, the
+hook `chiefrim_weapon_released`: a swap, a third weapon, the debug give) that Skyrim has an item for
+(`CR_MSG_ARSENAL`, sent on linking) goes back with its rounds (`CR_MSG_WEAPON_RETURNED`) and is
+deleted from Halo's world the next frame, so none lies about to be picked up again; any other stays
+in Halo's world, as before. One that can't fire any more Halo deletes as it drops it, as ever. Not as
+he dies: Skyrim loads a save then. Skyrim makes a returned one an item by placing it at the player,
+naming it and picking it up (an item's own extra data can't be made otherwise), with a notice. The
+kit's restore had capped a weapon's loaded rounds at its spare ones (a needler 20/0 came back empty);
+its rounds are Halo's own now: spare (`rounds_total`) and loaded beside them.
+Offline (`fake_skyrim.py --give-item needler:20/10,plasma_rifle:0.4 --arsenal ...`): a third weapon
+sends the assault rifle back 60/240; a needler 5/60 gives Chief's 20/10 all 65 rounds (20/75), a new
+one 5 (it's back 20/55); a plasma rifle at 0.9 swaps for his at 0.4, which comes back; a fuel rod is
+refused; a weapon outside the arsenal stays in Halo's world.
+To do: the other weapons (several nodes); Halo's weapons in Skyrim's leveled lists (from the plugin at
+kDataLoaded); the caches removed.
 
 ## 9. Rendering
 

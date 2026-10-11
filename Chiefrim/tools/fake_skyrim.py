@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 28
+VERSION = 29
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -52,10 +52,11 @@ MSG_WRAP, MSG_HELLO, MSG_TELEPORT, MSG_LOG = 0, 1, 2, 3
 MSG_HIT_ACTOR, MSG_PLAYER_HURT, MSG_PLAYER_DIED, MSG_GIVE_WEAPON, MSG_KEY_NAMES, MSG_LIGHTING = 6, 7, 8, 9, 10, 11
 MSG_CHIEF_STATE, MSG_CHIEF_RESTORE, MSG_CHIEF_HEAL, MSG_EXPLOSION, MSG_FLASHLIGHT = 12, 13, 14, 15, 16
 MSG_SHOT = 0x13
-MSG_CACHE_PLACE, MSG_CACHE_TAKEN = 0x14, 0x15
+MSG_CACHE_PLACE, MSG_CACHE_TAKEN, MSG_WEAPON_RETURNED, MSG_ARSENAL = 0x14, 0x15, 0x16, 0x17
 SHOTS = [0]
 MSG_CONSOLE, MSG_DEBUG = 17, 18
-GIVE_LIST, DEBUG_HITBOXES = 1, 1
+GIVE_LIST, GIVE_ITEM, DEBUG_HITBOXES = 1, 2, 1
+RETURNED = {1: "dropped", 2: "leftover", 3: "refused"}
 KIT_HEAD, KIT_WEAPON = "<IIii4BfffII", "<64s2h2hfI"  # cr_chief_state, cr_chief_weapon
 POSES = {0: "standing", 1: "crouching", 2: "airborne", 3: "dead"}
 MSG_COLLISION_RESET, MSG_COLLISION_TRIS = 4, 5
@@ -355,6 +356,26 @@ def kit_pack(kit):
     return body
 
 
+def give_pack(index, flags, name, item=0, weapon=None):
+    """cr_msg_give_weapon (protocol 29): index, flags, name; the item and its weapon"""
+    weapon = weapon or {"tag": "", "total": [0, 0], "loaded": [0, 0], "age": 0.0}
+    return (struct.pack("<iI64sII", index, flags, name.encode()[:63], item, 0)
+            + struct.pack(KIT_WEAPON, weapon["tag"].encode()[:63], *weapon["total"], *weapon["loaded"], weapon["age"], 0))
+
+
+def item_weapon(spec):
+    """--give-item's "needler:20/60" (loaded/spare), "plasma rifle:0.4" (battery
+    left) or "needler" (a new one's rounds); _ for a space"""
+    name, _, rounds = spec.partition(":")
+    weapon = {"tag": name.strip().replace("_", " "), "total": [-1, -1], "loaded": [-1, -1], "age": 0.0}
+    if "/" in rounds:
+        loaded, total = (int(v) for v in rounds.split("/"))
+        weapon.update(total=[total, 0], loaded=[loaded, 0])
+    elif rounds:
+        weapon["age"] = 1.0 - float(rounds)
+    return weapon
+
+
 def kit_text(kit):
     weapons = ", ".join(f"{w['tag'].rsplit(chr(92), 1)[-1]} {w['loaded'][0]}/{w['total'][0]}"
                         + (" (in hand)" if i == kit["current"] else "")
@@ -513,6 +534,12 @@ def main():
     parser.add_argument("--cache2-at", type=float, default=0.0)
     parser.add_argument("--give-name", default="",
                         help="with --give-at: weapons by name, comma-separated, in turn (the console's chiefrim give); empty: the next")
+    parser.add_argument("--give-item", default="",
+                        help="Skyrim items equipped (protocol 29), a second apart, comma-separated: needler:20/60 (loaded/spare), "
+                             "plasma rifle:0.4 (battery), or needler (a new one's rounds)")
+    parser.add_argument("--give-item-at", type=float, default=8.0)
+    parser.add_argument("--arsenal", default="weapons\\needler\\needler,weapons\\assault_rifle\\assault_rifle,weapons\\plasma_rifle\\plasma_rifle",
+                        help="with --give-item: the weapons Skyrim has items for (tag paths, comma-separated; _ for a space)")
     parser.add_argument("--list-weapons-at", type=float, default=0.0, help="seconds in: the console's chiefrim weapons")
     parser.add_argument("--shapes", action="store_true", help="the console's chiefrim shapes on: Halo draws the proxies' hit shapes")
     parser.add_argument("--restore-at", type=float, default=0.0,
@@ -687,6 +714,11 @@ def main():
                 elif msg_type == MSG_EXPLOSION:
                     cx, cy, cz, radius, acceleration = struct.unpack_from("<3fff", body)
                     print(f"fake_skyrim: explosion at ({cx:.0f} {cy:.0f} {cz:.0f}), radius {radius:.0f}, acceleration {acceleration:.3f}", flush=True)
+                elif msg_type == MSG_WEAPON_RETURNED:
+                    reason, item, taken, _ = struct.unpack_from("<IIiI", body)
+                    w = struct.unpack_from(KIT_WEAPON, body, 16)
+                    what = f"{text(w[0]) or 'nothing'} {w[3]}/{w[1]}, battery {1 - w[5]:.2f}"
+                    print(f"fake_skyrim: returned ({RETURNED.get(reason, reason)}, item {item:X}, {taken} rounds taken): {what}", flush=True)
                 elif msg_type == MSG_CACHE_TAKEN:
                     print(f"fake_skyrim: cache {struct.unpack_from('<I', body)[0]:08X} taken", flush=True)
                 elif msg_type == MSG_SHOT:
@@ -851,8 +883,21 @@ def main():
                 drive_state["gives"] = drive_state.get("gives", 0) + 1
                 names = [n.strip() for n in options.give_name.split(",") if n.strip()]
                 name = names[(drive_state["gives"] - 1) % len(names)] if names else ""
-                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, 0, name.encode()[:63]))
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, give_pack(-1, 0, name))
                 print(f"fake_skyrim: give weapon #{drive_state['gives']} {name!r}", flush=True)
+            items = [i for i in options.give_item.split(",") if i.strip()]
+            if items and not drive_state.get("arsenal"):
+                # cr_msg_arsenal: the weapons Skyrim has items for
+                tags = [t.strip().replace("_", " ") for t in options.arsenal.split(",") if t.strip()][:16]
+                link.push(RING_TO_HALO, MSG_ARSENAL, struct.pack("<II", len(tags), 0)
+                          + b"".join(t.encode()[:63].ljust(64, b"\0") for t in tags) + bytes(64 * (16 - len(tags))))
+                drive_state["arsenal"] = True
+                print(f"fake_skyrim: arsenal: {', '.join(tags)}", flush=True)
+            if items and t >= options.give_item_at + drive_state.get("items", 0) and drive_state.get("items", 0) < len(items):
+                spec = items[drive_state.get("items", 0)]
+                drive_state["items"] = drive_state.get("items", 0) + 1
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, give_pack(-1, GIVE_ITEM, "", 0x900 + drive_state["items"], item_weapon(spec)))
+                print(f"fake_skyrim: give item #{drive_state['items']} {spec.strip()!r}", flush=True)
             if options.cache and t >= options.cache_at and t >= drive_state.get("cache_next", 0.0):
                 drive_state["cache_next"] = t + 2.0
                 # cr_msg_cache_place: id, generation, position, yaw, weapon
@@ -874,7 +919,7 @@ def main():
                     options.x, options.y + 20.0, options.z + 120.0, 0.0, options.cache2.encode()[:63], 1.0, 0))
             if options.list_weapons_at and t >= options.list_weapons_at and not drive_state.get("listed"):
                 drive_state["listed"] = True
-                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, struct.pack("<iI64s", -1, GIVE_LIST, b""))
+                link.push(RING_TO_HALO, MSG_GIVE_WEAPON, give_pack(-1, GIVE_LIST, ""))
                 print("fake_skyrim: chiefrim weapons", flush=True)
             if options.shapes and not drive_state.get("shapes"):
                 drive_state["shapes"] = True
