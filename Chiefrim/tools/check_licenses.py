@@ -9,6 +9,8 @@ Checks, against licenses.toml:
 - every FetchContent dependency in skse/CMakeLists.txt is listed, under an
   allowed license, and (once fetched) its license file still says so;
 - CommonLibSSE-NG is still GPL-3.0;
+- every font under art/ is listed, under an allowed data license, and its
+  license file still says so;
 - with --halo: the pinned OpenCE is still CC0, every folder in
   its port/third_party is listed and allowed or excluded, and no compiled
   file, nor any of our patches, carries an excluded component's code.
@@ -108,6 +110,24 @@ def check_skse(manifest):
             problem(f"licenses.toml lists skse dependency {name!r}, which skse/CMakeLists.txt no longer fetches")
 
 
+def check_art(manifest):
+    """art/ holds our own drawings plus the listed third-party fonts"""
+    policy = manifest["policy"]
+    listed = set()
+    for entry in manifest.get("art", []):
+        listed.add(entry["path"])
+        if not (ROOT / entry["path"]).is_file():
+            problem(f"art: {entry['path']} is listed but missing")
+        if not allowed(entry["license"], policy["data"] + policy["code"]):
+            problem(f"art: {entry['name']} is {entry['license']}, which is not allowed for data")
+        check_markers(ROOT / entry["license_file"], entry["markers"], f"art: {entry['name']}")
+    # a font or image that arrives without a licenses.toml entry
+    for path in (ROOT / "art").rglob("*"):
+        name = str(path.relative_to(ROOT))
+        if path.suffix.lower() in {".ttf", ".otf", ".woff", ".woff2"} and name not in listed:
+            problem(f"art: {name} is not in licenses.toml")
+
+
 def check_halo(manifest):
     policy = manifest["policy"]
     work = ROOT / "halo" / ".work"
@@ -168,6 +188,7 @@ def main():
     check_project(manifest)
     check_headers()
     check_skse(manifest)
+    check_art(manifest)
     if "--halo" in sys.argv[1:]:
         check_halo(manifest)
 

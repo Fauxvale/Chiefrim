@@ -19,7 +19,10 @@ and must be GPL-compatible. "Or later" matches CommonLibSSE-NG's own terms.
    terms, the JSON license, or proprietary code.
 4. **Dual-licensed components** list the license Chiefrim takes (`taken`): Mbed TLS takes
    Apache-2.0, Monocypher CC0-1.0, and stb MIT.
-5. **Game data is never part of Chiefrim.** Skyrim's and Halo's data stay with the user (the
+5. **Artwork** in `Chiefrim/art` is ours, except the third-party files listed under `art` in
+   `licenses.toml` (data licenses only). The Halo font's readme lets anyone "do whatever you
+   want with it". That unconditional grant is recorded as `LicenseRef-Halo-Font-Free`.
+6. **Game data is never part of Chiefrim.** Skyrim's and Halo's data stay with the user (the
    repo ignores `HaloProjects/`; Halo reads the user's own extracted `maps/`).
 
 ### Enforcement
@@ -30,6 +33,7 @@ and must be GPL-compatible. "Or later" matches CommonLibSSE-NG's own terms.
 - Every `FetchContent_Declare` in `skse/CMakeLists.txt` is listed and allowed, and its fetched
   license file still says what we recorded.
 - CommonLibSSE-NG is still GPL-3.0.
+- Every font under `art/` is listed, and its readme still grants what we recorded.
 - With `--halo`: the pinned OpenCE is still CC0; every folder in its
   `port/third_party` is listed and allowed, or excluded; and no compiled file still carries an
   excluded component's code.

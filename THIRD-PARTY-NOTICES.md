@@ -51,6 +51,15 @@ incompatible with the GPL. Chiefrim's Halo build replaces the port's disc-image 
 
 Halo links the user's own SDL3, glibc, OpenGL and audio libraries as system libraries.
 
+## Artwork (`Chiefrim/art`)
+
+| Component | License | Notice |
+|---|---|---|
+| Halo font (`art/logo/Halo.ttf`; the logo's lettering is its outlined glyphs) | Free to use for anything, per its readme (`art/logo/Halo-Font-Readme.txt`) | Will Turnbow, in homage of Bungie's Halo |
+
+The logo imitates Halo's, and its background uses the reclaimer symbol from Bungie's Marathon
+and Halo games. Halo and its marks belong to Microsoft and Bungie.
+
 ## Design reference
 
 Chiefrim's architecture follows [SkyCraft](https://github.com/chasmlol/SkyCraft) (MIT,

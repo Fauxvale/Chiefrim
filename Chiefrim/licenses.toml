@@ -22,7 +22,12 @@ code = [
 	"CC0-1.0", "Unlicense",
 ]
 # Allowed only for data (fonts, images) shipped or embedded alongside code.
-data = ["OFL-1.1", "CC-BY-4.0", "CC-BY-SA-4.0", "CC0-1.0", "LicenseRef-PublicDomain"]
+# LicenseRef-Halo-Font-Free: the Halo font's readme, "Obviously the font is
+# free. Please do whatever you want with it." (an unconditional grant).
+data = [
+	"OFL-1.1", "CC-BY-4.0", "CC-BY-SA-4.0", "CC0-1.0", "LicenseRef-PublicDomain",
+	"LicenseRef-Halo-Font-Free",
+]
 # Never, in any form that is distributed with Chiefrim.
 forbidden = [
 	"BSD-4-Clause", "GPL-2.0-only", "LGPL-2.0-only", "AGPL-3.0-only",
@@ -201,3 +206,14 @@ notice = "Roger White (1994), released into the public domain"
 [[halo.system]]
 name = "SDL3, glibc, Mesa/OpenGL, PipeWire/PulseAudio"
 note = "dynamically linked system libraries of the user's Linux distribution"
+
+# ---- Artwork (art/)
+
+# Chiefrim's logo (art/logo): tools/make_logo.py outlines this font's glyphs.
+[[art]]
+name = "Halo font"
+path = "art/logo/Halo.ttf"
+license = "LicenseRef-Halo-Font-Free"
+license_file = "art/logo/Halo-Font-Readme.txt"
+markers = ["Created by Will Turnbow", "Please do whatever you want with it."]
+notice = "Will Turnbow, in homage of Bungie's Halo"
