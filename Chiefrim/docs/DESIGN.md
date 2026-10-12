@@ -931,9 +931,19 @@ using the camera Skyrim is about to use. It draws three layers:
   draws only the first-person weapon (`render_objects` skips every other object), its transparent
   parts, the HUD (`interface_draw_screen`), the screen flash and Halo's UI widgets. Halo's zoom
   screen effect (`interface.c`: every weapon's zoom blur and mask, desaturation, the sniper's night
-  vision) is skipped: it redraws the whole screen from Halo's picture, which here is empty, and
-  covered Skyrim with black (the first in-game test, zooming the pistol). Scope masks are HUD
-  bitmaps and still show. Night vision and desaturation, if wanted, belong on Skyrim's picture. No sky,
+  vision) redraws the whole screen from Halo's picture, which here is empty, and covered Skyrim
+  with black (the first in-game test, zooming the pistol). **Its mask (2026-10-12):** the scope's
+  dark surround and outline are the effect's mask (an A8Y8 bitmap, one texel per pixel of the
+  480-line screen, centred, its edges stretched to the sides: the pistol's and rocket launcher's
+  `pistol_scope_mask`, the sniper's `sniper_scope_mask2`), which darkens the picture by its
+  luminance. Over Skyrim, `rasterizer_xbox_screen_effect.c` draws only that, as the effect's own
+  one-pass mask (blend ZERO, INV_SRC_ALPHA), so the overlay's transmittance darkens Skyrim's
+  picture. Its quad is moved half a pixel up and left, as the game's other screen quads are: the
+  in-game test showed the top row undarkened (the port moves every vertex half a pixel to
+  OpenGL's pixel centres, over a pixel at 1080 lines). Checked with the fake Skyrim: the pistol's and the sniper's scopes as in Halo. The
+  warp's blur outside the scope (weighted by the mask's alpha, up to 15 Xbox pixels for the
+  pistol, 11 for the sniper and rocket launcher) and the sniper's night vision (light enhancement
+  and a green additive desaturation, with the flashlight) need Skyrim's picture and are left out. No sky,
   structure, decals, particles, fog, lens flares or mirrors. The port's screen takes Skyrim's
   shape: 480 lines and as many columns as the shape gives, its targets at Skyrim's pixels (at most
   2560x1440; a bigger screen gets a smaller picture, scaled up).
@@ -956,8 +966,8 @@ using the camera Skyrim is about to use. It draws three layers:
   (2026-10-08): a Talk prompt and subtitles over the MA5B. The HLSL is compiled at start
   (`d3dcompiler_47`): checked under Proton Experimental with DXVK, where its blend gives the
   expected pixels for opaque, half-covered, additive and empty texels.
-- **Still to come:** the zoom screen effect's tints on Skyrim's picture (night vision); checking
-  the sniper's and rocket launcher's scopes in game (b30 starts Chief with the MA5B and M6D only:
+- **Still to come:** the zoom screen effect's blur and tints on Skyrim's picture (the warp, night
+  vision); checking the sniper's and rocket launcher's scopes in game (b30 starts Chief with the MA5B and M6D only:
   needs §8.4's weapon spawn command); the layers apart (the weapon under Skyrim's HUD, not over its compass and
   messages), the world layer with depth (Phase 3), hiding Skyrim's own crosshair and bars, and
   object lighting from Skyrim (both done in Phase 4, below).
@@ -1501,7 +1511,8 @@ At the repo root: `LICENSE` (GPL-3.0) and `THIRD-PARTY-NOTICES.md`.
 - `UPSTREAM`: the pinned OpenCE commit (halo-ce-universal before its rename, 2026-10).
 - `patches/`: the hooks in the game's own files, each marked `/* CHIEFRIM */` (`main.c`,
   `game.c`, `scenario.c`/`.h`, `player_control.c`, `input_abstraction.c`, `render_cameras.c`,
-  `render.c`, `render_objects.c`, `collisions.c`, `objects.c`, `damage.c`, `decals.c`/`.h`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
+  `render.c`, `render_objects.c`, `collisions.c`, `objects.c`, `damage.c`, `decals.c`/`.h`,
+  `rasterizer_xbox_screen_effect.c`, and the port's `d3d8_gl.c` and `nv2a_psh.c`).
 - `src/`: our own engine code (`chiefrim.c`, `chiefrim.h`, ...); `src/port/` goes to
   `port/linux/src/` instead (`chiefrim_overlay_gl.c`: code on the port's OpenGL device, built with
   the platform layer's flags).
