@@ -131,6 +131,7 @@ namespace chiefrim::Overlay
 		// Full-screen triangles. Halo's pictures are premultiplied, scaled to
 		// the back buffer if Halo's are smaller (screens over CR_FRAME_MAX_*).
 		// The world layer's pixels behind Skyrim's own are dropped.
+		static_assert(CR_FRAME_DEPTH_FAINT == 131072.0f, "the shader's kFaint");
 		constexpr char kShader[] = R"(
 cbuffer Params : register(b0)
 {
@@ -277,8 +278,9 @@ float SkyrimViewDepth(float d)
 // Nothing on the way: on Skyrim's surface (Halo's decals lie on it). What
 // moves with the camera (the weapon's muzzle flash) is in the screen layer,
 // not here. Halo's depth is along its forward; cleared to 1e30 where it drew
-// nothing.
-static const float kNear = 16.0, kStepPixels = 3.0, kMaxSteps = 64.0;
+// nothing; where it drew only faint light, kFaint less the farthest's depth
+// (CR_FRAME_DEPTH_FAINT).
+static const float kNear = 16.0, kStepPixels = 3.0, kMaxSteps = 64.0, kFaint = 131072.0;
 // where the point at view depth a_t is in Halo's picture, its depth along
 // Halo's forward (a_ahead) and Halo's own there (a_halo), Skyrim units
 float2 HaloAt(float3 a_ray, float a_t, out float a_ahead, out float a_halo)
@@ -287,7 +289,10 @@ float2 HaloAt(float3 a_ray, float a_t, out float a_ahead, out float a_halo)
 	a_ahead = dot(p, haloBasis[0].xyz);
 	float2 h = float2(dot(p, haloBasis[2].xyz), dot(p, haloBasis[1].xyz)) / max(a_ahead, 1e-4) / haloBasis[3].xy;
 	float2 uv = float2(h.x * 0.5 + 0.5, 0.5 - h.y * 0.5);
-	a_halo = haloDepth.SampleLevel(point_clamp, uv, 0) * depthParams.w;
+	float d = haloDepth.SampleLevel(point_clamp, uv, 0);
+	if (d >= 0.5 * kFaint && d <= kFaint)
+		d = kFaint - d;
+	a_halo = d * depthParams.w;
 	return uv;
 }
 float4 PSWorld(VSOut i) : SV_Target

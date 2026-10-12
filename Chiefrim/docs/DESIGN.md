@@ -1034,6 +1034,24 @@ using the camera Skyrim is about to use. It draws three layers:
   their knee at 0.7 (`fWeaponHighlights`). On the MA5B's raw pixels offline, toned and graded with
   the log's numbers: the shine (its top 5%) 0.59 before, 0.88 now; at the dimmer moment (key
   0.22, brightest 0.41) 0.42 and 0.83; the cabin's 0.31 either way.
+- **Glows through walls (2026-10-12, protocol 33).** In game the needler's needles showed through a
+  pillar they flew behind. Their pink glow is a light volume: sprites Halo projects itself and
+  draws in screen space (`_rasterizer_widget_draw_sprite3d`), at a clip w of 1, so the world
+  layer's depth (1 / w) put every one a world unit (213 units) from the eye, in front of anything
+  of Skyrim's further. The sprites' screen matrix is now loaded times each sprite's clip w (the same
+  pixels, at its distance). That showed a second cause: a needle leaving the muzzle (15 units off)
+  has a soft glow a third of the screen across, faint but nearest, so whatever lay behind it
+  passed Skyrim's test while firing. A draw that adds light now shows where it adds light (not
+  where its alpha is non-zero, which left the glow's whole square claimed), and where it adds
+  under a quarter of full brightness it is faint: written as `CR_FRAME_DEPTH_FAINT` (131072) less
+  its depth, so that of faint light the farthest decides and anything else wins (the pixel key's
+  `chiefrim_adds`, `nv2a_psh.c`); Skyrim decodes it. Where it's unclear, faint light is hidden
+  rather than shown through Skyrim's walls. Offline (`--give-item needler --fire-at`): no
+  pixel at 213 units any more (39 of 540 frames had them); the glows at the needles' own depths
+  (40-49 units at the muzzle, up to 3,400 in flight); the muzzle glow's 300,000 pixels faint, its
+  core (about 1,200) and the needles' crystals not; the glows drawn as before. Still a limit of one
+  depth a pixel: where a bright near light (the needle's crystal in its first frame at the muzzle)
+  covers a far one, the far one shows with it.
 - **Checked offline** (fake Skyrim, `--fire-at`, `--pitch`, `--speed 0`): frames name the camera
   they were drawn through; muzzle flash, smoke, sparks and bullet holes are in the world layer; a
   camera 120 units up looking 60 degrees down puts the holes at 123-146 units (120 / sin 60 = 139).

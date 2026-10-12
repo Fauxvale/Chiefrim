@@ -25,6 +25,10 @@ and Chiefrim/docs/DESIGN.md §9.
 /* the depth target where nothing was drawn */
 #define OVERLAY_FAR 1.0e30f
 
+/* the pixel shaders' faint light (chiefrim_overlay_gl.h) is the protocol's */
+typedef char overlay_depth_faint_assert[
+	(long)CR_FRAME_DEPTH_FAINT == (long)CHIEFRIM_OVERLAY_DEPTH_FAINT ? 1 : -1];
+
 struct cr_shared *chiefrim_shared(void);
 long chiefrim_overlay_layer(void);
 long chiefrim_overlay_hud(void);
