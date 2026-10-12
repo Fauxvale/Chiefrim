@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 32u
+#define CR_PROTOCOL_VERSION 33u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -699,6 +699,13 @@ one byte a pixel (255: all of the pixel's colour is Chief's arms and weapon,
 0: the HUD's, or nothing), so Skyrim grades the weapon as its own picture
 and leaves the HUD alone.
 
+Faint light in the depth (protocol 33): where all that was drawn is faint
+added light (a glow's soft edge), the depth is CR_FRAME_DEPTH_FAINT less
+the farthest such light's depth, a value from CR_FRAME_DEPTH_FAINT / 2 up;
+anything else drawn there is the nearest's own depth, below that. So a glow
+beside the eye no longer brings what lies far behind it in front of
+Skyrim's walls.
+
 Halo writes the slots round-robin, each under its own seqlock, and then
 names it the latest. Skyrim copies the latest slot out and checks its seq
 again: a slot changed meanwhile is torn and dropped (Halo would have to
@@ -710,6 +717,7 @@ can restart at any time. */
 #define CR_FRAME_LAYER_BYTES (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT * 4u)
 #define CR_FRAME_MASK_BYTES  (CR_FRAME_MAX_WIDTH * CR_FRAME_MAX_HEIGHT)
 #define CR_FRAME_BYTES      (3u * CR_FRAME_LAYER_BYTES + CR_FRAME_MASK_BYTES)
+#define CR_FRAME_DEPTH_FAINT 131072.0f /* faint light's depth is this less its own (protocol 33) */
 
 typedef struct cr_frame_header
 {

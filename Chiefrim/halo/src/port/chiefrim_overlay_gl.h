@@ -15,7 +15,15 @@ and each draw's blend is turned into what that blend does to the coverage
 (an opaque draw makes it 1, an alpha blend mixes it, an additive one leaves
 it). A third target keeps the world layer's view depth: each pixel
 shader writes 1 / gl_FragCoord.w (the clip w: the distance along the view)
-where it shows anything, blended to the nearest. The world layer (render.c
+where it shows anything, blended to the nearest. Faint light is the
+exception (protocol 33): where a draw that adds light (a glow's sprite) adds
+less than CHIEFRIM_OVERLAY_FAINT, it writes CHIEFRIM_OVERLAY_DEPTH_FAINT less
+its depth instead, so that the nearest of those values is the farthest
+faint light, and anything else drawn there is nearer still. A glow beside the
+eye (a needle leaving the muzzle, its soft edge a third of the screen) then
+no longer carries what lies far behind it, its own glow too, in front of
+Skyrim's walls: where it's unclear, faint light is hidden rather than shown
+through them. The world layer (render.c
 draws it first) and the screen layer each become one premultiplied RGBA
 image, read back at Present into the link's frame slots
 (chiefrim_protocol.h).
@@ -23,6 +31,14 @@ image, read back at Present into the link's frame slots
 
 #ifndef __CHIEFRIM_OVERLAY_GL_H
 #define __CHIEFRIM_OVERLAY_GL_H
+
+/* the world layer's depth (chiefrim_protocol.h's CR_FRAME_DEPTH_FAINT):
+what a draw that adds light adds at most where it is faint, the depth
+faint light is written from, and the farthest depth either way, in Halo
+world units */
+#define CHIEFRIM_OVERLAY_FAINT 0.25
+#define CHIEFRIM_OVERLAY_DEPTH_FAINT 131072.0
+#define CHIEFRIM_OVERLAY_DEPTH_FARTHEST 65535.0
 
 /* CHIEFRIM=1: the pixel shaders write the coverage (fixed for the run) */
 int chiefrim_overlay_enabled(void);

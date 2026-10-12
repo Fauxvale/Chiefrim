@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 32
+VERSION = 33
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -37,6 +37,7 @@ OFF_ACTORS = OFF_DISPLAY + 96
 FRAME_SLOTS, FRAME_MAX_W, FRAME_MAX_H = 3, 2560, 1440
 FRAME_LAYER_BYTES = FRAME_MAX_W * FRAME_MAX_H * 4
 FRAME_BYTES = 3 * FRAME_LAYER_BYTES + FRAME_MAX_W * FRAME_MAX_H  # the layers, the weapon share
+DEPTH_FAINT = 131072.0  # CR_FRAME_DEPTH_FAINT: faint light's depth is this less its own
 OFF_CAMERA = OFF_DISPLAY + 24
 TOTAL_SIZE = OFF_FRAMES + 192 + FRAME_SLOTS * FRAME_BYTES
 
@@ -430,9 +431,11 @@ def grab_frame(link, directory, index):
         mean, count = covered_mean(world)
         note += f", world layer {mean:.0f} on {count}"
         values = [v for v in struct.unpack(f"<{width * height}f", depth) if v < 1e29]
+        faint = sum(1 for v in values if v >= DEPTH_FAINT / 2)  # faint light (protocol 33)
+        values = [DEPTH_FAINT - v if v >= DEPTH_FAINT / 2 else v for v in values]
         if values:
-            note += (f"; world depth on {100.0 * len(values) / (width * height):.1f}%: {min(values) * 213.36:.0f}"
-                    f"-{max(values) * 213.36:.0f} Skyrim units")
+            note += (f"; world depth on {100.0 * len(values) / (width * height):.1f}% ({100.0 * faint / (width * height):.1f}%"
+                    f" faint light): {min(values) * 213.36:.0f}-{max(values) * 213.36:.0f} Skyrim units")
     print(f"fake_skyrim: frame {frame} ({width}x{height}, flags {flags}, camera {camera_frame} of"
           f" {LAST_CAMERA[0]}, tangents {tangent_x:.4f} x {tangent_y:.4f}{note}) -> {', '.join(saved)}", flush=True)
     return True
