@@ -543,8 +543,13 @@ as Skyrim weapon items, with world models converted from the user's own Halo map
 
 | Form (in the esp) | Item |
 |---|---|
-| `900`–`907` | needler, assault rifle, pistol, shotgun, sniper rifle, rocket launcher, plasma pistol, plasma rifle |
-| `908`, `909` | frag grenade, plasma grenade |
+| `900`–`907` | Needler, MA5B Assault Rifle, M6D Pistol, M90 Shotgun, SRS99C-S2 AM Sniper Rifle, M41B "SPNKr" Rocket Launcher, Plasma Pistol, Plasma Rifle |
+| `908`, `909` | Frag Grenade, Plasma Grenade |
+
+The UNSC's guns are named with their designation as Halo: Combat Evolved has it (not a later
+game's: the M6D, not the M6G), except the rocket launcher, named as current lore has CE's (the
+M41B; CE called it by its M19 rockets). The Covenant's weapons and the grenades go by their
+common names. Each has its in-universe description, with its full designation.
 
 They are found, carried, dropped, stored and sold like any Skyrim item, have no Skyrim damage, and
 show their state in their name: **"Needler (20/60)"** (loaded / spare), **"Plasma Rifle (40%)"**
@@ -563,8 +568,9 @@ show their state in their name: **"Needler (20/60)"** (loaded / spare), **"Plasm
 - If he can't take it (Chiefrim off, no Chief), it comes back whole. While unlinked, an equipped
   Halo item is simply unequipped.
 - Each hand-over shows a notification in Skyrim's voice, as the player taking spare kit from
-  the pack: "You take the Needler from your pack.", "You salvage 40 rounds and discard the empty
-  Assault Rifle.", "You clip 2 Frag Grenades to your armor.", "You can't ready the Pistol now."
+  the pack: "You take the Needler from your pack.", "You salvage 40 rounds and discard the
+  empty MA5B Assault Rifle.", "You clip 2 Frag Grenades to your armor.", "You can't ready the
+  M6D Pistol now."
 
 **Weapons Chief lets go of come back.** Every weapon Chief drops in Halo (a swap, a third weapon)
 that Skyrim has an item for is sent back with its rounds and deleted from Halo's world; the plugin
@@ -841,7 +847,8 @@ redistributed.
 | `bsa.py` | Archive support |
 | `blender_preview.py` | Headless Blender renders of each stage, for checking |
 
-The armor is cosmetic (Daedric stats) and isn't placed in the world or in loot; add it with the
+The armor pieces are the MJOLNIR Mark V Helmet, Armor, Gauntlets and Boots (Halo: Combat
+Evolved's Mark V, not Halo 2's Mark VI), with in-universe descriptions. The armor is cosmetic (Daedric stats) and isn't placed in the world or in loot; add it with the
 console. The cuirass also covers the tail slot (40).
 
 ## 16. Repo layout
