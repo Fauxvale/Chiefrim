@@ -1222,6 +1222,25 @@ boolean chiefrim_object_unseen(long object_index)
 	return !show && chiefrim_object_is_proxy(object_index);
 }
 
+/* an object a proxy holds (its weapon) is unseen with it: the lens flares of
+its lights (a plasma pistol's standby glows) left floating where it is */
+boolean chiefrim_object_or_holder_unseen(long object_index)
+{
+	short depth;
+
+	for (depth = 0; depth < 8 && object_index != NONE; depth++)
+	{
+		struct object_datum *object = object_try_and_get(object_index);
+
+		if (!object)
+			return FALSE;
+		if (chiefrim_object_unseen(object_index))
+			return TRUE;
+		object_index = object->object.parent_object_index;
+	}
+	return FALSE;
+}
+
 /* Skyrim's console turned debug drawing on or off (CR_MSG_DEBUG) */
 void chiefrim_combat_debug(cr_msg_debug const *message)
 {

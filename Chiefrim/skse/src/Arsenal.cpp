@@ -113,61 +113,117 @@ namespace chiefrim::Arsenal
 			return nullptr;
 		}
 
-		// After the equip event, on the main thread: the equipped one handed
-		// to Chief and out of the inventory; or, while he can't take it,
+		// A menu listing the inventory's entries reads them as it redraws: one
+		// equipped there and taken out from under it (the worn one removed,
+		// next frame) was read freed (a crash in
+		// InventoryEntryData::GetWornExtraDataList). So what's equipped in one
+		// is handed over as the last of them closes.
+		bool ItemMenuOpen()
+		{
+			auto* ui = RE::UI::GetSingleton();
+			return ui && (ui->IsMenuOpen(RE::InventoryMenu::MENU_NAME) || ui->IsMenuOpen(RE::ContainerMenu::MENU_NAME) ||
+							 ui->IsMenuOpen(RE::BarterMenu::MENU_NAME) || ui->IsMenuOpen(RE::GiftMenu::MENU_NAME) ||
+							 ui->IsMenuOpen(RE::FavoritesMenu::MENU_NAME));
+		}
+
+		std::vector<RE::FormID> waiting;  // equipped in an item menu (main thread only)
+
+		// On the main thread, no item menu open: the equipped one handed to
+		// Chief and out of the inventory; or, while he can't take it,
 		// unequipped and kept.
+		void HandOverNow(RE::FormID a_id)
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			const auto found = items.find(a_id);
+			if (!player || found == items.end()) {
+				return;
+			}
+			const auto& item = found->second;
+			auto* worn = Worn(player, item.form);
+			if (!worn) {
+				return;  // unequipped again already
+			}
+			const std::string name = worn->GetDisplayName(item.form);
+			auto& link = Link::Get();
+			cr_msg_give_weapon give{};
+			give.index = -1;
+			give.flags = CR_GIVE_ITEM;
+			give.item = item.form->GetFormID();
+			give.weapon = ItemRounds(item, name);
+			const bool grenades = item.weapon->kind == Kind::kGrenade;
+			if (grenades) {
+				// all the player has: Chief takes what he has room for
+				const auto counts = player->GetInventoryCounts([&item](RE::TESBoundObject& a_object) { return &a_object == item.form; });
+				const auto found = counts.find(item.form);
+				give.flags |= CR_GIVE_GRENADES;
+				give.count = static_cast<std::uint32_t>(std::max(found != counts.end() ? found->second : 1, 1));
+			}
+			if (!link.Enabled() || !link.Connected() || !link.PushRaw(CR_MSG_GIVE_WEAPON, &give, sizeof(give))) {
+				logger::info("arsenal: {} equipped while Chief can't take it (Chiefrim {}); unequipped", name, link.Enabled() ? "not linked" : "off");
+				RE::SendHUDMessage::ShowHUDMessage(fmt::format("Master Chief can't take the {} now.", item.form->GetName()).c_str());
+				auto* objects = RE::BGSDefaultObjectManager::GetSingleton();
+				const bool left = worn->HasType(RE::ExtraDataType::kWornLeft);
+				auto* slot = objects->GetObject<RE::BGSEquipSlot>(left ? RE::DEFAULT_OBJECT::kLeftHandEquip : RE::DEFAULT_OBJECT::kRightHandEquip);
+				RE::ActorEquipManager::GetSingleton()->UnequipObject(player, item.form, worn, 1, slot);
+				return;
+			}
+			if (grenades) {
+				// the one equipped, then the rest; how many he took comes back
+				logger::info("arsenal: {} equipped: {} to Chief", name, give.count);
+				player->RemoveItem(item.form, 1, RE::ITEM_REMOVE_REASON::kRemove, worn, nullptr);
+				if (give.count > 1) {
+					player->RemoveItem(item.form, static_cast<std::int32_t>(give.count - 1), RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+				}
+				return;
+			}
+			logger::info("arsenal: {} equipped: to Chief ({}, {}/{} rounds, battery {:.2f})", name, give.weapon.tag,
+				give.weapon.rounds_loaded[0], give.weapon.rounds_total[0], 1.0f - give.weapon.age);
+			RE::SendHUDMessage::ShowHUDMessage(fmt::format("Handed the {} to Master Chief.", item.form->GetName()).c_str());
+			player->RemoveItem(item.form, 1, RE::ITEM_REMOVE_REASON::kRemove, worn, nullptr);
+		}
+
+		// After the equip event: now, or as the item menus close
 		void HandOver(RE::FormID a_id)
 		{
 			SKSE::GetTaskInterface()->AddTask([a_id] {
-				auto* player = RE::PlayerCharacter::GetSingleton();
-				const auto found = items.find(a_id);
-				if (!player || found == items.end()) {
-					return;
-				}
-				const auto& item = found->second;
-				auto* worn = Worn(player, item.form);
-				if (!worn) {
-					return;  // unequipped again already
-				}
-				const std::string name = worn->GetDisplayName(item.form);
-				auto& link = Link::Get();
-				cr_msg_give_weapon give{};
-				give.index = -1;
-				give.flags = CR_GIVE_ITEM;
-				give.item = item.form->GetFormID();
-				give.weapon = ItemRounds(item, name);
-				const bool grenades = item.weapon->kind == Kind::kGrenade;
-				if (grenades) {
-					// all the player has: Chief takes what he has room for
-					const auto counts = player->GetInventoryCounts([&item](RE::TESBoundObject& a_object) { return &a_object == item.form; });
-					const auto found = counts.find(item.form);
-					give.flags |= CR_GIVE_GRENADES;
-					give.count = static_cast<std::uint32_t>(std::max(found != counts.end() ? found->second : 1, 1));
-				}
-				if (!link.Enabled() || !link.Connected() || !link.PushRaw(CR_MSG_GIVE_WEAPON, &give, sizeof(give))) {
-					logger::info("arsenal: {} equipped while Chief can't take it (Chiefrim {}); unequipped", name, link.Enabled() ? "not linked" : "off");
-					RE::SendHUDMessage::ShowHUDMessage(fmt::format("Master Chief can't take the {} now.", item.form->GetName()).c_str());
-					auto* objects = RE::BGSDefaultObjectManager::GetSingleton();
-					const bool left = worn->HasType(RE::ExtraDataType::kWornLeft);
-					auto* slot = objects->GetObject<RE::BGSEquipSlot>(left ? RE::DEFAULT_OBJECT::kLeftHandEquip : RE::DEFAULT_OBJECT::kRightHandEquip);
-					RE::ActorEquipManager::GetSingleton()->UnequipObject(player, item.form, worn, 1, slot);
-					return;
-				}
-				if (grenades) {
-					// the one equipped, then the rest; how many he took comes back
-					logger::info("arsenal: {} equipped: {} to Chief", name, give.count);
-					player->RemoveItem(item.form, 1, RE::ITEM_REMOVE_REASON::kRemove, worn, nullptr);
-					if (give.count > 1) {
-						player->RemoveItem(item.form, static_cast<std::int32_t>(give.count - 1), RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+				if (ItemMenuOpen()) {
+					if (std::find(waiting.begin(), waiting.end(), a_id) == waiting.end()) {
+						waiting.push_back(a_id);
 					}
 					return;
 				}
-				logger::info("arsenal: {} equipped: to Chief ({}, {}/{} rounds, battery {:.2f})", name, give.weapon.tag,
-					give.weapon.rounds_loaded[0], give.weapon.rounds_total[0], 1.0f - give.weapon.age);
-				RE::SendHUDMessage::ShowHUDMessage(fmt::format("Handed the {} to Master Chief.", item.form->GetName()).c_str());
-				player->RemoveItem(item.form, 1, RE::ITEM_REMOVE_REASON::kRemove, worn, nullptr);
+				HandOverNow(a_id);
 			});
 		}
+
+		class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		{
+		public:
+			static MenuSink* Get()
+			{
+				static MenuSink sink;
+				return &sink;
+			}
+
+			// a menu closed: next frame (it's off the stack then), the waiting
+			// ones if that was the last item menu
+			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+			{
+				if (a_event && !a_event->opening) {
+					SKSE::GetTaskInterface()->AddTask([] {
+						if (waiting.empty() || ItemMenuOpen()) {
+							return;
+						}
+						const auto ids = std::move(waiting);
+						waiting.clear();
+						for (const auto id : ids) {
+							HandOverNow(id);
+						}
+					});
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+		};
 
 		// A placed weapon named for its rounds (a new one's: unnamed); its name
 		std::string Named(RE::TESObjectREFR& a_placed, const Item& a_item, const cr_chief_weapon& a_weapon)
@@ -248,6 +304,9 @@ namespace chiefrim::Arsenal
 		}
 		if (!items.empty()) {
 			RE::ScriptEventSourceHolder::GetSingleton()->AddEventSink<RE::TESEquipEvent>(EquipSink::Get());
+			if (auto* ui = RE::UI::GetSingleton()) {
+				ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuSink::Get());
+			}
 		}
 	}
 

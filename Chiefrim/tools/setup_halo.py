@@ -14,12 +14,15 @@ this script makes the work tree halo/.work (git-ignored) from it:
    halo/src/port/* to port/linux/src/ (code on the port's OpenGL device,
    built with the platform layer's flags);
 5. check licenses (tools/check_licenses.py), then configure and build with
-   ninja (unless --no-build).
+   ninja (unless --no-build): a release build (assertions not checked),
+   optimised with the profile OpenCE keeps in pgo/ (profile-guided
+   optimisation: the hooks weren't in its play, the engine around them was).
 
 The result is halo/.work/build/linux/halo. No game data is involved: the
 game asks for the user's own Xbox disc image, or finds maps/ next to it.
 
-Usage: tools/setup_halo.py [--release] [--no-build] [--keep]
+Usage: tools/setup_halo.py [--debug] [--no-build] [--keep]
+  --debug  assertions checked, as OpenCE's development builds
   --keep  don't reset halo/.work: rebuild what is there (for working on the
           hooks; tools/save_halo_patch.sh writes them back to halo/patches)
 """
@@ -53,7 +56,7 @@ def install(source, destination):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--release", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--keep", action="store_true")
     options = parser.parse_args()
@@ -87,8 +90,8 @@ def main():
     run(sys.executable, ROOT / "tools" / "check_licenses.py", "--halo", cwd=ROOT)
     if options.no_build:
         return 0
-    configure = [sys.executable, "configure.py", "--pgo=off", "--lto=off"]
-    if options.release:
+    configure = [sys.executable, "configure.py", "--lto=off"]
+    if not options.debug:
         configure.append("--release")
     run(*configure)
     run("ninja", "linux")

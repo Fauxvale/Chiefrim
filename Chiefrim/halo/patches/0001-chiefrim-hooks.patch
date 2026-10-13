@@ -1,5 +1,5 @@
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
-index 3dc40e06..d3d98e24 100644
+index 9e260d75..eea0fecf 100644
 --- a/port/linux/src/d3d8_gl.c
 +++ b/port/linux/src/d3d8_gl.c
 @@ -28,6 +28,7 @@ Conventions carried over from the Xbox:
@@ -30,7 +30,7 @@ index 3dc40e06..d3d98e24 100644
  	*width = 640;
  	scale[0] = scale[1] = 1.0f;
  	if (platform_screen_mode(&display_width, &display_height) && display_width > 0 && display_height > 0)
-@@ -1445,6 +1450,8 @@ static unsigned long render_target_write_serial;
+@@ -1525,6 +1530,8 @@ static unsigned long render_target_write_serial;
  
  /* the pixels per unit of the bound targets (render_target_get) */
  static float target_scale[2] = { 1.0f, 1.0f };
@@ -39,7 +39,7 @@ index 3dc40e06..d3d98e24 100644
  
  /* the pixel edge of a coordinate in a target's units, at its scale:
  floorf's, without its call (on 32-bit x86 it saves and restores the FPU's
-@@ -1487,6 +1494,22 @@ static BOOL bind_targets(BOOL *has_depth)
+@@ -1567,6 +1574,22 @@ static BOOL bind_targets(BOOL *has_depth)
  	/* viewports and clears are in the targets' units (render_target_get) */
  	target_scale[0] = color ? color->target.scale[0] : depth->target.scale[0];
  	target_scale[1] = color ? color->target.scale[1] : depth->target.scale[1];
@@ -62,7 +62,7 @@ index 3dc40e06..d3d98e24 100644
  	/* with multisampling, multisampled where either is a screen buffer or
  	is multisampled already */
  	samples = anti_aliasing() == _anti_aliasing_msaa ? anti_aliasing_samples : 0;
-@@ -3458,6 +3481,9 @@ static void apply_raster_state(BOOL has_depth)
+@@ -3586,6 +3609,9 @@ static void apply_raster_state(BOOL has_depth)
  		gl_state.color_mask = color_mask;
  		glColorMask((color_mask & 1) != 0, (color_mask & 2) != 0, (color_mask & 4) != 0, (color_mask & 8) != 0);
  	}
@@ -72,9 +72,9 @@ index 3dc40e06..d3d98e24 100644
  
  	/* the cull mode names the winding to discard; FRONTFACE names the
  	front winding */
-@@ -3669,6 +3695,15 @@ static struct program_entry *prepare_draw(BOOL immediate)
- #endif
+@@ -3798,6 +3824,15 @@ static struct program_entry *prepare_draw(BOOL immediate)
  	key.fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
+ 	key.source_blend = source_blend_in_shader();
  	key.fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
 +	if (chiefrim_coverage_bound && D3D__RenderState[D3DRS_ALPHABLENDENABLE] &&
 +		D3D__RenderState[D3DRS_DESTBLEND] == D3DBLEND_ONE &&
@@ -88,7 +88,7 @@ index 3dc40e06..d3d98e24 100644
  #ifdef HALO_GLES
  	key.count_samples = device.visibility_test_active && xgpu_capabilities.atomic_counters;
  #endif
-@@ -4917,6 +4952,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -5566,6 +5601,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  			device.depth_stencil ? (unsigned long)device.depth_stencil->Data : 0);
  	stats.clears++;
  	color_to_vec4(color, rgba);
@@ -97,16 +97,16 @@ index 3dc40e06..d3d98e24 100644
  	if (flags & D3DCLEAR_TARGET)
  	{
  		/* the Xbox clears the channels named (D3DCLEAR_TARGET_R, _G, _B, _A):
-@@ -4951,6 +4988,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -5600,6 +5637,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  		glScissor(x0, y0, target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0,
  			target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
  		glClear(mask);
 +		if (chiefrim_coverage_bound && (mask & GL_COLOR_BUFFER_BIT)) /* CHIEFRIM: the world's depth */
 +			chiefrim_overlay_cleared();
  		glDisable(GL_SCISSOR_TEST);
- 		xgpu_gl_state_invalidate();
+ 		clear_state_forget();
  		return;
-@@ -5197,6 +5236,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5846,6 +5885,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  	{
  		struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
  		int window_width, window_height, width, height, x, y;
@@ -114,7 +114,7 @@ index 3dc40e06..d3d98e24 100644
  
  		if (trace_frame())
  			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
-@@ -5212,6 +5252,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5861,6 +5901,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  			write_key_screenshot(back_buffer);
  #endif
  
@@ -124,7 +124,7 @@ index 3dc40e06..d3d98e24 100644
  		platform_video_drawable_size(&window_width, &window_height);
  		/* letterbox to the back buffer's aspect ratio */
  		width = window_width;
-@@ -5232,7 +5275,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5881,7 +5924,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		/* row 0 of the render target is the top of the picture */
  		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
  			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -135,7 +135,7 @@ index 3dc40e06..d3d98e24 100644
  		memory_watch_begin_frame();
  		xgpu_texture_cache_begin_frame();
 diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
-index 8ee338be..c2e25d65 100644
+index ef675e33..d8a53166 100644
 --- a/port/linux/src/nv2a_psh.c
 +++ b/port/linux/src/nv2a_psh.c
 @@ -17,6 +17,7 @@ Register values are clamped to [-1, 1] between stages, as on the hardware.
@@ -156,8 +156,8 @@ index 8ee338be..c2e25d65 100644
 +			"layout(location = 3) out vec4 chiefrim_weapon;\n");
  	for (stage = 0; stage < 4; stage++)
  		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
- 	if (key->per_pixel_lighting)
-@@ -745,6 +750,24 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
+ 	if (key->source_blend)
+@@ -747,6 +752,24 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
  	if (key->count_samples)
  		xgpu_text_append(&text, "\tatomicCounterIncrement(visible_samples);\n");
  #endif
@@ -179,17 +179,17 @@ index 8ee338be..c2e25d65 100644
 +			CHIEFRIM_OVERLAY_DEPTH_FARTHEST, key->chiefrim_adds ? CHIEFRIM_OVERLAY_FAINT : 0.0,
 +			CHIEFRIM_OVERLAY_DEPTH_FAINT);
 +	}
- 	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
- 	return text.buffer;
- }
+ 	if (key->source_blend)
+ 	{
+ 		static const char *const factors[] =
 diff --git a/port/linux/src/xgpu.h b/port/linux/src/xgpu.h
-index 982f24b7..5887433e 100644
+index 6e5058ea..d0f02284 100644
 --- a/port/linux/src/xgpu.h
 +++ b/port/linux/src/xgpu.h
-@@ -143,6 +143,11 @@ struct nv2a_pixel_shader_key
- 	proportion to how far alpha is past the reference, not all of the pixel
- 	or none of it, so that cut-out edges (foliage, grates) are smoothed too */
- 	unsigned char alpha_test_samples;
+@@ -151,6 +151,11 @@ struct nv2a_pixel_shader_key
+ 	blend of a constant color factor with a constant alpha one, as the
+ 	meters' (shader_transparent_meter) */
+ 	unsigned char source_blend;
 +	/* CHIEFRIM: drawn into the overlay with a blend that adds light (the
 +	destination kept whole): 1 adds its colour, 2 its colour times its alpha.
 +	Where it shows anything, for the world layer's depth, is where it adds
@@ -328,7 +328,7 @@ index 429fd821..b269faa6 100644
  				}
  				else
 diff --git a/source/game/players.c b/source/game/players.c
-index 6d81ff0c..0593bcdc 100644
+index 04dcec5a..77df84da 100644
 --- a/source/game/players.c
 +++ b/source/game/players.c
 @@ -279,6 +279,7 @@ symbols in this file:
@@ -339,7 +339,7 @@ index 6d81ff0c..0593bcdc 100644
  
  /* network_game_globals.c's */
  boolean network_game_distributed_client(void);
-@@ -4968,7 +4969,10 @@ void players_update_after_game(
+@@ -5046,7 +5047,10 @@ void players_update_after_game(
  				else if (player->unit_index != NONE)
  				{
  					unit = unit_get(player->unit_index);
@@ -351,7 +351,7 @@ index 6d81ff0c..0593bcdc 100644
  					{
  						players_show_telefragged(iterator.datum_index);
  						player_telefrag_effect_stop(iterator.datum_index);
-@@ -5007,7 +5011,8 @@ void players_update_after_game(
+@@ -5085,7 +5089,8 @@ void players_update_after_game(
  						&scenario->bsp_switch_trigger_volumes,
  						bsp_switch_trigger_volume_index,
  						struct scenario_bsp_switch_trigger_volume);
@@ -540,10 +540,10 @@ index 77783077..d6a8a33f 100644
  
  	projectile->projectile.hit_material_type = material_type;
 diff --git a/source/main/main.c b/source/main/main.c
-index 8944621c..a4ac858f 100644
+index 9af8e6a8..5edd92f5 100644
 --- a/source/main/main.c
 +++ b/source/main/main.c
-@@ -411,6 +411,7 @@ symbols in this file:
+@@ -412,6 +412,7 @@ symbols in this file:
  #define HALO_BUILD_FLAVOR "local"
  #endif
  #endif
@@ -551,7 +551,7 @@ index 8944621c..a4ac858f 100644
  
  /* ---------- constants */
  
-@@ -1167,6 +1168,7 @@ void set_window_camera_values(
+@@ -1168,6 +1169,7 @@ void set_window_camera_values(
  				1.0f));
  
  		if (window->local_player_index != NONE &&
@@ -559,7 +559,7 @@ index 8944621c..a4ac858f 100644
  			!console_is_active() &&
  			!game_time_get_paused() &&
  			director_get_perspective(window->local_player_index) !=
-@@ -3303,6 +3305,7 @@ static void main_game_render(
+@@ -3304,6 +3306,7 @@ static void main_game_render(
  			window->local_player_index = last_local_player_index;
  			observer = observer_get_camera(window->local_player_index);
  			observer = render_interpolation_camera(window->local_player_index, observer);
@@ -567,7 +567,7 @@ index 8944621c..a4ac858f 100644
  		}
  		else
  		{
-@@ -3390,6 +3393,7 @@ void main_loop(
+@@ -3391,6 +3394,7 @@ void main_loop(
  	main_globals.switch_to_structure_bsp_index = NONE;
  	main_globals.halt_time_scale = TRUE;
  
@@ -575,7 +575,7 @@ index 8944621c..a4ac858f 100644
  	console_initialize();
  	debug_keys_initialize();
  	game_initialize();
-@@ -3606,6 +3610,7 @@ static boolean main_loop_iteration(
+@@ -3609,6 +3613,7 @@ static boolean main_loop_iteration(
  					collision_log_continue_period(1);
  					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
  					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
@@ -623,7 +623,7 @@ index 8073bc94..275e863a 100644
  				damage,
  				object_index,
 diff --git a/source/objects/object_lights.c b/source/objects/object_lights.c
-index ed850b82..5b93f201 100644
+index ed850b82..89939e9b 100644
 --- a/source/objects/object_lights.c
 +++ b/source/objects/object_lights.c
 @@ -185,6 +185,7 @@ symbols in this file:
@@ -634,7 +634,17 @@ index ed850b82..5b93f201 100644
  
  /* port: port/linux/src (halo.log) */
  void platform_log(const char *format, ...);
-@@ -2586,6 +2587,10 @@ void lights_prepare_for_object_static(
+@@ -1220,7 +1221,8 @@ void lights_preprocess_scene(
+ 				lights_port.radius_writes++;
+ 			}
+ 
+-			if (definition->lens_flare.index != NONE)
++			if (definition->lens_flare.index != NONE &&
++				!chiefrim_object_or_holder_unseen(light->object_index)) /* CHIEFRIM: none from an unseen proxy's kit */
+ 			{
+ 				struct rasterizer_lens_flare_submit_parameters lens_flare_parameters;
+ 
+@@ -2586,6 +2588,10 @@ void lights_prepare_for_object_static(
  		"c:\\halo\\SOURCE\\objects\\object_lights.c",
  		970,
  		lighting);
@@ -645,7 +655,7 @@ index ed850b82..5b93f201 100644
  	if (TEST_FLAG(object->object.flags, _object_static_lighting_raycast_sideways_bit))
  	{
  		SET_FLAG(flags, _distant_lighting_raycast_sideways_bit, TRUE);
-@@ -2691,3 +2696,65 @@ void lights_prepare_for_object_static(
+@@ -2691,3 +2697,65 @@ void lights_prepare_for_object_static(
  
  	return;
  }
@@ -761,6 +771,59 @@ index 42775183..ab3ca026 100644
  				TEST_FLAG(flags, _collision_test_use_vehicle_physics_bit))
  			{
  				struct physics_instance instance;
+diff --git a/source/rasterizer/rasterizer_lights.c b/source/rasterizer/rasterizer_lights.c
+index 61662307..6d3f2537 100644
+--- a/source/rasterizer/rasterizer_lights.c
++++ b/source/rasterizer/rasterizer_lights.c
+@@ -103,6 +103,7 @@ symbols in this file:
+ #include "rasterizer/xbox/rasterizer_xbox.h"
+ #include "main/main.h"
+ #include "view_fov.h" /* port: port/linux/game/view_fov.c */
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
+ 
+ /* ---------- constants */
+ 
+@@ -869,6 +870,15 @@ void rasterizer_lens_flares_submit_occlusion_tests(
+ 				real occlusion_radius = definition->occlusion_radius;
+ 				real_point3d occlusion_point;
+ 
++				/* CHIEFRIM: tested in its layer, against what that draws: the
++				first-person weapon's (its lights' standby glows) hidden by the
++				weapon, drawn only in the screen layer (render.c) */
++				if (chiefrim_overlay_layer() != CHIEFRIM_LAYER_ALL &&
++					first_person != (chiefrim_overlay_layer() == CHIEFRIM_LAYER_SCREEN))
++				{
++					continue;
++				}
++
+ 				/* port: the first-person weapon's projection (view_fov.c) */
+ 				if (first_person)
+ 					viewmodel_projection_begin();
+@@ -947,6 +957,14 @@ void rasterizer_lens_flares_draw(
+ 					_lens_flare_first_person_weapon_flag) != 0;
+ 				struct lens_flare_definition *definition = lens_flare_parameters->definition;
+ 
++				/* CHIEFRIM: a flare in its object's layer, the first-person
++				weapon's in the screen layer (render.c, docs §12.1) */
++				if (chiefrim_overlay_layer() != CHIEFRIM_LAYER_ALL &&
++					first_person != (chiefrim_overlay_layer() == CHIEFRIM_LAYER_SCREEN))
++				{
++					continue;
++				}
++
+ 				/* port: the first-person weapon's projection (view_fov.c) */
+ 				if (first_person)
+ 					viewmodel_projection_begin();
+@@ -1200,7 +1218,8 @@ void rasterizer_lens_flares_draw(
+ 		rasterizer_set_stencil_mode(RASTERIZER_STENCIL_MODE_NONE);
+ 		rasterizer_widget_end();
+ 
+-		if (rasterizer_debug_options.lens_flare_sun_glow_enabled)
++		if (rasterizer_debug_options.lens_flare_sun_glow_enabled &&
++			chiefrim_overlay_layer() == CHIEFRIM_LAYER_ALL) /* CHIEFRIM: no sky over Skyrim's */
+ 		{
+ 			for (lens_flare_index = 0; lens_flare_index < local_lens_flare_count; lens_flare_index++)
+ 			{
 diff --git a/source/rasterizer/xbox/rasterizer_xbox_screen_effect.c b/source/rasterizer/xbox/rasterizer_xbox_screen_effect.c
 index 68154707..9067786b 100644
 --- a/source/rasterizer/xbox/rasterizer_xbox_screen_effect.c
@@ -828,7 +891,7 @@ index 68154707..9067786b 100644
  				global_d3d_device,
  				D3DPT_TRIANGLEFAN) >= 0 && success)
 diff --git a/source/rasterizer/xbox/rasterizer_xbox_widgets.c b/source/rasterizer/xbox/rasterizer_xbox_widgets.c
-index 03c09cca..079e586f 100644
+index b0039a0e..05b5eccb 100644
 --- a/source/rasterizer/xbox/rasterizer_xbox_widgets.c
 +++ b/source/rasterizer/xbox/rasterizer_xbox_widgets.c
 @@ -85,6 +85,7 @@ symbols in this file:
@@ -848,16 +911,29 @@ index 03c09cca..079e586f 100644
  
  /* ---------- globals */
  
-@@ -790,6 +793,8 @@ void _rasterizer_widget_draw_sprite3d(
- 			scale_x = scale_y = 1.0f;
+@@ -852,7 +855,8 @@ void _rasterizer_widget_draw_sprite3d(
  		}
  
+ 		/* port: (widget_sprite_batch) */
+-		if (widget_sprite_batching)
++		if (widget_sprite_batching &&
++			chiefrim_overlay_layer() != CHIEFRIM_LAYER_WORLD) /* CHIEFRIM: one at a time at its distance (chiefrim_sprite_clip_w) */
+ 		{
+ 			struct widget_sprite_batch_vertex *vertices;
+ 
+@@ -880,6 +884,11 @@ void _rasterizer_widget_draw_sprite3d(
+ 			widget_sprite_batch_count++;
+ 			return;
+ 		}
 +		if (chiefrim_overlay_layer() == CHIEFRIM_LAYER_WORLD) /* CHIEFRIM: drawn at its distance */
++		{
++			rasterizer_widget_draw_sprite_batch();
 +			chiefrim_sprite_clip_w(point);
++		}
  		IDirect3DDevice8_Begin(
  			global_d3d_device,
  			D3DPT_TRIANGLEFAN);
-@@ -846,6 +851,8 @@ void _rasterizer_widget_draw_sprite3d(
+@@ -936,6 +945,8 @@ void _rasterizer_widget_draw_sprite3d(
  			projected_center.z,
  			1.0f);
  		IDirect3DDevice8_End(global_d3d_device);
@@ -866,7 +942,7 @@ index 03c09cca..079e586f 100644
  	}
  
  	return;
-@@ -1030,3 +1037,50 @@ static boolean rasterizer_widget_project_billboard(
+@@ -1120,3 +1131,52 @@ static boolean rasterizer_widget_project_billboard(
  
  	return projected;
  }
@@ -877,7 +953,9 @@ index 03c09cca..079e586f 100644
 +through Skyrim's walls and pillars as if a world unit from the eye. So the
 +sprites' screen matrix (_rasterizer_widget_begin's) is loaded times the
 +point's clip w: the same pixels and depth test, at the point's distance. With
-+no point, the matrix as it was. */
++no point, the matrix as it was. The matrix is a sprite's own, so in the world
++layer sprites aren't batched (widget_sprite_batch): its vertex shader takes
++their w as 1, and vertices given times w would land off the screen. */
 +static void chiefrim_sprite_clip_w(
 +	real_point3d const *point)
 +{
@@ -918,7 +996,7 @@ index 03c09cca..079e586f 100644
 +	return;
 +}
 diff --git a/source/render/render.c b/source/render/render.c
-index dc251459..ed669fc5 100644
+index dc251459..fdb2f526 100644
 --- a/source/render/render.c
 +++ b/source/render/render.c
 @@ -89,6 +89,8 @@ symbols in this file:
@@ -940,7 +1018,7 @@ index dc251459..ed669fc5 100644
  
  	profile_render_window_start(TRUE);
  	render.scene_index++;
-@@ -327,13 +332,71 @@ static void render_window(
+@@ -327,13 +332,75 @@ static void render_window(
  	parameters.rasterizer_target = rasterizer_target;
  	parameters.has_mirror = has_mirror;
  	parameters.window_index = render.window_index;
@@ -973,6 +1051,7 @@ index dc251459..ed669fc5 100644
 +		first_person_weapon_render_update();
 +		lights_preprocess_scene();
 +		render_objects();
++		rasterizer_lens_flares_submit_occlusion_tests(); /* the world's flares, against its objects */
 +		for (rendered_cluster_index = 0; rendered_cluster_index < 4; rendered_cluster_index++)
 +		{
 +			static short const layers[4] = { _decal_layer_light, _decal_layer_alpha_tested,
@@ -990,16 +1069,19 @@ index dc251459..ed669fc5 100644
 +		rasterizer_transparent_geometry_draw(TRUE);
 +		rasterizer_transparent_geometry_draw(FALSE);
 +		rasterizer_transparent_geometry_stop();
++		rasterizer_lens_flares_draw(); /* the world's lights' (rasterizer_lights.c) */
 +		chiefrim_overlay_world_done();
 +
 +		/* the screen layer: the first-person weapon and what's attached to
 +		it (its muzzle flash), and the HUD, over all */
 +		chiefrim_set_render_layer(CHIEFRIM_LAYER_SCREEN);
 +		render_objects();
++		rasterizer_lens_flares_submit_occlusion_tests(); /* the weapon's, against the weapon */
 +		render_particles();
 +		rasterizer_transparent_geometry_draw(TRUE);
 +		rasterizer_transparent_geometry_draw(FALSE);
 +		rasterizer_transparent_geometry_stop();
++		rasterizer_lens_flares_draw(); /* the weapon's lights' (its overcharge's glow) */
 +		chiefrim_set_render_hud(TRUE); /* Skyrim grades the weapon, not the HUD */
 +		interface_draw_screen();
 +		rasterizer_screen_flash();
@@ -1013,7 +1095,7 @@ index dc251459..ed669fc5 100644
  	{
  		build_sprite_prepare_for_window();
  		render_sky();
-@@ -542,7 +605,7 @@ static void render_player_frame(
+@@ -542,7 +609,7 @@ static void render_player_frame(
  		&rasterizer_frustum,
  		TRUE);
  
@@ -1046,7 +1128,7 @@ index bcd26cd0..176277d3 100644
  
  boolean render_camera_world_to_screen(
 diff --git a/source/render/render_objects.c b/source/render/render_objects.c
-index e897ca69..506bdfff 100644
+index e897ca69..008f717e 100644
 --- a/source/render/render_objects.c
 +++ b/source/render/render_objects.c
 @@ -106,6 +106,7 @@ symbols in this file:
@@ -1105,7 +1187,7 @@ index e897ca69..506bdfff 100644
  			interpolate_real_rgb_color(
  				&lighting->ambient_color,
 diff --git a/source/render/render_particles.c b/source/render/render_particles.c
-index cfce7009..7f89bdde 100644
+index cfce7009..0f3e56e6 100644
 --- a/source/render/render_particles.c
 +++ b/source/render/render_particles.c
 @@ -25,6 +25,7 @@ symbols in this file:
@@ -1203,7 +1285,7 @@ index 73088440..c3e862fb 100644
  long global_structure_bsp_tag_index_get(void);
  void scenario_location_award_bonus(struct location *location);
 diff --git a/source/units/units.c b/source/units/units.c
-index 023a4b43..72ead72a 100644
+index 2500a408..63e2aab4 100644
 --- a/source/units/units.c
 +++ b/source/units/units.c
 @@ -695,6 +695,7 @@ symbols in this file:
