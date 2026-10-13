@@ -779,9 +779,11 @@ Deep water is handled this way (Halo has no swimming).
 
 `tools/launch_halo.sh` supervises Halo:
 
-- As Skyrim's Steam launch options (`/full/path/launch_halo.sh --steam %command%`) it starts Halo
-  with Skyrim, outside Proton's container, and stops it when Skyrim exits. It can also be run by
-  hand, before or after Skyrim; the plugin links when both are up.
+- It's run by hand from a terminal, before or after Skyrim; the plugin links when both are up.
+  The plugin doesn't start Halo itself yet, and Skyrim is started through SKSE from a mod
+  manager, not Steam. `--steam %command%` (as Steam launch options, with the script's full path)
+  starts Halo with Skyrim outside Proton's container and stops it when Skyrim exits, for a
+  setup where Steam starts Skyrim through SKSE.
 - It restarts Halo whenever it exits or crashes (backing off from 1 s to 30 s while it keeps
   crashing), and obeys Skyrim through `/dev/shm/chiefrim_control` (`restart`, `stop`, `start`).
 - Before killing a hung Halo it sends `SIGUSR2`, and Halo writes its main thread's stack to
