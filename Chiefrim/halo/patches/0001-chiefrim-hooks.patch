@@ -1,3 +1,27 @@
+diff --git a/port/linux/game/view_fov.c b/port/linux/game/view_fov.c
+index 2c0241de..f0ab13c7 100644
+--- a/port/linux/game/view_fov.c
++++ b/port/linux/game/view_fov.c
+@@ -26,6 +26,8 @@ that draw the first-person weapon (rasterizer and render sources).
+ #include "units/unit_definitions.h"
+ #include "units/units.h"
+ 
++#include "chiefrim/chiefrim.h" /* CHIEFRIM */
++
+ #include <math.h>
+ 
+ /* (the window's rasterizer target, as the rasterizer's sources number it) */
+@@ -180,7 +182,10 @@ static real viewmodel_vertical(void)
+ 	static unsigned long read_at;
+ 	static real angle;
+ 	unsigned long changes = config_changes();
++	real chiefrim_angle = chiefrim_viewmodel_vertical_field_of_view(); /* CHIEFRIM: Chief's viewmodel FOV from Skyrim */
+ 
++	if (chiefrim_angle > 0.0f)
++		return chiefrim_angle;
+ 	if (!initialized || read_at != changes)
+ 	{
+ 		double degrees = config_real("display.viewmodel_fov");
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
 index 9e260d75..eea0fecf 100644
 --- a/port/linux/src/d3d8_gl.c

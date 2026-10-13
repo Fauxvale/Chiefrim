@@ -31,7 +31,8 @@ namespace chiefrim::Camera
 			bool               axesRejected{ false };
 			// Skyrim's own settings while Chief drives
 			bool  useHaloFov{ true };   // [Camera] bUseHaloFov
-			float fieldOfView{ 85.0f }; // [Camera] fFieldOfView
+			float fieldOfView{ 105.0f };         // [Camera] fWorldFieldOfView
+			float viewmodelFieldOfView{ 80.0f }; // [Camera] fViewmodelFieldOfView
 			bool  fovSaved{ false };
 			float savedWorldFov{ 0.0f };
 			bool  foundThirdPerson{ false };  // the view Chief found, for the unlink
@@ -263,14 +264,16 @@ namespace chiefrim::Camera
 		}
 
 		s.useHaloFov = Settings::ReadBool(L"Camera", L"bUseHaloFov", true);
-		s.fieldOfView = Settings::ReadFloat(L"Camera", L"fFieldOfView", 85.0f);
+		s.fieldOfView = Settings::ReadFloat(L"Camera", L"fWorldFieldOfView", 105.0f);
+		s.viewmodelFieldOfView = Settings::ReadFloat(L"Camera", L"fViewmodelFieldOfView", 80.0f);
 
 		REL::Relocation<std::uintptr_t> firstPerson{ RE::VTABLE_FirstPersonState[0] };
 		FirstPersonTranslationHook::func = firstPerson.write_vfunc(0x5, FirstPersonTranslationHook::thunk);
 		REL::Relocation<std::uintptr_t> firstPersonInput{ RE::VTABLE_FirstPersonState[1] };
 		FirstPersonCanProcessHook::func = firstPersonInput.write_vfunc(0x1, FirstPersonCanProcessHook::thunk);
-		logger::info("camera hooks installed (PlayerCamera::Update at {} call site(s), first-person translation); FOV: {}",
-			sites.size(), s.useHaloFov ? std::format("Chief's, {:.0f} unzoomed", s.fieldOfView) : std::string("Skyrim's own"));
+		logger::info("camera hooks installed (PlayerCamera::Update at {} call site(s), first-person translation); FOV: {}, viewmodel {:.0f}",
+			sites.size(), s.useHaloFov ? std::format("Chief's, {:.0f} unzoomed", s.fieldOfView) : std::string("Skyrim's own"),
+			s.viewmodelFieldOfView);
 	}
 
 	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state, bool a_viewFromHalo)
@@ -314,6 +317,11 @@ namespace chiefrim::Camera
 	float FieldOfView()
 	{
 		return s.fieldOfView;
+	}
+
+	float ViewmodelFieldOfView()
+	{
+		return s.viewmodelFieldOfView;
 	}
 
 	void Release(RE::PlayerCharacter* a_player, bool a_unlinked)

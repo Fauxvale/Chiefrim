@@ -8,7 +8,7 @@ This document describes how Chiefrim works **today**. It is not a changelog: for
 got this way, see the git history. The previous version of this document, which mixed design and
 history, is kept in [archive/DESIGN-v0.3.md](archive/DESIGN-v0.3.md).
 
-Last revised 2026-10-13 · protocol version 33 · OpenCE pinned at `b1ef7f7e`.
+Last revised 2026-10-13 · protocol version 34 · OpenCE pinned at `b1ef7f7e`.
 
 ---
 
@@ -171,7 +171,7 @@ meaning changes, and update `fake_skyrim.py`'s copy.
 
 | Slot | Direction | Written | Contents |
 |---|---|---|---|
-| `world_context` | S→H | each new world | world ID, interior flag, origin, generation, Chief's FOV, height and collision radius, collision radius in regions |
+| `world_context` | S→H | each new world | world ID, interior flag, origin, generation, Chief's world and viewmodel FOV, height and collision radius, collision radius in regions |
 | `skyrim_player` | S→H | every frame | position, heading, pitch, eye, view direction, velocity, on-ground/sneaking flags, and whether Skyrim drives |
 | `input` | S→H | every frame | held actions, per-action press counters, forward/strafe, running look totals, routing |
 | `actors` | S→H | every frame | up to 48 nearby actors and up to 1024 hit shapes (§10.1) |
@@ -301,9 +301,14 @@ Chief's own movement.
 ### 7.1 Field of view
 
 Halo publishes the vertical FOV it renders with, and Skyrim's camera follows it, so zooming
-narrows Skyrim's view as in Halo. `[Camera] fFieldOfView` (default 85°, measured as Skyrim's
-setting is) sets Chief's unzoomed view; zoom keeps Halo's magnification ratios.
+narrows Skyrim's view as in Halo. `[Camera] fWorldFieldOfView` (default 105°, measured as
+Skyrim's setting is) sets Chief's unzoomed view; zoom keeps Halo's magnification ratios.
 `bUseHaloFov=0` keeps the player's own FOV and disables zoom.
+
+Chief's arms and weapon have their own field of view, `[Camera] fViewmodelFieldOfView` (default
+80°, measured the same; 0 draws them with the world's). It travels in the world context, and
+Halo's first-person weapon passes use it in place of OpenCE's `display.viewmodel_fov`
+(`port/linux/game/view_fov.c`); zoom doesn't change it.
 
 The third-person view is not available while Chief is linked: Toggle POV and the mouse wheel are
 Chief's melee and weapon switch. (Skyrim's third person still works during a hand-off, §13.)

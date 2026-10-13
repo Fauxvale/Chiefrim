@@ -37,7 +37,7 @@ extern "C" {
 /* ---- constants ---------------------------------------------------------- */
 
 #define CR_MAGIC            0x46454843u /* "CHEF" */
-#define CR_PROTOCOL_VERSION 33u
+#define CR_PROTOCOL_VERSION 34u
 
 #define CR_SHM_NAME         "chiefrim_v1"                    /* shm_open name */
 #define CR_SHM_LINUX_PATH   "/dev/shm/chiefrim_v1"
@@ -90,7 +90,8 @@ typedef struct cr_world_context
 	uint32_t collision_radius; /* regions (CR_REGION_UNITS) around Chief's that Halo builds its
 	                              collision from, so shots hit that far; 0: 1. Skyrim sends one
 	                              more around */
-	uint32_t reserved;
+	float    viewmodel_fov; /* Chief's arms and weapon, degrees, measured as field_of_view
+	                           is; zoom leaves it. 0: the view's own (field_of_view's) */
 } cr_world_context;
 
 /* Skyrim -> Halo. Chief's controls (docs §8). Skyrim's ControlMap has already

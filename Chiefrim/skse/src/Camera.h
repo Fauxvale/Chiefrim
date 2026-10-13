@@ -16,9 +16,13 @@ namespace chiefrim::Camera
 	// and, when Halo moves the player (a_viewFromHalo), Chief's eye and view.
 	void Drive(RE::PlayerCharacter* a_player, const cr_player_state& a_state, bool a_viewFromHalo);
 
-	// Chief's unzoomed field of view for Halo ([Camera] fFieldOfView, degrees,
+	// Chief's unzoomed field of view for Halo ([Camera] fWorldFieldOfView, degrees,
 	// horizontal for 4:3 as Skyrim measures it; 0 = Halo's own).
 	float FieldOfView();
+
+	// Chief's arms and weapon's field of view for Halo ([Camera]
+	// fViewmodelFieldOfView, measured the same; 0 = the world's).
+	float ViewmodelFieldOfView();
 
 	// Skyrim's own camera, FOV and arms back. a_unlinked: the link closed,
 	// and the third person comes back if Chief found the player in it.

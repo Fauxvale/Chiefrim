@@ -219,6 +219,7 @@ namespace chiefrim::Puppet
 			context.floor_z = position.z;
 			context.generation = ++s.generation;
 			context.field_of_view = Camera::FieldOfView();
+			context.viewmodel_fov = Camera::ViewmodelFieldOfView();
 			context.chief_height = ChiefHeight(a_player);
 			context.chief_radius = ChiefRadius(a_player);
 			context.collision_radius = Settings::CollisionRadius();
