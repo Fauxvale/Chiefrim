@@ -15,18 +15,19 @@
 # FAKE_SKYRIM_ARGS (e.g. "--silence-at 5 --silence-for 4").
 # Halo's data root is build/halo-data: a link to the user's maps/ folder and
 # its own init.txt (the host map), so the user's Halo install and saves are
-# never touched. Set HALO_MAPS to the folder holding the extracted maps/.
+# never touched. The maps are where tools/game_paths.py finds them (HALO_MAPS
+# to name the folder).
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 seconds=${1:-40}
 visible=${2:-}
-maps=${HALO_MAPS:-"$root/../HaloProjects/Halo-CE-Universal/maps"}
+maps=$(python3 -I "$root/tools/game_paths.py" maps)  # HALO_MAPS, else where OpenCE extracted them
 data="$root/build/halo-data"
 log="$root/build/phase0"
 halo="$root/halo/.work/build/linux/halo"
 
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
-[ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
+[ -d "$maps" ] || { echo "no Halo maps at $maps: extract them (docs/INSTALLATION.md) or set HALO_MAPS"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$log"
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
 map=${CHIEFRIM_MAP:-d20}

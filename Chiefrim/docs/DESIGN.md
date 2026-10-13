@@ -102,12 +102,22 @@ Known problems and limits are in §18.
 | Skyrim | SE/AE **1.6.1170**, Steam, Proton Experimental, SKSE64 and Address Library |
 | SKSE plugin | C++23, CommonLibSSE-NG (submodule), CMake. **Cross-compiled on Linux** to a Windows x64 DLL with clang-cl and lld-link, against the MSVC CRT and Windows SDK fetched by xwin |
 | Halo | OpenCE (the Halo CE Xbox decompilation, formerly halo-ce-universal), **Linux i386 build**, OpenGL, SDL3. 32-bit because the map data contains 32-bit pointers |
-| Halo data | The user's own `maps/`, extracted from their Xbox disc image. The host map is `d20` (§6.1) |
+| Halo data | The user's own `maps/`, extracted from their Xbox disc image (by OpenCE, into `halo/.work/build/linux/maps`). The host map is `d20` (§6.1) |
 | Tested with | SSE Display Tweaks (it hooks the swap chain; Chiefrim chains with it). No ENB or shader replacer |
 
 **No game data in the repo.** The repo holds code only. `HaloProjects/`, `References/` and
 `Chiefrim/build/` are git-ignored. Anything built from game assets (the Arsenal) stays in
 `build/` and must not be redistributed.
+
+How to build and install Chiefrim from nothing, for someone who doesn't know how it works, is
+[INSTALLATION.md](INSTALLATION.md). No script holds one machine's paths: they find the user's game
+files through `tools/game_paths.py` (`tools/game_paths.py maps|map|skyrim` prints them):
+
+| Files | Found at, the first that exists |
+|---|---|
+| Halo's `maps/` | `HALO_MAPS`; `halo/.work/build/linux/maps` (where OpenCE extracts them from the disc image); `HaloProjects/Halo-CE-Universal/maps` beside the repo |
+| The host map | `CHIEFRIM_MAP` (else `d20`), `.map`, in those `maps/` |
+| Skyrim's `Data/` | `SKYRIM_DATA`; Skyrim Special Edition (app 489830) in any of Steam's libraries (`libraryfolders.vdf`, native Steam's or the Flatpak's); Steam's default library |
 
 Build commands:
 
@@ -776,11 +786,11 @@ Deep water is handled this way (Halo has no swimming).
   crashing), and obeys Skyrim through `/dev/shm/chiefrim_control` (`restart`, `stop`, `start`).
 - Before killing a hung Halo it sends `SIGUSR2`, and Halo writes its main thread's stack to
   `halo.out`.
-- Halo's data root is `build/halo-data`, which links to the user's `maps/` (`HALO_MAPS`), so the
+- Halo's data root is `build/halo-data`, which links to the user's `maps/` (`tools/game_paths.py`, §3), so the
   user's own Halo install and saves are never touched. Logs: `build/halo-data/debug.txt` and
   `halo.out` (previous runs as `.1`).
 
-Environment: `CHIEFRIM_MAP` (host map), `CHIEFRIM_HALO_GPU`, `CHIEFRIM_HALO_SHOW_WINDOW=1`,
+Environment: `HALO_MAPS` (the maps' folder), `CHIEFRIM_MAP` (host map), `CHIEFRIM_HALO_GPU`, `CHIEFRIM_HALO_SHOW_WINDOW=1`,
 `HALO_VIEWMODEL_SHIELD=false` (no shield flare on the first-person arms), `--bot` (a scripted
 player).
 
@@ -830,8 +840,8 @@ Other test tools: `tools/test_protocol.sh` (layout), `tools/test_bsp.sh` (BSP bu
 
 The Arsenal is Chief's whole kit as a Skyrim mod: his Mjolnir armor and Halo's weapons and
 grenades. `tools/arsenal/build.sh [HALO_MAP] [SKYRIM_DATA_DIR]` turns Chief's model in the user's
-own Halo map (by default the host map, d20, where `tools/launch_halo.sh` finds it: `HALO_MAPS`,
-`CHIEFRIM_MAP`) into a Skyrim armor set, and builds Halo's weapon items (§11.1), all into
+own Halo map and Skyrim (by default the host map, d20, and the user's Skyrim, where
+`tools/game_paths.py` finds them, §3) into a Skyrim armor set, and builds Halo's weapon items (§11.1), all into
 `ChiefrimArsenal.esp` and its meshes and textures (in `build/arsenal/Data/`, and packed as
 `build/dist/ChiefrimArsenal.zip`). Nothing it produces goes in the repo or may be
 redistributed.
@@ -859,7 +869,7 @@ Chiefrim-Project/
   LICENSE                     GPL-3.0
   THIRD-PARTY-NOTICES.md
   Chiefrim/
-    docs/                     DESIGN.md (this), LICENSING.md, archive/
+    docs/                     DESIGN.md (this), INSTALLATION.md, LICENSING.md, archive/
     protocol/                 chiefrim_protocol.h (the shared layout), test_protocol.c
     skse/                     the SKSE plugin: CMakeLists.txt, Chiefrim.ini, src/, cmake/ (cross toolchain),
                               extern/CommonLibSSE-NG (submodule)

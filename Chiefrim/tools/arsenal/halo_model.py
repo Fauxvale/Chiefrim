@@ -23,16 +23,17 @@ side by side (+x, -x, +y, -y, +z, -z), as PNGs.
 """
 import argparse
 import json
-import os
 import struct
 import sys
 import zlib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import game_paths  # noqa: E402
+
 # the map read when none is given: the host map (docs §6.1), d20 (Keyes),
-# where tools/launch_halo.sh finds it (HALO_MAPS, CHIEFRIM_MAP override both)
-DEFAULT_MAP = Path(os.environ.get("HALO_MAPS", Path(__file__).resolve().parents[3] / "HaloProjects" / "Halo-CE-Universal" / "maps")) \
-	/ f"{os.environ.get('CHIEFRIM_MAP', 'd20')}.map"
+# where tools/game_paths.py finds the user's maps
+DEFAULT_MAP = game_paths.host_map()
 
 
 class CacheMap:
