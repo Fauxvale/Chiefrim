@@ -543,14 +543,16 @@ as Skyrim weapon items, with world models converted from the user's own Halo map
 
 | Form (in the esp) | Item |
 |---|---|
-| `900`–`907` | Type-33 Needler, MA5B Assault Rifle, M6D Pistol, M90 Shotgun, SRS99C-S2 AM Sniper Rifle, M19 SSM Rocket Launcher, Type-25 Plasma Pistol, Type-25 Plasma Rifle |
-| `908`, `909` | M9 Frag Grenade, Type-1 Plasma Grenade |
+| `900`–`907` | Needler, MA5B Assault Rifle, M6D Pistol, M90 Shotgun, SRS99C-S2 AM Sniper Rifle, M41B "SPNKr" Rocket Launcher, Plasma Pistol, Plasma Rifle |
+| `908`, `909` | Frag Grenade, Plasma Grenade |
 
-Each is named with its designation as Halo: Combat Evolved has it (not a later game's: the M6D,
-not the M6G; the M19 SSM, not the M41), and its description is the in-universe one.
+The UNSC's guns are named with their designation as Halo: Combat Evolved has it (not a later
+game's: the M6D, not the M6G), except the rocket launcher, named as current lore has CE's (the
+M41B; CE called it by its M19 rockets). The Covenant's weapons and the grenades go by their
+common names. Each has its in-universe description, with its full designation.
 
 They are found, carried, dropped, stored and sold like any Skyrim item, have no Skyrim damage, and
-show their state in their name: **"Type-33 Needler (20/60)"** (loaded / spare), **"Type-25 Plasma Rifle (40%)"**
+show their state in their name: **"Needler (20/60)"** (loaded / spare), **"Plasma Rifle (40%)"**
 (battery). An unnamed one has a new weapon's rounds.
 
 **Equipping one hands it to Chief** (`skse/src/Arsenal.cpp`, `chiefrim_inventory.c`):
@@ -566,13 +568,13 @@ show their state in their name: **"Type-33 Needler (20/60)"** (loaded / spare), 
 - If he can't take it (Chiefrim off, no Chief), it comes back whole. While unlinked, an equipped
   Halo item is simply unequipped.
 - Each hand-over shows a notification in Skyrim's voice, as the player taking spare kit from
-  the pack: "You take the Type-33 Needler from your pack.", "You salvage 40 rounds and discard the
-  empty MA5B Assault Rifle.", "You clip 2 M9 Frag Grenades to your armor.", "You can't ready the
+  the pack: "You take the Needler from your pack.", "You salvage 40 rounds and discard the
+  empty MA5B Assault Rifle.", "You clip 2 Frag Grenades to your armor.", "You can't ready the
   M6D Pistol now."
 
 **Weapons Chief lets go of come back.** Every weapon Chief drops in Halo (a swap, a third weapon)
 that Skyrim has an item for is sent back with its rounds and deleted from Halo's world; the plugin
-places it at the player, names it and picks it up ("You stow the Type-33 Needler (20/60) in your pack."). Empty weapons Halo deletes as usual. Weapons
+places it at the player, names it and picks it up ("You stow the Needler (20/60) in your pack."). Empty weapons Halo deletes as usual. Weapons
 Skyrim has no item for stay in Halo's world.
 
 ### 11.2 Loot

@@ -74,12 +74,15 @@ PIECES = [
 		"quickly as the SPARTAN inside it."),
 ]
 WEAPON_TEMPLATE = "IronDagger"
-# per weapon (weapons.WEAPONS's key): its name in Skyrim, its designation
-# as Halo: Combat Evolved has it before its common name (not a later game's:
-# the M6D, not the M6G; the M19 SSM, not the M41; the M90, not the M90A),
-# and its description
+# per weapon (weapons.WEAPONS's key): its name in Skyrim and its
+# description. The UNSC's are named with their designation before their
+# common name, as Halo: Combat Evolved has it (not a later game's: the M6D,
+# not the M6G; the M90, not the M90A), but the rocket launcher as current
+# lore has CE's (the M41B "SPNKr"; CE called it by its rockets, the M19
+# SSM). The Covenant's and the grenades go by their common names; their
+# designations are in their descriptions.
 WEAPON_NAMES = {
-	"needler": ("Type-33 Needler",
+	"needler": ("Needler",
 		"Covenant Type-33 Guided Munitions Launcher. Fires crystalline shards that home in on their "
 		"target, lodge in it and detonate together."),
 	"assault_rifle": ("MA5B Assault Rifle",
@@ -94,19 +97,19 @@ WEAPON_NAMES = {
 	"sniper_rifle": ("SRS99C-S2 AM Sniper Rifle",
 		"Sniper Rifle System 99C, Series 2, Anti-Materiel. Four 14.5mm armor-piercing rounds to a "
 		"magazine, through a 2x and 10x scope with night vision."),
-	"rocket_launcher": ("M19 SSM Rocket Launcher",
-		"M19 surface-to-surface missile launcher. Two tubes of 102mm high-explosive rockets, made to "
-		"stop armored vehicles."),
-	"plasma_pistol": ("Type-25 Plasma Pistol",
+	"rocket_launcher": ("M41B \"SPNKr\" Rocket Launcher",
+		"M41B Surface-to-Surface Rocket, Medium Anti-Vehicle/Assault Weapon, by Misriah Armory. Two "
+		"tubes of M19 102mm high-explosive rockets, made to stop armored vehicles."),
+	"plasma_pistol": ("Plasma Pistol",
 		"Covenant Type-25 Directed Energy Pistol. Fires bolts of superheated plasma, or holds a charge "
 		"for one overcharged bolt that tracks its target and strips energy shields."),
-	"plasma_rifle": ("Type-25 Plasma Rifle",
+	"plasma_rifle": ("Plasma Rifle",
 		"Covenant Type-25 Directed Energy Rifle, the Elites' weapon. Fires rapid bolts of superheated "
 		"plasma until it overheats and must vent."),
-	"frag_grenade": ("M9 Frag Grenade",
+	"frag_grenade": ("Frag Grenade",
 		"M9 High-Explosive, Dual-Purpose fragmentation grenade. It bounces before it bursts, so it "
 		"can be thrown around corners."),
-	"plasma_grenade": ("Type-1 Plasma Grenade",
+	"plasma_grenade": ("Plasma Grenade",
 		"Covenant Type-1 Antipersonnel Grenade. A ball of plasma that clings to whatever it strikes, "
 		"flesh or armor, and detonates a moment later."),
 }
