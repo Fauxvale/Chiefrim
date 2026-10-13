@@ -3,7 +3,7 @@
 
 namespace chiefrim::Hud
 {
-	// Skyrim's HUD while Chief plays (docs §9): Halo's HUD has the crosshair,
+	// Skyrim's HUD while Chief plays (docs §12.6): Halo's HUD has the crosshair,
 	// shields and health, so Skyrim's crosshair and its health and magicka
 	// bars are hidden ([HUD] bHideCrosshair, bHideBars). The rest stays: the
 	// stamina bar (Skyrim's sprint, which moves the player, spends it; [HUD]

@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Builds the SKSE plugin on Linux (docs/DESIGN.md §2): clang-cl and lld-link
+# Builds the SKSE plugin on Linux (docs/DESIGN.md §3): clang-cl and lld-link
 # against Microsoft's CRT and Windows SDK, downloaded by xwin.
 #
 # The first run fetches the tools into .tools/ (git-ignored): xwin, and CMake

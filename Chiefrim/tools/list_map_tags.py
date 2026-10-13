@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Lists the tags of Halo cache maps (docs/DESIGN.md §5.3): which weapons
+"""Lists the tags of Halo cache maps (docs/DESIGN.md §6.1): which weapons
 (and, with --class, bipeds, vehicles or any other tag class) each map holds,
 to choose the host map. Reads the user's own maps; nothing is written.
 

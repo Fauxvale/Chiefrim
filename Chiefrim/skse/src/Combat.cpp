@@ -16,7 +16,7 @@ namespace chiefrim::Combat
 {
 	namespace
 	{
-		constexpr float kActorRange = 25.0f * CR_SKY_UNITS_PER_WU;  // ~5300 units, ~75 m (docs §8.1)
+		constexpr float kActorRange = 25.0f * CR_SKY_UNITS_PER_WU;  // ~5300 units, ~75 m (docs §10.1)
 		constexpr float kHitMemorySeconds = 1.0f;  // a hit event explains a health drop this soon after it
 		constexpr float kDotFlushSeconds = 0.5f;   // damage over time goes to Halo in sums this often
 
@@ -123,7 +123,7 @@ namespace chiefrim::Combat
 			}
 		}
 
-		// The people an explosion set alight (docs §8.2): burning for a while,
+		// The people an explosion set alight (docs §10.5): burning for a while,
 		// hurt a little each frame.
 		struct Burning
 		{
@@ -334,7 +334,7 @@ namespace chiefrim::Combat
 		};
 
 		// Chiefrim's own keys: give Chief the host map's next weapon (debug,
-		// docs §8.4), Chiefrim off and on, Halo restarted (docs §11).
+		// docs §11.4), Chiefrim off and on, Halo restarted (docs §14.2).
 		class HotkeySink final : public RE::BSTEventSink<RE::InputEvent*>
 		{
 		public:
@@ -432,7 +432,7 @@ namespace chiefrim::Combat
 			}
 		}
 
-		// Halo owns Chief's health (docs §8.3): Skyrim's damage to the player
+		// Halo owns Chief's health (docs §10.3): Skyrim's damage to the player
 		// is refunded here and sent to Halo. (The player's health stays full in
 		// Skyrim rather than following Chief's body: lowered, Skyrim's essential
 		// player kneels in bleedout at the next hit.)
@@ -690,7 +690,7 @@ namespace chiefrim::Combat
 			}
 		}
 
-		// The toughness of an NPC against the player (docs §13): an NPC at
+		// The toughness of an NPC against the player (docs §10.2): an NPC at
 		// four times the player's level takes twice the hits (exponent 0.5).
 		float Toughness(RE::Actor* a_actor, RE::PlayerCharacter* a_player)
 		{
@@ -788,7 +788,7 @@ namespace chiefrim::Combat
 					React(a_actor, dir, 0.0f);  // the flinch (a bullet's stagger is 0)
 				}
 			} else {
-				// Without it (1.6.1170: docs §8.2), what it would do, piece by
+				// Without it (1.6.1170: docs §10.2), what it would do, piece by
 				// piece: the damage, a stagger or a flinch, and the hit event.
 				a_actor->DoDamage(damage, a_player, true);
 				if (!a_actor->IsDead() && !explosion) {

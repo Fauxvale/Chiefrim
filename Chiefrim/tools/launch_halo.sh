@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Runs Halo in Chiefrim mode for a session with Skyrim (docs/DESIGN.md §11),
+# Runs Halo in Chiefrim mode for a session with Skyrim (docs/DESIGN.md §14.1),
 # and keeps it running: when Halo exits or crashes it's started again (a few
 # seconds later each time it keeps crashing), and Skyrim can restart, stop and
 # start it through /dev/shm/chiefrim_control (the SKSE plugin's hotkeys, and
@@ -22,7 +22,7 @@
 # Halo through a command (tests: "gamescope --backend headless --").
 #
 # CHIEFRIM_MAP is the host map, the campaign level whose weapons, effects and
-# HUD Halo loads (docs/DESIGN.md §5.3): d20 by default, the one with every
+# HUD Halo loads (docs/DESIGN.md §6.1): d20 by default, the one with every
 # weapon a player can carry (tools/list_map_tags.py).
 #
 # CHIEFRIM_HALO_GPU picks the GPU Halo renders on, in a laptop with two:

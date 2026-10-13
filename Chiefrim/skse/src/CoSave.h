@@ -5,7 +5,7 @@
 
 namespace chiefrim::CoSave
 {
-	// Chief's kit in the SKSE co-save (docs §11): his weapons, ammo,
+	// Chief's kit in the SKSE co-save (docs §11.3): his weapons, ammo,
 	// grenades, vitality and flashlight. Halo reports it when it changes, and
 	// the latest goes into each save, linked or not. Loading a save sends its
 	// kit back to Halo, or the starting loadout ([Loadout]) for a save without

@@ -3,7 +3,7 @@
 WINE_PEER.C
 
 The Skyrim side of the link test: a Windows x64 program run under Proton,
-opening the mapping the way the SKSE plugin will (docs §10). Built without
+opening the mapping the way the SKSE plugin will (docs §5). Built without
 the Windows SDK or a C runtime (tools/linktest/build.sh), so it declares the
 few kernel32 functions it needs.
 

@@ -5,7 +5,7 @@
 
 namespace chiefrim::Combat
 {
-	// Chief against Skyrim's people (docs §8). Each frame while linked: the
+	// Chief against Skyrim's people (docs §10). Each frame while linked: the
 	// actors near the player go to Halo (which keeps a hittable stand-in for
 	// each), and the player's lost health is refunded and sent to Halo, where
 	// it hurts Chief, shields first. Halo's hits on the stand-ins come back

@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Phase 0 test stand (docs/DESIGN.md §12): runs the Chiefrim Halo build in
+# Phase 0 test stand (docs/DESIGN.md §14.5): runs the Chiefrim Halo build in
 # Chiefrim mode against tools/fake_skyrim.py, then prints both sides' logs.
 #
 # Usage: tools/run_phase0.sh [seconds] [--visible]
@@ -8,7 +8,7 @@
 #   Otherwise Halo runs in a headless gamescope (no window, no sound). Not
 #   the port's own hidden-window mode: with it, the lens-flare occlusion query
 #   crashes the GL driver after a few seconds (upstream bug, also without
-#   Chiefrim; docs/DESIGN.md §15).
+#   Chiefrim).
 #
 # Extra environment passes through, for example HALO_TEST_INPUT=bot:1 (a
 # scripted player that walks, turns, jumps and fires), CHIEFRIM_DEBUG=1, and

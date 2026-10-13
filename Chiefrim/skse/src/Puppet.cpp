@@ -207,7 +207,7 @@ namespace chiefrim::Puppet
 		}
 
 		// Phase 0: the origin and the flat floor are where the player stands
-		// when the world (re)starts (docs §4, §5.1).
+		// when the world (re)starts (docs §4, §9.2).
 		void SendWorld(RE::PlayerCharacter* a_player, RE::FormID a_id, bool a_interior)
 		{
 			const auto position = a_player->GetPosition();
@@ -471,7 +471,7 @@ namespace chiefrim::Puppet
 				Lighting::Reset();
 				SnapshotController(a_player);
 			}
-			// Skyrim's animations, scenes and swimming (docs §11): kept as it
+			// Skyrim's animations, scenes and swimming (docs §13): kept as it
 			// was while paused (a crafting station's menu is open, say).
 			const bool wasHandedOff = Handoff::Active();
 			const bool handedOff = GameplayIsRunning() ? Handoff::Update(a_player) : wasHandedOff;

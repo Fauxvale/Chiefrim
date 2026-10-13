@@ -2,7 +2,7 @@
 /*
 CHIEFRIM_WORLD.C
 
-Skyrim's shape as Halo's collision (Chiefrim/docs/DESIGN.md §5):
+Skyrim's shape as Halo's collision (Chiefrim/docs/DESIGN.md §9):
 
 - REGIONS: the SKSE plugin streams Skyrim's Havok collision near the player
   as triangles, per cube region (chiefrim_protocol.h, CR_MSG_COLLISION_*).

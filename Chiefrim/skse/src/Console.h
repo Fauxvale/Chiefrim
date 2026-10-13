@@ -5,7 +5,7 @@
 
 namespace chiefrim::Console
 {
-	// Skyrim's console gets a "chiefrim" command (docs §11), in place of one
+	// Skyrim's console gets a "chiefrim" command (docs §14.3), in place of one
 	// of the game's unused developer commands:
 	//   chiefrim restart | on | off | toggle   as the F11 and F10 keys
 	//   chiefrim give [name | number]          a weapon by name (or the next, as F7)

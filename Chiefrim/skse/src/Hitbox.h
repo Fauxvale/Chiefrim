@@ -5,7 +5,7 @@
 
 namespace chiefrim::Hitbox
 {
-	// An actor's hit shapes for its proxy in Halo (docs §8.1, protocol 18):
+	// An actor's hit shapes for its proxy in Halo (docs §10.1, protocol 18):
 	// the bodies of its skeleton that Skyrim's own arrows hit (capsules,
 	// spheres; a box or hull as the capsule along its longest side), as
 	// they stand now, in Skyrim world units. Without any (no ragdoll in the

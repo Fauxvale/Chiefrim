@@ -650,7 +650,7 @@ index ed850b82..5b93f201 100644
  	return;
  }
 +
-+/* CHIEFRIM: how an object's flashlight shines now (Chief's, docs §9): the
++/* CHIEFRIM: how an object's flashlight shines now (Chief's, docs §12.5): the
 +light attached to it that is marked as the first-person flashlight (else its
 +first light), as lights_preprocess_scene would make it this frame: its colour
 +(black when off), radius (world units) and cone (radians). Skyrim lights its
@@ -935,7 +935,7 @@ index dc251459..ed669fc5 100644
  	struct rasterizer_window_begin_parameters parameters;
  	short rendered_cluster_index;
 +	/* CHIEFRIM: Skyrim draws the world; Halo only Chief's arms and weapon,
-+	the HUD and its screens, for Skyrim to draw over its own (docs §9) */
++	the HUD and its screens, for Skyrim to draw over its own (docs §12.1) */
 +	boolean overlay = chiefrim_overlay_wanted();
  
  	profile_render_window_start(TRUE);
@@ -953,7 +953,7 @@ index dc251459..ed669fc5 100644
  	rasterizer_window_begin(&parameters);
  
 -	if (!bink_playback_in_progress())
-+	if (!bink_playback_in_progress() && overlay) /* CHIEFRIM: two layers (docs §9) */
++	if (!bink_playback_in_progress() && overlay) /* CHIEFRIM: two layers (docs §12.1) */
 +	{
 +		/* the world layer: objects (not the first-person weapon), decals,
 +		effects, with their depth for Skyrim to hide what's behind its own */
@@ -1062,7 +1062,7 @@ index e897ca69..506bdfff 100644
  	do
  	{
 +		/* CHIEFRIM: in overlay mode, the world layer has the objects and the
-+		screen layer the first-person weapon (render.c, docs §9) */
++		screen layer the first-person weapon (render.c, docs §12.1) */
  		if (first_person_pass != rasterizer_debug_options.draw_first_person_weapon_first)
  		{
 -			first_person_weapon_draw();
@@ -1122,7 +1122,7 @@ index cfce7009..7f89bdde 100644
  				particle->local_player_index == local_player_index;
 +			/* CHIEFRIM: in overlay mode, what's attached to the first-person
 +			weapon (its muzzle flash) moves with it: drawn with it in the
-+			screen layer, the rest in the world layer (render.c, docs §9) */
++			screen layer, the rest in the world layer (render.c, docs §12.1) */
 +			boolean on_weapon = owned_by_local_player &&
 +				TEST_FLAG(particle->flags, _particle_datum_attached_to_local_player_bit);
  

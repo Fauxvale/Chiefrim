@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* chiefrim_lighting.c: Skyrim's light on Halo's objects (docs §9).
+/* chiefrim_lighting.c: Skyrim's light on Halo's objects (docs §12.4).
 
 Halo lights an object from its map's lightmap under it (object_lights.c):
 an ambient colour, a key light, a fill, a reflection tint and a shadow. In

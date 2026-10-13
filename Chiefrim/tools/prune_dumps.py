@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Prunes Halo's collision build dumps (build/collision-dumps, docs/DESIGN.md
-§5.2): every dump of a build Chief fell through or got stuck in is kept (it
+§9.3): every dump of a build Chief fell through or got stuck in is kept (it
 carries his position: the cases to replay), and of the builds dumped for
 being slow only the newest --keep-slow. Slow builds come in runs of three a
 Halo start, many of the same place, and tools/test_bsp.sh replays them all.

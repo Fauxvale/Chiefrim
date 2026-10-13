@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Writes Halo's weapons as Skyrim items' world models (what lies on the
-ground and turns in the inventory; docs §8.4's loot rework), from the user's
+ground and turns in the inventory; docs §11.1), from the user's
 own Halo map and Skyrim: per weapon, build/mjolnir/Data/meshes/weapons/
 chiefrim/<key>.nif and its textures under textures/weapons/chiefrim/<key>/.
 plugin.py makes each a WEAP whose world model this is; equipping one gives

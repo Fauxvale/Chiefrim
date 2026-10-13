@@ -3,7 +3,7 @@
 CHIEFRIM_BSP.C
 
 A runtime builder of Halo collision BSPs from Skyrim's collision triangles
-(Chiefrim/docs/DESIGN.md §5.2). Halo's biped physics needs a real collision
+(Chiefrim/docs/DESIGN.md §9.2). Halo's biped physics needs a real collision
 BSP: it keeps the surface it stands on by index and walks that surface's
 edges, so loose triangles won't do.
 

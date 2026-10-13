@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Builds the Halo side of Chiefrim (docs/DESIGN.md §14).
+"""Builds the Halo side of Chiefrim (docs/DESIGN.md §6.3).
 
 Chiefrim does not fork OpenCE (halo-ce-universal before its rename). It pins an upstream commit, and
 this script makes the work tree halo/.work (git-ignored) from it:

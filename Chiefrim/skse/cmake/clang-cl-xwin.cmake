@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Cross-compiles Windows x64 binaries on Linux with clang-cl and lld-link,
-# against the MSVC CRT and Windows SDK that xwin downloads (docs/DESIGN.md §2).
+# against the MSVC CRT and Windows SDK that xwin downloads (docs/DESIGN.md §3).
 #
 #   XWIN_DIR: the folder `xwin splat` wrote (crt/ and sdk/); default
 #             Chiefrim/.tools/xwin, which tools/setup_skse.sh fills.
