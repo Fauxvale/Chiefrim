@@ -22,6 +22,11 @@ needs to know where the other is installed.
 
 ## Requirements
 
+> **Tested setup.** Chiefrim was developed and tested exclusively on Skyrim **1.6.1170** with
+> **SKSE 2.2.6**, on a vanilla-adjacent load order of about 300 mods, under Proton Experimental
+> on CachyOS. No other versions or setups have been tested. They may work, but there are no
+> guarantees.
+
 **Computer**
 
 - Linux on x86-64. Chiefrim has been built and played on CachyOS (Arch-based). Other
@@ -32,8 +37,8 @@ needs to know where the other is installed.
 **Games**
 
 - **The Elder Scrolls V: Skyrim Special Edition or Anniversary Edition on Steam**, version
-  **1.6.1170** (the current Steam version), run with **Proton**. Proton Experimental is the
-  tested version. Other versions of Skyrim won't load the plugin.
+  **1.6.1170** (the current Steam version), run with **Proton**. It's the only version tested,
+  with Proton Experimental.
 - **An Xbox disc image of Halo: Combat Evolved** (`.iso` or `.xiso`), any region or version,
   made from a disc you own. Chiefrim reads Halo's maps out of it.
 
@@ -166,8 +171,8 @@ your own game only: don't share it.
 
 If you already play Skyrim with SKSE plugins, you have these; check the versions and skip ahead.
 
-1. **SKSE64**: from [skse.silverlock.org](https://skse.silverlock.org), the build for game
-   version **1.6.1170** (2.2.6). Copy `skse64_loader.exe` and the `skse64_1_6_1170.dll` into
+1. **SKSE64**: from [skse.silverlock.org](https://skse.silverlock.org), **SKSE 2.2.6**, the
+   build for game version 1.6.1170 and the only one tested. Copy `skse64_loader.exe` and the `skse64_1_6_1170.dll` into
    Skyrim's folder (the one with `SkyrimSE.exe`), and the archive's `Data` folder into Skyrim's.
 2. **Make Steam start Skyrim through SKSE.** Under Proton, the usual way is to stand the loader
    in for Skyrim's launcher. In Skyrim's folder, rename `SkyrimSELauncher.exe` to
