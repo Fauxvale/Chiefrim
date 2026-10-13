@@ -15,7 +15,8 @@
 #       Halo starts with Skyrim and stops when Skyrim exits.
 #   --bot  a scripted player walks, turns and jumps by itself (HALO_TEST_INPUT)
 #
-# Halo's data root is build/halo-data, a link to the user's maps/ (HALO_MAPS),
+# Halo's data root is build/halo-data, a link to the user's maps/ (HALO_MAPS,
+# else where tools/game_paths.py finds them),
 # so the user's own Halo install and saves are never touched. Its log is
 # build/halo-data/debug.txt, its terminal output build/halo-data/halo.out
 # (the last run's; the one before is halo.out.1). CHIEFRIM_HALO_WRAPPER runs
@@ -43,13 +44,13 @@
 # (OpenCE's display.viewmodel_shield): HALO_VIEWMODEL_SHIELD=false turns it off.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-maps=${HALO_MAPS:-"$root/../HaloProjects/Halo-CE-Universal/maps"}
+maps=$(python3 -I "$root/tools/game_paths.py" maps)  # HALO_MAPS, else where OpenCE extracted them
 data="$root/build/halo-data"
 halo="$root/halo/.work/build/linux/halo"
 control=/dev/shm/chiefrim_control
 
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
-[ -d "$maps" ] || { echo "no maps at $maps (set HALO_MAPS)"; exit 1; }
+[ -d "$maps" ] || { echo "no Halo maps at $maps: extract them (docs/INSTALLATION-LINUX.md) or set HALO_MAPS"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$root/build/collision-dumps"
 # slow builds' dumps to the newest 20; Chief's falls are all kept
 python3 "$root/tools/prune_dumps.py" || true

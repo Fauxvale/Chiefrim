@@ -14,7 +14,7 @@ A bitmap's pixels_offset is where its pixels are in the (decompressed)
 map: the game adds pixel_data.file_offset to it as it loads it
 (xbox_texture_cache.c), and that is 0 in a map.
 
-Usage: tools/arsenal/halo_model.py MAP.map [--model characters\\cyborg\\cyborg]
+Usage: tools/arsenal/halo_model.py [MAP.map] [--model characters\\cyborg\\cyborg]
          [--lod 0] [--out build/arsenal]
 Writes model.json (nodes, shaders, then per part its vertices and
 triangles) and, per model shader, its colour, glow and reflection mask
@@ -27,6 +27,13 @@ import struct
 import sys
 import zlib
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import game_paths  # noqa: E402
+
+# the map read when none is given: the host map (docs §6.1), d20 (Keyes),
+# where tools/game_paths.py finds the user's maps
+DEFAULT_MAP = game_paths.host_map()
 
 
 class CacheMap:
@@ -404,7 +411,7 @@ def bake(shader, bitmaps, change_colors, size):
 
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-	parser.add_argument("map")
+	parser.add_argument("map", nargs="?", default=str(DEFAULT_MAP))
 	parser.add_argument("--model", default="characters\\cyborg\\cyborg")
 	parser.add_argument("--object", default="bipd:characters\\cyborg\\cyborg",
 		help="the object whose change colours colour the model (class:name)")

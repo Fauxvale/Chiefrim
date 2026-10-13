@@ -6,12 +6,17 @@
 # as a mod archive for a mod manager, build/dist/ChiefrimArsenal.zip.
 # Nothing it writes goes in the repo (build/ is git-ignored), and none of it
 # may be redistributed: it is the games' own assets, converted.
-# Usage: tools/arsenal/build.sh HALO_MAP [SKYRIM_DATA_DIR]
+# Usage: tools/arsenal/build.sh [HALO_MAP] [SKYRIM_DATA_DIR]
+# Unless given (or given as ""), both are where tools/game_paths.py finds
+# them (docs/INSTALLATION-LINUX.md): the host map, d20 (Keyes), in the user's
+# extracted maps/ (HALO_MAPS, CHIEFRIM_MAP), and Skyrim's Data/ (SKYRIM_DATA,
+# else Steam's libraries).
 set -eu
-[ $# -ge 1 ] || { echo "usage: $0 HALO_MAP [SKYRIM_DATA_DIR]"; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
-map=$1
-skyrim=${2:-"$HOME/.local/share/Steam/steamapps/common/Skyrim Special Edition/Data"}
+map=${1:-$(python3 -I "$here/../game_paths.py" map)}
+skyrim=${2:-$(python3 -I "$here/../game_paths.py" skyrim)}
+[ -f "$map" ] || { echo "no Halo map at $map: extract Halo's maps (docs/INSTALLATION-LINUX.md) or set HALO_MAPS"; exit 1; }
+[ -f "$skyrim/Skyrim.esm" ] || { echo "no Skyrim at $skyrim: set SKYRIM_DATA to Skyrim's Data folder"; exit 1; }
 build=$(cd "$here/../.." && pwd)/build
 # from nothing, so no file of an earlier build ends up in the archive
 rm -rf "$build/arsenal/Data"

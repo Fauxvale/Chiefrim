@@ -33,13 +33,16 @@ from pathlib import Path
 import numpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
+import game_paths  # noqa: E402
 from bsa import Archive  # noqa: E402
 from nif import Nif  # noqa: E402
 
 HALO_UNIT = 3.048
 SKYRIM_UNIT = 1 / 70
 SKELETON = "meshes\\actors\\character\\character assets\\skeleton.nif"
-DEFAULT_SKYRIM = Path.home() / ".local/share/Steam/steamapps/common/Skyrim Special Edition/Data"
+# the user's Skyrim, where tools/game_paths.py finds it (SKYRIM_DATA, else Steam's libraries)
+DEFAULT_SKYRIM = game_paths.skyrim_data()
 
 # Halo's node: its Skyrim bone, and the Halo and Skyrim joints its segment
 # runs to (None: turned as its parent; "axes": turned from its bone's

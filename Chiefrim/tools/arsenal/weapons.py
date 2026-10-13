@@ -49,7 +49,7 @@ from armor import ARMOR_FLAGS, CHIEF_VERTEX, ENVIRONMENT_MAP, SLSF1_ENVIRONMENT_
 from bsa import Archive  # noqa: E402
 from fit import DEFAULT_SKYRIM, HALO_TO_SKYRIM  # noqa: E402
 from ground import BSX, FLAGS, GROUND_VERTEX, SLSF1_SKINNED, dop_hull  # noqa: E402
-from halo_model import CacheMap, bake, decode_bitmap, decode_cube, read_model, reference, model_shader, rgba_array, sample  # noqa: E402
+from halo_model import DEFAULT_MAP, CacheMap, bake, decode_bitmap, decode_cube, read_model, reference, model_shader, rgba_array, sample  # noqa: E402
 from nif import HAVOK_SCALE, Nif  # noqa: E402
 from textures import FLAT_NORMAL, turn_cube, write_dds  # noqa: E402
 
@@ -293,7 +293,7 @@ def build(cache, key, weapon, name, weight, dagger, out, size):
 
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-	parser.add_argument("map")
+	parser.add_argument("map", nargs="?", default=str(DEFAULT_MAP))
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
 	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	parser.add_argument("--size", type=int, default=512, help="the baked textures' size")

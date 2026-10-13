@@ -46,5 +46,6 @@ The project path must not contain `[` or `]`, because CMake's `file(GLOB)` treat
 
 - **No game data in the repo.** `HaloProjects/`, `References/`, `Chiefrim/build/`, `Chiefrim/halo/.work/` and `Chiefrim/.tools/` are git-ignored. Anything built from game assets stays in `build/` and is never redistributed.
 - **GPL-3.0-or-later** (required by CommonLibSSE-NG). Every third-party component must be in `Chiefrim/licenses.toml` under a compatible license. See `docs/LICENSING.md`.
+- **No machine's paths in the code.** The user's game files (Halo's maps, Skyrim's Data) are found by `tools/game_paths.py` (`HALO_MAPS`, `SKYRIM_DATA`, then the usual places); a script needing one asks it. `docs/INSTALLATION-LINUX.md` is the from-nothing guide for someone else's Linux machine (a Windows guide would be its own file): update it when a build step, requirement or install step changes.
 - **DESIGN.md describes the current state only.** Update it in place when behavior changes; don't add history. `docs/archive/` is frozen.
 - **Git workflow**: work happens on a feature branch, which is merged into `main` with a merge commit (`Merge <branch>: <summary>`). Commit subjects take the form `Area: what changed`. Bodies explain the cause and say how the change was checked (offline against the fake Skyrim, and/or in game).
