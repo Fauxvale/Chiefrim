@@ -6,8 +6,9 @@ them holds one machine's paths.
 
 Halo's maps/, the first of these that exists:
 1. HALO_MAPS;
-2. halo/.work/build/linux/maps, where OpenCE extracts them from the Xbox
-   disc image the first time it starts (tools/setup_halo.py keeps build/);
+2. halo/.work/build/linux/maps, where the install guide has the user put
+   them once the upstream OpenCE release has extracted them from the Xbox
+   disc image (tools/setup_halo.py keeps build/);
 3. HaloProjects/Halo-CE-Universal/maps beside the repo (an OpenCE of one's
    own, from before Chiefrim built it).
 None: the second, where they'd be extracted. The host map in it is
