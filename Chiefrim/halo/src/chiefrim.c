@@ -227,9 +227,10 @@ static void chiefrim_apply_world(void)
 	}
 	chiefrim_world_generation(world.generation);
 	chiefrim.world_valid = TRUE;
-	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f, Chief's height %.0f",
+	error(_error_silent, "chiefrim: world %08X%s, origin (%.1f, %.1f, %.1f), floor %.1f, field of view %.1f (viewmodel %.1f), Chief's height %.0f",
 		world.world_id, world.is_interior ? " (interior)" : "",
-		world.origin.x, world.origin.y, world.origin.z, world.floor_z, world.field_of_view, world.chief_height);
+		world.origin.x, world.origin.y, world.origin.z, world.floor_z, world.field_of_view, world.viewmodel_fov,
+		world.chief_height);
 
 	/* Placing Chief is the Teleport message's job (Skyrim sends one with each
 	new world), never a side effect of seeing the world again. */
@@ -804,6 +805,18 @@ real chiefrim_field_of_view_tangent_scale(void)
 	/* Skyrim's angle is horizontal for 4:3, as Halo's tangent is: the
 	unzoomed view gets exactly it, and zoom keeps Halo's magnification. */
 	return tangent(DEGREES_TO_RADIANS(chiefrim.world.field_of_view) * 0.5f) / tangent(base * 0.5f);
+}
+
+real chiefrim_viewmodel_vertical_field_of_view(void)
+{
+	if (!chiefrim.active || !chiefrim.world_valid ||
+		chiefrim.world.viewmodel_fov < 10.0f || chiefrim.world.viewmodel_fov > 170.0f)
+	{
+		return 0.0f;
+	}
+	/* horizontal for 4:3, as the world's: the same vertical angle the world
+	gets at that setting, which zoom doesn't change */
+	return 2.0f * atan2f(0.75f * tangent(DEGREES_TO_RADIANS(chiefrim.world.viewmodel_fov) * 0.5f), 1.0f);
 }
 
 /* Skyrim composites Halo's layers (docs §12.2): its screen, while it asks.

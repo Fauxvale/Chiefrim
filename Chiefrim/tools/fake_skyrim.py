@@ -27,7 +27,7 @@ import time
 
 PATH = "/dev/shm/chiefrim_v1"
 MAGIC = 0x46454843
-VERSION = 33
+VERSION = 34
 RING_BYTES = 4 * 1024 * 1024
 OFF_DISPLAY = 360 + 2 * (128 + RING_BYTES)
 ACTORS_MAX, HITBOXES_MAX = 48, 1024
@@ -477,7 +477,8 @@ def main():
     parser.add_argument("--y", type=float, default=-7400.0)
     parser.add_argument("--z", type=float, default=-3650.0)
     parser.add_argument("--heading", type=float, default=0.0, help="degrees, 0 = north")
-    parser.add_argument("--fov", type=float, default=85.0, help="Chief's field of view, as Skyrim measures it (0: Halo's own)")
+    parser.add_argument("--fov", type=float, default=105.0, help="Chief's field of view, as Skyrim measures it (0: Halo's own)")
+    parser.add_argument("--viewmodel-fov", type=float, default=80.0, help="Chief's arms and weapon's field of view, measured the same (0: the world's)")
     parser.add_argument("--silence-at", type=float, default=0.0,
                         help="seconds in: stop the heartbeat, as a Skyrim that hangs (0: never)")
     parser.add_argument("--silence-for", type=float, default=5.0)
@@ -648,10 +649,11 @@ def main():
     link.set_u32(SKYRIM_STATE, SIDE_READY)
     link.push(RING_TO_HALO, MSG_HELLO,
         struct.pack("<II48s", VERSION, os.getpid(), b"fake_skyrim.py"))
-    # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, chief_height, reserved
+    # cr_world_context: world_id, is_interior, origin, floor_z, generation, field_of_view, chief_height,
+    # chief_radius, collision_radius, viewmodel_fov
     start_z = options.z - options.start_below
-    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffII",
-        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius, options.collision_radius, 0))
+    link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffIf",
+        TAMRIEL, 0, options.x, options.y, start_z, start_z, 1, options.fov, options.height, options.radius, options.collision_radius, options.viewmodel_fov))
     link.push(RING_TO_HALO, MSG_TELEPORT,
         struct.pack("<4f", options.x, options.y, start_z, math.radians(options.heading)))
     if options.terrain:
@@ -747,8 +749,8 @@ def main():
                 px, py, pz, yaw = last_position
                 generation += 1
                 epoch += 1
-                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffII",
-                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius, options.collision_radius, 0))
+                link.slot_write(SLOT_WORLD, struct.pack("<II3ffIfffIf",
+                    TAMRIEL, 0, px, py, pz, pz, generation, options.fov, options.height, options.radius, options.collision_radius, options.viewmodel_fov))
                 link.push(RING_TO_HALO, MSG_TELEPORT, struct.pack("<4f", px, py, pz + 5.0, yaw))
                 print(f"fake_skyrim: recenter #{generation - 1} at ({px:.1f} {py:.1f} {pz:.1f})", flush=True)
                 if options.terrain:
