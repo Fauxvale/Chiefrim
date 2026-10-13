@@ -539,7 +539,9 @@ show their state in their name: **"Needler (20/60)"** (loaded / spare), **"Plasm
 
 **Equipping one hands it to Chief** (`skse/src/Arsenal.cpp`, `chiefrim_inventory.c`):
 
-- The item leaves the inventory and goes to Halo with its rounds.
+- The item leaves the inventory and goes to Halo with its rounds. Equipped in an item menu
+  (inventory, container, barter, gift, favorites), it goes as the last of them closes: taken out
+  from under an open menu, the menu read the freed entry and crashed Skyrim.
 - If Chief already has the same weapon, his takes the item's rounds up to its maximum, and any
   leftover comes back as an item. An energy weapon swaps with his instead.
 - Otherwise Chief takes it into his hands; if he already carries two, the one selected comes back.
