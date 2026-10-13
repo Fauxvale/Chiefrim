@@ -102,7 +102,7 @@ Known problems and limits are in §18.
 | Skyrim | SE/AE **1.6.1170**, Steam, Proton Experimental, SKSE64 and Address Library |
 | SKSE plugin | C++23, CommonLibSSE-NG (submodule), CMake. **Cross-compiled on Linux** to a Windows x64 DLL with clang-cl and lld-link, against the MSVC CRT and Windows SDK fetched by xwin |
 | Halo | OpenCE (the Halo CE Xbox decompilation, formerly halo-ce-universal), **Linux i386 build**, OpenGL, SDL3. 32-bit because the map data contains 32-bit pointers |
-| Halo data | The user's own `maps/`, extracted from their Xbox disc image by the upstream OpenCE release (Chiefrim's build can't) and moved into `halo/.work/build/linux/maps`. The host map is `d20` (§6.1) |
+| Halo data | The user's own `maps/`, extracted from their Xbox disc image by the upstream OpenCE release (Chiefrim's build can't) and copied into `halo/.work/build/linux/maps`. The host map is `d20` (§6.1) |
 | Tested with | SSE Display Tweaks (it hooks the swap chain; Chiefrim chains with it). No ENB or shader replacer |
 
 **No game data in the repo.** The repo holds code only. `HaloProjects/`, `References/` and

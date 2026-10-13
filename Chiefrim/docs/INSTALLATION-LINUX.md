@@ -136,15 +136,14 @@ extract the maps.
    Halo disc image in the file picker, and wait while it copies the maps (about 2 GB) to
    `~/Games/OpenCE/maps`. The game then starts. Close it.
 
-4. Move the maps to where Chiefrim looks for them, back in the `Chiefrim` folder:
+4. Copy the maps to where Chiefrim looks for them, back in the `Chiefrim` folder:
 
    ```
-   mv ~/Games/OpenCE/maps halo/.work/build/linux/maps
+   cp -r ~/Games/OpenCE/maps halo/.work/build/linux/maps
    ```
 
-Chiefrim finds the maps there by itself, and rebuilding Halo later keeps them. You can delete
-`~/Games/OpenCE` afterwards. To keep playing upstream OpenCE as well, copy the maps with `cp -r`
-instead of moving them.
+Chiefrim finds the maps there by itself, and rebuilding Halo later keeps them. `~/Games/OpenCE`
+stays a working upstream OpenCE you can play. If you don't want it, delete it.
 
 Already have Halo's `maps/` folder extracted somewhere else? Skip this step, and set `HALO_MAPS`
 to that folder each time you run a Chiefrim command:
