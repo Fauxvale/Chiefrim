@@ -19,7 +19,8 @@ this script makes the work tree halo/.work (git-ignored) from it:
    optimisation: the hooks weren't in its play, the engine around them was).
 
 The result is halo/.work/build/linux/halo. No game data is involved: the
-game asks for the user's own Xbox disc image, or finds maps/ next to it.
+user's own maps/, extracted from their Xbox disc image with the upstream OpenCE
+release (this build can't), goes next to it (docs/INSTALLATION-LINUX.md).
 
 Usage: tools/setup_halo.py [--debug] [--no-build] [--keep]
   --debug  assertions checked, as OpenCE's development builds
