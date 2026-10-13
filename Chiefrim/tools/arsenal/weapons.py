@@ -56,8 +56,8 @@ from textures import FLAT_NORMAL, turn_cube, write_dds  # noqa: E402
 MESHES = "meshes\\weapons\\chiefrim"
 TEXTURES = "textures\\weapons\\chiefrim"
 TEMPLATE = "meshes\\weapons\\iron\\irondagger.nif"
-# per weapon: its key (files, editor IDs), its weap tag, its name in
-# Skyrim, its form ID in the plugin (skse/src/Arsenal.cpp's table has the
+# per weapon: its key (files, editor IDs), its weap tag, its short name
+# (nodes, editor IDs; plugin.py's WEAPON_NAMES has its name in Skyrim), its form ID in the plugin (skse/src/Arsenal.cpp's table has the
 # same; its inventory model's is INVENTORY_ID past it), its value and weight
 # (a one-handed gun as heavy as a sword, a rifle as a greatsword, the
 # rocket launcher more). Halo's others (the fuel rod, the flamethrower)

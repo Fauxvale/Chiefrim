@@ -57,17 +57,59 @@ FIRST_ID = 0x800
 # biped slots, as BOD2's and BODT's bits (slot 30 is bit 0)
 SLOT = {slot: 1 << (slot - 30) for slot in range(30, 62)}
 # per piece: its Daedric armor, its name, its NIFs (by sex; the first
-# person's for the cuirass), its addon's slots, and slots its armor adds
+# person's for the cuirass), its addon's slots, slots its armor adds, and its
+# description (Halo: Combat Evolved's Mark V, not Halo 2's Mark VI)
 PIECES = [
-	("helmet", "ArmorDaedricHelmet", "Mjolnir Helmet", "helmet", (30,), ()),
-	("cuirass", "ArmorDaedricCuirass", "Mjolnir Armor", "cuirass_1", (32, 34, 38), (40,)),
-	("gauntlets", "ArmorDaedricGauntlets", "Mjolnir Gauntlets", "gauntlets_1", (33, 34), ()),
-	("boots", "ArmorDaedricBoots", "Mjolnir Boots", "boots_1", (37, 38), ()),
+	("helmet", "ArmorDaedricHelmet", "MJOLNIR Mark V Helmet", "helmet", (30,), (),
+		"The sealed helmet of MJOLNIR powered assault armor. Behind its gold-mirrored visor, the suit's "
+		"heads-up display tracks shield strength, motion and ammunition."),
+	("cuirass", "ArmorDaedricCuirass", "MJOLNIR Mark V Armor", "cuirass_1", (32, 34, 38), (40,),
+		"MJOLNIR Mark V powered assault armor, made for the SPARTAN-IIs. A titanium-alloy shell over a "
+		"layer of hydrostatic gel, guarded by a recharging energy shield."),
+	("gauntlets", "ArmorDaedricGauntlets", "MJOLNIR Mark V Gauntlets", "gauntlets_1", (33, 34), (),
+		"The armored gauntlets of MJOLNIR powered assault armor. The armor's powered undersuit lends "
+		"the wearer's grip and blows many times a man's strength."),
+	("boots", "ArmorDaedricBoots", "MJOLNIR Mark V Boots", "boots_1", (37, 38), (),
+		"The armored boots of MJOLNIR powered assault armor. Half a ton of suit, and it moves as "
+		"quickly as the SPARTAN inside it."),
 ]
-DESCRIPTION = "MJOLNIR Mark V powered assault armor."
 WEAPON_TEMPLATE = "IronDagger"
-WEAPON_DESCRIPTION = "A weapon of Halo's. Equip it to hand it to Master Chief."
-GRENADE_DESCRIPTION = "A grenade of Halo's. Equip it to hand Master Chief as many as he can carry."
+# per weapon (weapons.WEAPONS's key): its name in Skyrim, its designation
+# as Halo: Combat Evolved has it before its common name (not a later game's:
+# the M6D, not the M6G; the M19 SSM, not the M41; the M90, not the M90A),
+# and its description
+WEAPON_NAMES = {
+	"needler": ("Type-33 Needler",
+		"Covenant Type-33 Guided Munitions Launcher. Fires crystalline shards that home in on their "
+		"target, lodge in it and detonate together."),
+	"assault_rifle": ("MA5B Assault Rifle",
+		"MA5B Individual Combat Weapon System, by Misriah Armory. Fully automatic, sixty 7.62mm "
+		"rounds to a magazine, with a round counter and compass on its receiver."),
+	"pistol": ("M6D Pistol",
+		"M6D Personal Defense Weapon System. A semi-automatic 12.7mm sidearm with a 2x smart-linked "
+		"scope, firing semi-armor-piercing high-explosive rounds."),
+	"shotgun": ("M90 Shotgun",
+		"M90 Close Assault Weapon System. A pump-action shotgun firing 8-gauge magnum shells; at close "
+		"quarters few weapons in the UNSC arsenal hit harder."),
+	"sniper_rifle": ("SRS99C-S2 AM Sniper Rifle",
+		"Sniper Rifle System 99C, Series 2, Anti-Materiel. Four 14.5mm armor-piercing rounds to a "
+		"magazine, through a 2x and 10x scope with night vision."),
+	"rocket_launcher": ("M19 SSM Rocket Launcher",
+		"M19 surface-to-surface missile launcher. Two tubes of 102mm high-explosive rockets, made to "
+		"stop armored vehicles."),
+	"plasma_pistol": ("Type-25 Plasma Pistol",
+		"Covenant Type-25 Directed Energy Pistol. Fires bolts of superheated plasma, or holds a charge "
+		"for one overcharged bolt that tracks its target and strips energy shields."),
+	"plasma_rifle": ("Type-25 Plasma Rifle",
+		"Covenant Type-25 Directed Energy Rifle, the Elites' weapon. Fires rapid bolts of superheated "
+		"plasma until it overheats and must vent."),
+	"frag_grenade": ("M9 Frag Grenade",
+		"M9 High-Explosive, Dual-Purpose fragmentation grenade. It bounces before it bursts, so it "
+		"can be thrown around corners."),
+	"plasma_grenade": ("Type-1 Plasma Grenade",
+		"Covenant Type-1 Antipersonnel Grenade. A ball of plasma that clings to whatever it strikes, "
+		"flesh or armor, and detonates a moment later."),
+}
 VENDOR_ITEM_WEAPON = 0x0008F958
 # the dagger's that a weapon Chief holds has no use for: its texture
 # hashes, its first-person model, its keywords (replaced)
@@ -125,6 +167,7 @@ def weapon_records(plugin, data_dir):
 	static_template = plugin.find("STAT", FIRST_PERSON_TEMPLATE)
 	records, statics = [], []
 	for key, _, name, form_id, value, weight in weapons.WEAPONS:
+		full_name, description = WEAPON_NAMES[key]
 		nif = Path(data_dir) / Path(weapons.MESHES.replace("\\", "/")) / f"{key}.nif"
 		points = [v["position"] for b in Nif(nif).blocks if b["type"] == "BSTriShape" for v in b["vertices"]]
 		low = [int(min(p[i] for p in points) // 1) for i in range(3)]
@@ -132,7 +175,7 @@ def weapon_records(plugin, data_dir):
 		weapon = Record("WEAP", 0x01000000 | form_id, subrecords=[(t, d) for t, d in template.subrecords if t not in WEAPON_LEFT_OUT])
 		weapon.set("EDID", zstring(f"Chiefrim{weapons.editor_name(name)}"))
 		weapon.set("OBND", struct.pack("<6h", *low, *high))
-		weapon.set("FULL", zstring(name))
+		weapon.set("FULL", zstring(full_name))
 		model_path = zstring(f"{weapons.MESHES.split(chr(92), 1)[1]}\\{key}.nif")
 		weapon.set("MODL", model_path)
 		static = Record("STAT", 0x01000000 | form_id + weapons.INVENTORY_ID,
@@ -145,7 +188,7 @@ def weapon_records(plugin, data_dir):
 		# the keywords go after the equip type and its impacts, as the dagger's did
 		index = next(i for i, (t, _) in enumerate(weapon.subrecords) if t == "DESC")
 		weapon.subrecords[index:index] = [("KSIZ", struct.pack("<I", 1)), ("KWDA", struct.pack("<I", VENDOR_ITEM_WEAPON))]
-		weapon.set("DESC", zstring(GRENADE_DESCRIPTION if key.endswith("_grenade") else WEAPON_DESCRIPTION))
+		weapon.set("DESC", zstring(description))
 		weapon.set("DATA", struct.pack("<IfH", value, weight, 0))
 		records.append(weapon)
 	return records, statics
@@ -191,7 +234,7 @@ def build(skyrim, data_dir):
 	plugin = Plugin(Path(skyrim) / "Skyrim.esm", ["ARMO", "ARMA", "WEAP", "STAT", "LVLI", "CONT"])
 	armors, addons = [], []
 	next_id = FIRST_ID
-	for piece, template, name, nif, addon_slots, extra_slots in PIECES:
+	for piece, template, name, nif, addon_slots, extra_slots, description in PIECES:
 		armor_template = plugin.find("ARMO", template)
 		addon_id, = struct.unpack("<I", armor_template.get("MODL"))
 		addon_template = plugin.by_id("ARMA", addon_id)
@@ -225,7 +268,7 @@ def build(skyrim, data_dir):
 		armor.set("EDID", zstring(f"ChiefrimMjolnir{piece.title()}"))
 		# Skyrim.esm's are localized (string IDs); this plugin's aren't
 		armor.set("FULL", zstring(name))
-		armor.set("DESC", zstring(DESCRIPTION))
+		armor.set("DESC", zstring(description))
 		armor.set("MOD2", model(None, f"{piece}_go"))
 		body = bytearray(armor.get("BOD2"))
 		current, = struct.unpack_from("<I", body)

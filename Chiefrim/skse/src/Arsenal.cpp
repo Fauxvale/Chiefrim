@@ -54,8 +54,8 @@ namespace chiefrim::Arsenal
 			return nullptr;
 		}
 
-		// An item's rounds are in its name, as Halo's HUD shows them: "Needler
-		// (20/60)" (loaded, spare), "Plasma Rifle (40%)" (battery). Skyrim
+		// An item's rounds are in its name, as Halo's HUD shows them: "Type-33
+		// Needler (20/60)" (loaded, spare), "Type-25 Plasma Rifle (40%)" (battery). Skyrim
 		// keeps a name with the item wherever it goes (dropped, in a chest, a
 		// merchant's, a save). One without: a new one's rounds.
 		std::string ItemName(const Item& a_item, const cr_chief_weapon& a_weapon)

@@ -8,7 +8,7 @@ namespace chiefrim::Arsenal
 	// Halo's weapons as Skyrim items (docs §11.1, the loot rework): weapons
 	// (WEAP) in ChiefrimArsenal.esp (tools/arsenal/weapons.py and plugin.py),
 	// found, carried, stored and sold as Skyrim's are, each with its rounds in
-	// its name ("Needler (20/60)": loaded, spare; "Plasma Rifle (40%)"; none:
+	// its name ("Type-33 Needler (20/60)": loaded, spare; "Type-25 Plasma Rifle (40%)"; none:
 	// a new one's). Equipping one hands it to Chief with them
 	// (CR_MSG_GIVE_WEAPON, CR_GIVE_ITEM) and it leaves the inventory; while
 	// Chiefrim is off (unlinked) it is unequipped again and kept. What Chief
