@@ -27,7 +27,7 @@ log="$root/build/phase0"
 halo="$root/halo/.work/build/linux/halo"
 
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
-[ -d "$maps" ] || { echo "no Halo maps at $maps: extract them (docs/INSTALLATION.md) or set HALO_MAPS"; exit 1; }
+[ -d "$maps" ] || { echo "no Halo maps at $maps: extract them (docs/INSTALLATION-LINUX.md) or set HALO_MAPS"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$log"
 ln -sfn "$(cd "$maps" && pwd)" "$data/maps"
 map=${CHIEFRIM_MAP:-d20}

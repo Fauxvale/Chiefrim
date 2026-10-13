@@ -109,9 +109,9 @@ Known problems and limits are in §18.
 `Chiefrim/build/` are git-ignored. Anything built from game assets (the Arsenal) stays in
 `build/` and must not be redistributed.
 
-How to build and install Chiefrim from nothing, for someone who doesn't know how it works, is
-[INSTALLATION.md](INSTALLATION.md). No script holds one machine's paths: they find the user's game
-files through `tools/game_paths.py` (`tools/game_paths.py maps|map|skyrim` prints them):
+How to build and install Chiefrim on Linux from nothing, for someone who doesn't know how it
+works, is [INSTALLATION-LINUX.md](INSTALLATION-LINUX.md). No script holds one machine's paths:
+they find the user's game files through `tools/game_paths.py` (`tools/game_paths.py maps|map|skyrim` prints them):
 
 | Files | Found at, the first that exists |
 |---|---|
@@ -869,7 +869,7 @@ Chiefrim-Project/
   LICENSE                     GPL-3.0
   THIRD-PARTY-NOTICES.md
   Chiefrim/
-    docs/                     DESIGN.md (this), INSTALLATION.md, LICENSING.md, archive/
+    docs/                     DESIGN.md (this), INSTALLATION-LINUX.md, LICENSING.md, archive/
     protocol/                 chiefrim_protocol.h (the shared layout), test_protocol.c
     skse/                     the SKSE plugin: CMakeLists.txt, Chiefrim.ini, src/, cmake/ (cross toolchain),
                               extern/CommonLibSSE-NG (submodule)

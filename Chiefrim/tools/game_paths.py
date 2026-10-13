@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Where the user's own game files are (docs/INSTALLATION.md): Halo's maps/
+"""Where the user's own game files are (docs/INSTALLATION-LINUX.md): Halo's maps/
 and Skyrim's Data/. The build and launch scripts all ask this, so none of
 them holds one machine's paths.
 

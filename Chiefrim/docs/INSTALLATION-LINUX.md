@@ -1,4 +1,4 @@
-# Installing Chiefrim
+# Installing Chiefrim on Linux
 
 This guide takes you from nothing to playing Skyrim as Master Chief. It assumes no knowledge of
 how Chiefrim works. For that, see [DESIGN.md](DESIGN.md).

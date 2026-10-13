@@ -50,7 +50,7 @@ halo="$root/halo/.work/build/linux/halo"
 control=/dev/shm/chiefrim_control
 
 [ -x "$halo" ] || { echo "build Halo first: tools/setup_halo.py"; exit 1; }
-[ -d "$maps" ] || { echo "no Halo maps at $maps: extract them (docs/INSTALLATION.md) or set HALO_MAPS"; exit 1; }
+[ -d "$maps" ] || { echo "no Halo maps at $maps: extract them (docs/INSTALLATION-LINUX.md) or set HALO_MAPS"; exit 1; }
 mkdir -p "$data" "$root/build/halo-saves" "$root/build/collision-dumps"
 # slow builds' dumps to the newest 20; Chief's falls are all kept
 python3 "$root/tools/prune_dumps.py" || true
