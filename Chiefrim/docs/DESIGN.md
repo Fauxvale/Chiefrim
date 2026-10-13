@@ -116,7 +116,7 @@ Build commands:
 | Halo with Chiefrim's hooks | `tools/setup_halo.py` | `halo/.work/build/linux/halo` |
 | SKSE plugin | `tools/setup_skse.sh` (first run: `--accept-license` for the MSVC CRT/SDK) | `build/skse/Chiefrim.dll` |
 | Plugin as a mod archive | `tools/package_skse.sh` | `build/dist/ChiefrimPlugin.zip` |
-| The Arsenal: Mjolnir armor and weapon items | `tools/arsenal/build.sh HALO_MAP [SKYRIM_DATA_DIR]` | `build/dist/ChiefrimArsenal.zip` |
+| The Arsenal: Mjolnir armor and weapon items | `tools/arsenal/build.sh [HALO_MAP] [SKYRIM_DATA_DIR]` | `build/dist/ChiefrimArsenal.zip` |
 
 The project path must not contain `[` or `]` (CMake's `file(GLOB)` reads them as a pattern).
 
@@ -829,8 +829,9 @@ Other test tools: `tools/test_protocol.sh` (layout), `tools/test_bsp.sh` (BSP bu
 ## 15. The Arsenal
 
 The Arsenal is Chief's whole kit as a Skyrim mod: his Mjolnir armor and Halo's weapons and
-grenades. `tools/arsenal/build.sh HALO_MAP [SKYRIM_DATA_DIR]` turns Chief's model in the user's
-own Halo map into a Skyrim armor set, and builds Halo's weapon items (§11.1), all into
+grenades. `tools/arsenal/build.sh [HALO_MAP] [SKYRIM_DATA_DIR]` turns Chief's model in the user's
+own Halo map (by default the host map, d20, where `tools/launch_halo.sh` finds it: `HALO_MAPS`,
+`CHIEFRIM_MAP`) into a Skyrim armor set, and builds Halo's weapon items (§11.1), all into
 `ChiefrimArsenal.esp` and its meshes and textures (in `build/arsenal/Data/`, and packed as
 `build/dist/ChiefrimArsenal.zip`). Nothing it produces goes in the repo or may be
 redistributed.

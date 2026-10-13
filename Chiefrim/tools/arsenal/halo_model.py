@@ -14,7 +14,7 @@ A bitmap's pixels_offset is where its pixels are in the (decompressed)
 map: the game adds pixel_data.file_offset to it as it loads it
 (xbox_texture_cache.c), and that is 0 in a map.
 
-Usage: tools/arsenal/halo_model.py MAP.map [--model characters\\cyborg\\cyborg]
+Usage: tools/arsenal/halo_model.py [MAP.map] [--model characters\\cyborg\\cyborg]
          [--lod 0] [--out build/arsenal]
 Writes model.json (nodes, shaders, then per part its vertices and
 triangles) and, per model shader, its colour, glow and reflection mask
@@ -23,10 +23,16 @@ side by side (+x, -x, +y, -y, +z, -z), as PNGs.
 """
 import argparse
 import json
+import os
 import struct
 import sys
 import zlib
 from pathlib import Path
+
+# the map read when none is given: the host map (docs §6.1), d20 (Keyes),
+# where tools/launch_halo.sh finds it (HALO_MAPS, CHIEFRIM_MAP override both)
+DEFAULT_MAP = Path(os.environ.get("HALO_MAPS", Path(__file__).resolve().parents[3] / "HaloProjects" / "Halo-CE-Universal" / "maps")) \
+	/ f"{os.environ.get('CHIEFRIM_MAP', 'd20')}.map"
 
 
 class CacheMap:
@@ -404,7 +410,7 @@ def bake(shader, bitmaps, change_colors, size):
 
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-	parser.add_argument("map")
+	parser.add_argument("map", nargs="?", default=str(DEFAULT_MAP))
 	parser.add_argument("--model", default="characters\\cyborg\\cyborg")
 	parser.add_argument("--object", default="bipd:characters\\cyborg\\cyborg",
 		help="the object whose change colours colour the model (class:name)")

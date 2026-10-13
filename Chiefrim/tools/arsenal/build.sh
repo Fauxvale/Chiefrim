@@ -6,11 +6,15 @@
 # as a mod archive for a mod manager, build/dist/ChiefrimArsenal.zip.
 # Nothing it writes goes in the repo (build/ is git-ignored), and none of it
 # may be redistributed: it is the games' own assets, converted.
-# Usage: tools/arsenal/build.sh HALO_MAP [SKYRIM_DATA_DIR]
+# Usage: tools/arsenal/build.sh [HALO_MAP] [SKYRIM_DATA_DIR]
+# HALO_MAP is the host map, d20 (Keyes), where tools/launch_halo.sh finds
+# it unless given: in HALO_MAPS (else HaloProjects/Halo-CE-Universal/maps
+# beside the repo), CHIEFRIM_MAP naming another.
 set -eu
-[ $# -ge 1 ] || { echo "usage: $0 HALO_MAP [SKYRIM_DATA_DIR]"; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
-map=$1
+maps=${HALO_MAPS:-"$here/../../../HaloProjects/Halo-CE-Universal/maps"}
+map=${1:-"$maps/${CHIEFRIM_MAP:-d20}.map"}
+[ -f "$map" ] || { echo "no Halo map at $map (usage: $0 [HALO_MAP] [SKYRIM_DATA_DIR]; or set HALO_MAPS)"; exit 1; }
 skyrim=${2:-"$HOME/.local/share/Steam/steamapps/common/Skyrim Special Edition/Data"}
 build=$(cd "$here/../.." && pwd)/build
 # from nothing, so no file of an earlier build ends up in the archive
