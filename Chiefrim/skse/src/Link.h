@@ -5,7 +5,7 @@
 
 namespace chiefrim
 {
-	// The Skyrim end of the shared memory (protocol/chiefrim_protocol.h, docs §10).
+	// The Skyrim end of the shared memory (protocol/chiefrim_protocol.h, docs §5).
 	// Halo creates /dev/shm/chiefrim_v1; this opens it as Z:\dev\shm\chiefrim_v1
 	// whenever Halo is up, and lets go when Halo stops.
 	class Link
@@ -38,7 +38,7 @@ namespace chiefrim
 		std::optional<cr_player_state> ReadPlayerState();
 		void SendSkyrimPlayer(const cr_skyrim_player& a_player);
 
-		// The compositor (docs §9), on the thread that runs Update: Skyrim's
+		// The compositor (docs §12.2), on the thread that runs Update: Skyrim's
 		// screen to Halo, and Halo's frames; nullptr while unlinked.
 		void SendDisplay(const cr_display& a_display);
 		void SendCamera(const cr_camera& a_camera);

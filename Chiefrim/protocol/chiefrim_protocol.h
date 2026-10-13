@@ -3,7 +3,7 @@
 CHIEFRIM_PROTOCOL.H
 
 The shared-memory layout between the Skyrim SKSE plugin (Windows x64 under
-Proton) and the Halo engine (native Linux i386). See docs/DESIGN.md, §10.
+Proton) and the Halo engine (native Linux i386). See docs/DESIGN.md, §5.
 
 One file, /dev/shm/chiefrim_v1, mapped by both sides:
 - Halo creates it (shm_open + mmap MAP_SHARED).
@@ -74,7 +74,7 @@ typedef struct cr_vec3
 
 /* ---- slots (latest value, seqlock) ------------------------------------- */
 
-/* Skyrim -> Halo. Where the world is (docs §4, §5.1 stage A). */
+/* Skyrim -> Halo. Where the world is (docs §4). */
 typedef struct cr_world_context
 {
 	uint32_t world_id;      /* worldspace or interior-cell FormID */
@@ -93,7 +93,7 @@ typedef struct cr_world_context
 	uint32_t reserved;
 } cr_world_context;
 
-/* Skyrim -> Halo. Chief's controls (docs §7). Skyrim's ControlMap has already
+/* Skyrim -> Halo. Chief's controls (docs §8). Skyrim's ControlMap has already
 turned keys, mouse and gamepad into user events, so these are actions, not
 keys: rebinding a Skyrim action rebinds Chief's with it. */
 #define CR_ACTION_JUMP           0u
@@ -128,7 +128,7 @@ typedef struct cr_input
 #define CR_ROUTE_HALO   0u /* gameplay: Chief gets the actions */
 #define CR_ROUTE_SKYRIM 1u /* a Skyrim menu or scene owns input; Chief gets none */
 
-/* Halo -> Skyrim. The player and camera (docs §6). Skyrim units/radians. */
+/* Halo -> Skyrim. The player and camera (docs §7). Skyrim units/radians. */
 typedef struct cr_player_state
 {
 	uint32_t tick;          /* Halo game tick */
@@ -182,7 +182,7 @@ typedef struct cr_skyrim_player
 #define CR_SKYRIM_ON_GROUND 0x0002u
 #define CR_SKYRIM_SNEAKING  0x0004u
 
-/* Skyrim -> Halo. Skyrim's picture (docs §9): Halo draws Chief's layers at
+/* Skyrim -> Halo. Skyrim's picture (docs §12.2): Halo draws Chief's layers at
 its size and shape. */
 typedef struct cr_display
 {
@@ -194,7 +194,7 @@ typedef struct cr_display
 
 #define CR_DISPLAY_OVERLAY 0x0001u /* Skyrim composites Halo's frames: draw them */
 
-/* Skyrim -> Halo. The camera Skyrim is rendering this frame with (docs §9),
+/* Skyrim -> Halo. The camera Skyrim is rendering this frame with (docs §12.2),
 published as its world rendering starts. Halo draws its next frame through
 it, so its world layer sits exactly on Skyrim's picture, and names it in
 the frame (cr_frame_header.camera_frame); Skyrim waits a moment for that
@@ -216,7 +216,7 @@ CR_DECLARE_SLOT(cr_slot_world_context, cr_world_context);
 CR_DECLARE_SLOT(cr_slot_input, cr_input);
 CR_DECLARE_SLOT(cr_slot_player_state, cr_player_state);
 CR_DECLARE_SLOT(cr_slot_skyrim_player, cr_skyrim_player);
-/* Skyrim -> Halo. The actors near the player (docs §8.1): Halo keeps an
+/* Skyrim -> Halo. The actors near the player (docs §10.1): Halo keeps an
 unseen, hittable stand-in (a proxy biped) for each. Latest value. */
 #define CR_ACTORS_MAX   48u
 #define CR_HITBOXES_MAX 1024u /* all the actors' together */
@@ -296,17 +296,17 @@ typedef struct cr_msg_header
 } cr_msg_header;
 
 /* Message types. 0x80-0xFF are reserved for stretch goals (Covenant,
-vehicles); docs §10. */
+vehicles); docs §5. */
 #define CR_MSG_WRAP      0x00u
 #define CR_MSG_HELLO     0x01u /* both ways */
 #define CR_MSG_TELEPORT  0x02u /* S->H */
 #define CR_MSG_LOG       0x03u /* H->S: a line for SKSE's log */
 #define CR_MSG_COLLISION_RESET 0x04u /* S->H: forget all collision regions */
 #define CR_MSG_COLLISION_TRIS  0x05u /* S->H: (part of) one region's triangles */
-#define CR_MSG_HIT_ACTOR    0x06u /* H->S: Chief hurt an actor's proxy (docs §8.2) */
-#define CR_MSG_PLAYER_HURT  0x07u /* S->H: something in Skyrim hurt the player (docs §8.3) */
+#define CR_MSG_HIT_ACTOR    0x06u /* H->S: Chief hurt an actor's proxy (docs §10.2) */
+#define CR_MSG_PLAYER_HURT  0x07u /* S->H: something in Skyrim hurt the player (docs §10.3) */
 #define CR_MSG_PLAYER_DIED  0x08u /* H->S: Chief is dead */
-#define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §8.4) */
+#define CR_MSG_GIVE_WEAPON  0x09u /* S->H: debug: give Chief a weapon of the host map (docs §11.4) */
 #define CR_MSG_KEY_NAMES    0x0Au /* S->H: the player's keys for Chief's actions, for Halo's prompts (protocol 12) */
 #define CR_MSG_LIGHTING     0x0Bu /* S->H: Skyrim's light where the player is, for Halo's objects (protocol 13) */
 #define CR_MSG_CHIEF_STATE   0x0Cu /* H->S: Chief's weapons, ammo, grenades and vitality, when they change (protocol 14) */
@@ -318,11 +318,11 @@ vehicles); docs §10. */
 #define CR_MSG_DEBUG         0x12u /* S->H: debug drawing on or off (protocol 19) */
 #define CR_MSG_SHOT          0x13u /* H->S: a projectile's way this tick: Skyrim's destructible objects on it are hurt (protocol 23) */
 /* 0x14, 0x15: the weapon caches' (protocol 24 to 29), gone with them in 30:
-Halo's weapons are Skyrim's items, found as its loot (docs §8.4) */
+Halo's weapons are Skyrim's items, found as its loot (docs §11) */
 #define CR_MSG_WEAPON_RETURNED 0x16u /* H->S: a weapon Chief let go of, or one he couldn't take, back to Skyrim as an item (protocol 29) */
 #define CR_MSG_ARSENAL       0x17u /* S->H: the weapons Skyrim has items for, on linking (protocol 29) */
 
-/* Collision (docs §5.2): Skyrim's Havok shapes near the player, as
+/* Collision (docs §9): Skyrim's Havok shapes near the player, as
 triangles in Skyrim world units, wound counter-clockwise around their
 front, per cube region of CR_REGION_UNITS. A region arrives in one or more
 CR_MSG_COLLISION_TRIS messages (first..first+count of total, in order);
@@ -348,7 +348,7 @@ Chief back on top if he ends up under it. */
 
 /* Chief hurt an actor: how much, as a fraction of the proxy's own vitality
 (its biped's, shields and body, unscaled), so a weapon takes as many hits
-as it would on that biped in Halo. Skyrim scales it (docs §13). */
+as it would on that biped in Halo. Skyrim scales it (docs §10.2). */
 typedef struct cr_msg_hit_actor
 {
 	cr_msg_header header;
@@ -362,7 +362,7 @@ typedef struct cr_msg_hit_actor
 
 /* Some of it was an explosion's (a grenade's, a rocket's: Halo's area
 damage): Skyrim throws the actor away from its centre and sets it alight
-(docs §8.2). */
+(docs §10.5). */
 #define CR_HIT_EXPLOSION 0x0001u
 /* The proxy was killed outright: a headshot, which kills a marine whatever
 its vitality. Skyrim kills the actor, whatever its level (protocol 16). */
@@ -457,7 +457,7 @@ its last part ("sniper rifle"), any case; Halo answers on the console. Empty:
 by index, of the host map's weapons as Halo lists them in its log at start
 (wraps); -1: the next after the last given (the debug key).
 
-CR_GIVE_ITEM (protocol 29, docs §8.4): the player equipped one of Halo's
+CR_GIVE_ITEM (protocol 29, docs §11.1): the player equipped one of Halo's
 weapons as a Skyrim item, which Skyrim took out of the inventory: weapon is
 it, with its rounds (negative: the weapon's own, a new one's). Halo waits
 for its world, then:
@@ -557,7 +557,7 @@ typedef struct cr_msg_key_names
 	char names[CR_ACTION_COUNT][CR_KEY_NAME_LENGTH];
 } cr_msg_key_names;
 
-/* Skyrim's light around the player, ~10 times a second (docs §9): Halo lights
+/* Skyrim's light around the player, ~10 times a second (docs §12.4): Halo lights
 Chief's arms and weapon and its objects with it in place of its map's
 lightmap. Colours are linear, 1 = full; directions are the way the light
 travels (the sun's points down), in Skyrim's (and Halo's) axes. */
@@ -598,7 +598,7 @@ typedef struct cr_msg_lighting
 	float    reflection_cap;
 } cr_msg_lighting;
 
-/* Chief's kit (docs §11, save and load): what the Skyrim co-save keeps.
+/* Chief's kit (docs §11.3): what the Skyrim co-save keeps.
 Halo sends it (CR_MSG_CHIEF_STATE) when it changes, a few times a second at
 most; Skyrim keeps the latest and writes it into each save. Loading a save
 sends it back (CR_MSG_CHIEF_RESTORE), and Halo gives Chief exactly that; a
@@ -682,7 +682,7 @@ typedef struct cr_msg_collision_tris
 #define CR_COLLISION_TRIS_SIZE(count) \
 	((uint32_t)__builtin_offsetof(cr_msg_collision_tris, tris) + (uint32_t)(count) * (uint32_t)sizeof(cr_triangle))
 
-/* ---- frames (H->S, docs §9) -------------------------------------------- */
+/* ---- frames (H->S, docs §12) -------------------------------------------- */
 
 /* Halo's pictures of what it draws over Skyrim's, in two layers:
 - SCREEN: Chief's arms and weapon, and the HUD; over everything.

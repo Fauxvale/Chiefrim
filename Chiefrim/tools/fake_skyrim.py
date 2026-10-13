@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""A stand-in for the Skyrim side of the link (docs/DESIGN.md §12, Phase 0).
+"""A stand-in for the Skyrim side of the link (docs/DESIGN.md §14.5).
 
 It maps /dev/shm/chiefrim_v1 as the SKSE plugin will, says hello, sends a
 world context (origin and floor at a Skyrim position) and a Teleport, keeps
@@ -9,7 +9,7 @@ can be tested without Skyrim.
 
 Usage: tools/fake_skyrim.py [--seconds N] [--x X --y Y --z Z --heading DEG]
   The default position is outside Whiterun's gate in Tamriel.
-  --overlay WxH asks Halo for its overlay frames (docs §9) at that size, and
+  --overlay WxH asks Halo for its overlay frames (docs §12) at that size, and
   --grab DIR saves one every few seconds there as a PNG (over a grey
   checkerboard, so transparency shows).
 
@@ -513,7 +513,7 @@ def main():
     parser.add_argument("--height", type=float, default=128.0,
                         help="Chief's height in Skyrim units, as the plugin sends it (0: Halo's own)")
     parser.add_argument("--overlay", default="",
-                        help="WxH: ask Halo for overlay frames at this size, as the plugin does (docs §9)")
+                        help="WxH: ask Halo for overlay frames at this size, as the plugin does (docs §12)")
     parser.add_argument("--grab", default="",
                         help="with --overlay: save a frame to this directory every --grab-every seconds")
     parser.add_argument("--grab-every", type=float, default=5.0)

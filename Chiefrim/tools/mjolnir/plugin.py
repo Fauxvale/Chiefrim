@@ -24,7 +24,7 @@ first-person model (WNAM, a static) is what the inventory shows it as, so
 each has one (made from the dagger's, its own NIF again); equipping one
 hands it to Chief, so it is never held.
 
-Halo's weapons as loot (docs §8.4): leveled lists (LVLI) of them by
+Halo's weapons as loot (docs §11.2): leveled lists (LVLI) of them by
 weight, light, medium and heavy (as the caches had them), and grenades;
 those a chest draws on: an ordinary one's (light, medium or grenades) and
 a boss chest's (heavy or medium, now and then light or grenades); and a

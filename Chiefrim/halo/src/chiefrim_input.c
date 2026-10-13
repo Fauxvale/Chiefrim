@@ -2,7 +2,7 @@
 /*
 CHIEFRIM_INPUT.C
 
-Chief's controls from Skyrim (Chiefrim/docs/DESIGN.md §7). The SKSE plugin
+Chief's controls from Skyrim (Chiefrim/docs/DESIGN.md §8). The SKSE plugin
 publishes actions in the link's input slot: Skyrim's ControlMap has already
 turned the player's keys, mouse and gamepad into user events, so rebinding a
 Skyrim action rebinds Chief's with it. This file hands those actions to the

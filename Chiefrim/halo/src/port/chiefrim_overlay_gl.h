@@ -2,7 +2,7 @@
 /*
 CHIEFRIM_OVERLAY_GL.H
 
-Chiefrim's overlay on the port's OpenGL device (Chiefrim/docs/DESIGN.md §9).
+Chiefrim's overlay on the port's OpenGL device (Chiefrim/docs/DESIGN.md §12.1).
 Copied into port/linux/src by Chiefrim/tools/setup_halo.py and called from
 hooks marked CHIEFRIM in d3d8_gl.c and nv2a_psh.c.
 

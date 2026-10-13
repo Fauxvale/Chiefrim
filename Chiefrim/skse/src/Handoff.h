@@ -3,8 +3,8 @@
 
 namespace chiefrim::Handoff
 {
-	// Skyrim's own animations and scenes (docs §11): while the player sits,
-	// sleeps, works at a crafting station, rides, swims (docs §6, deep
+	// Skyrim's own animations and scenes (docs §13): while the player sits,
+	// sleeps, works at a crafting station, rides, swims (deep
 	// water), is a werewolf or vampire lord, is in a kill move, or a script
 	// holds him (AI-driven, or his movement turned off), Skyrim has the
 	// player: its controls, camera, arms and HUD bars, and Chief gets no input

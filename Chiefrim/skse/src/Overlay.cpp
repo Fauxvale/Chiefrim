@@ -581,7 +581,7 @@ float4 PSWorld(VSOut i) : SV_Target
 			}
 		}
 
-		// Lockstep (docs §9): Halo draws the frame of the camera published as
+		// Lockstep (docs §12.2): Halo draws the frame of the camera published as
 		// Skyrim's world rendering began; wait a moment for it, so Halo's world
 		// layer sits on this frame's picture, not on one a frame or two old.
 		void WaitForCameraFrame(const cr_frames* a_frames)

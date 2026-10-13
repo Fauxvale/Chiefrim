@@ -2,7 +2,7 @@
 /*
 NATIVE_PEER.C
 
-The Halo side of the link test (docs §10, §15): a native Linux i386 program,
+The Halo side of the link test (docs §5): a native Linux i386 program,
 like the Halo build. It creates /dev/shm/chiefrim_v1, echoes every TELEPORT
 "ping" from the Wine peer back as a TELEPORT, publishes a player-state slot
 whose fields are all derived from one counter (so a torn read shows), and

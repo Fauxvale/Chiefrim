@@ -8,7 +8,7 @@ The Halo side of Chiefrim (Chiefrim/docs/DESIGN.md):
   heartbeat, reads the Skyrim side's world context and events, and publishes
   the player state every frame.
 - WORLD: Skyrim's collision becomes Halo's, as a collision BSP built at
-  runtime (chiefrim_world.c, chiefrim_bsp.c; docs §5). Until Skyrim's
+  runtime (chiefrim_world.c, chiefrim_bsp.c; docs §9). Until Skyrim's
   triangles arrive, a flat floor at the Skyrim player's feet.
 - PLAYER: when the link starts, and on each Teleport, moves Chief to the
   Skyrim player's position and heading.
@@ -16,7 +16,7 @@ The Halo side of Chiefrim (Chiefrim/docs/DESIGN.md):
   so nobody spawns). In Chiefrim mode its scripts and AI don't run (hooks in
   game_tick), and its actors are erased once Chief exists.
 
-Halo is authoritative for the player (docs §6); Skyrim follows PlayerState.
+By default Skyrim moves the player and Chief follows (docs §7).
 */
 
 #include "cseries.h"
@@ -376,7 +376,7 @@ static void chiefrim_pump_events(void)
 	}
 }
 
-/* Chief's size from Skyrim (docs §7): Halo's Chief is 0.7 wu (~150 Skyrim
+/* Chief's size from Skyrim (docs §7.2): Halo's Chief is 0.7 wu (~150 Skyrim
 units, 7 ft in armour), too tall for doorways and ledges Skyrim's people walk
 under. His biped definition's heights scale to the height Skyrim asks for;
 Halo reads them every tick (bipeds.c), so collision, crouching and his eyes,
@@ -806,7 +806,7 @@ real chiefrim_field_of_view_tangent_scale(void)
 	return tangent(DEGREES_TO_RADIANS(chiefrim.world.field_of_view) * 0.5f) / tangent(base * 0.5f);
 }
 
-/* Skyrim composites Halo's layers (docs §9): its screen, while it asks.
+/* Skyrim composites Halo's layers (docs §12.2): its screen, while it asks.
 A read that finds Skyrim writing keeps the last (going without the overlay
 for a frame would resize every target twice). */
 static boolean chiefrim_read_display(cr_display *display)
@@ -895,7 +895,7 @@ long chiefrim_overlay_hud(void)
 	return chiefrim.render_hud;
 }
 
-/* Lockstep with Skyrim (docs §9): the frame Halo draws next is for the
+/* Lockstep with Skyrim (docs §12.2): the frame Halo draws next is for the
 camera Skyrim published as it began rendering its own, so the world layer
 sits on Skyrim's picture. Waits up to 30 ms for a camera newer than the
 last drawn (Skyrim paused: Halo draws at ~30 frames a second meanwhile),
@@ -1066,7 +1066,7 @@ void chiefrim_initialize(void)
 		chiefrim.shm = (cr_shared *)address;
 	}
 #else
-	error(_error_silent, "chiefrim: this platform has no link yet (docs §10)");
+	error(_error_silent, "chiefrim: this platform has no link yet (docs §5)");
 	return;
 #endif
 

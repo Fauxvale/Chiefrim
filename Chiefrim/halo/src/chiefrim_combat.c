@@ -2,7 +2,7 @@
 /*
 CHIEFRIM_COMBAT.C
 
-Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
+Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §10):
 
 - PROXIES: for each actor Skyrim lists near the player, an unseen biped of
   the host map's (a marine's) where the actor stands, its size, on the
@@ -22,7 +22,7 @@ Chief against Skyrim's people (Chiefrim/docs/DESIGN.md §8):
 - HEALING: Skyrim's restore-health potions and food (CR_MSG_CHIEF_HEAL) heal
   his body, on the scale of Skyrim's damage to him.
 - WEAPONS: CR_MSG_GIVE_WEAPON gives Chief one of the map's weapons, listed
-  in the log at start (debug, docs §8.4): the next (the debug key), or one
+  in the log at start (debug, docs §11.4): the next (the debug key), or one
   by name (the console's "chiefrim give"), answered on Skyrim's console. A person's proxy
   carries, by chance (Skyrim's odds, CR_MSG_ARSENAL), one of a few sidearms
   and 0 to 2 grenades of a type, which it drops when its actor dies (Skyrim

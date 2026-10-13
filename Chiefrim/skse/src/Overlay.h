@@ -3,7 +3,7 @@
 
 namespace chiefrim::Overlay
 {
-	// The Compositor (docs §9): Halo's layers over Skyrim's picture. Halo
+	// The Compositor (docs §12.2): Halo's layers over Skyrim's picture. Halo
 	// draws Chief's arms and weapon and its HUD on transparent black, at
 	// Skyrim's screen size, into the link's frame slots; at each Present this
 	// tells Halo the screen's size, uploads Halo's newest frame and draws it

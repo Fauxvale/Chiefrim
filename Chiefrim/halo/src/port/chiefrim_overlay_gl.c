@@ -3,7 +3,7 @@
 CHIEFRIM_OVERLAY_GL.C
 
 Chiefrim's overlay on the port's OpenGL device: see chiefrim_overlay_gl.h
-and Chiefrim/docs/DESIGN.md §9.
+and Chiefrim/docs/DESIGN.md §12.1.
 */
 
 #include "xgpu.h"

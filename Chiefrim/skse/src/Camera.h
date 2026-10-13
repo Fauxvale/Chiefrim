@@ -5,7 +5,7 @@
 
 namespace chiefrim::Camera
 {
-	// CameraDriver (docs §6): Skyrim's first-person camera sees through
+	// CameraDriver (docs §7): Skyrim's first-person camera sees through
 	// Chief's eyes: his eye position, his look direction, Halo's field of
 	// view, with Skyrim's own first-person arms hidden.
 

@@ -33,7 +33,7 @@ namespace chiefrim::Settings
 	// Skyrim's own controller, and Halo's Chief follows it (docs §7). 0: Halo
 	// moves Chief and the player follows him (the first design).
 	// [Collision] iRadius: regions (1024 units) around Chief's that Halo's
-	// collision covers, so his shots hit at least that far (docs §5.2). Halo
+	// collision covers, so his shots hit at least that far (docs §9.2). Halo
 	// builds from (2r+1)^2 regions; Skyrim sends one ring more.
 	inline std::uint32_t CollisionRadius()
 	{

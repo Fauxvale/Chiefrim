@@ -654,7 +654,7 @@ namespace chiefrim::Input
 			std::clamp(double(now.QuadPart - s.lastPublish.QuadPart) / double(frequency.QuadPart), 0.0, 0.25) : 0.0;
 		s.lastPublish = now;
 
-		// handed off (docs §11), Skyrim's controls are its own, and Chief gets none
+		// handed off (docs §13), Skyrim's controls are its own, and Chief gets none
 		const bool handedOff = Handoff::Active();
 		const bool gameplay = InGameplay() && !handedOff;
 		if (gameplay != s.gameplay) {

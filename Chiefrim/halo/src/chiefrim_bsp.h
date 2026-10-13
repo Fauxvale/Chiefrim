@@ -3,7 +3,7 @@
 CHIEFRIM_BSP.H
 
 Builds Halo collision BSPs from Skyrim's collision triangles at runtime
-(Chiefrim/docs/DESIGN.md §5.2). Thread-safe: the build runs on a worker
+(Chiefrim/docs/DESIGN.md §9.2). Thread-safe: the build runs on a worker
 thread and touches nothing of the game's; the result is swapped in on the
 main thread (chiefrim.c).
 */

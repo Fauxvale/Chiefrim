@@ -2,7 +2,7 @@
 /*
 CHIEFRIM_INVENTORY.C
 
-Chief's kit in Skyrim's saves (Chiefrim/docs/DESIGN.md §11, save and load):
+Chief's kit in Skyrim's saves (Chiefrim/docs/DESIGN.md §11.3):
 
 - STATE: his weapons (by tag path, with their rounds and an energy weapon's
   battery), the one in hand, his grenades, his body and shield vitality and
@@ -18,7 +18,7 @@ Chief's kit in Skyrim's saves (Chiefrim/docs/DESIGN.md §11, save and load):
 Each restore has a generation, and the states carry the last one applied:
 Skyrim drops states from before the restore it waits on.
 
-Halo's weapons as Skyrim items (docs §8.4, protocol 29):
+Halo's weapons as Skyrim items (docs §11.1, protocol 29):
 
 - GIVE: the player equipped one (CR_MSG_GIVE_WEAPON, CR_GIVE_ITEM). Once
   Halo's world is in place, Chief takes it with its rounds and has it in

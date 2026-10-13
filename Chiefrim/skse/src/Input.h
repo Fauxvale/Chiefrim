@@ -5,7 +5,7 @@
 
 namespace chiefrim::Input
 {
-	// Chief's controls from Skyrim's own (docs §7). An input sink reads
+	// Chief's controls from Skyrim's own (docs §8). An input sink reads
 	// Skyrim's user events, so the player's remaps in Skyrim's Controls menu
 	// apply to Chief as well; only Chiefrim's two hotkeys are raw keys.
 

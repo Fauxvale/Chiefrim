@@ -5,7 +5,7 @@
 
 namespace chiefrim::Arsenal
 {
-	// Halo's weapons as Skyrim items (docs §8.4, the loot rework): weapons
+	// Halo's weapons as Skyrim items (docs §11.1, the loot rework): weapons
 	// (WEAP) in ChiefrimMjolnir.esp (tools/mjolnir/weapons.py and plugin.py),
 	// found, carried, stored and sold as Skyrim's are, each with its rounds in
 	// its name ("Needler (20/60)": loaded, spare; "Plasma Rifle (40%)"; none:

@@ -5,7 +5,7 @@
 
 namespace chiefrim::Lighting
 {
-	// Skyrim's light around the player, for Halo's objects (docs §9): Chief's
+	// Skyrim's light around the player, for Halo's objects (docs §12.4): Chief's
 	// arms and weapon, and the world layer's objects, lit like Skyrim lights
 	// the player rather than by the host map's lightmap.
 

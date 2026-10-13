@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// An actor's hit shapes for Halo (docs §8.1): the rigid bodies on its
+// An actor's hit shapes for Halo (docs §10.1): the rigid bodies on its
 // skeleton's bones. Skyrim puts them in its physics world only now and then
 // (in furniture and some idles, hit, ragdolled: bAddBipedWhenKeyframed is
 // off), so a body out of the world is placed here as Skyrim keys one, from
