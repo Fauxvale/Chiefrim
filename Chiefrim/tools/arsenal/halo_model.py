@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Reads a model (mode) and its bitmaps out of the user's own Xbox Halo cache
-maps, for the Mjolnir armor port. Nothing of Halo's is in the repo: this
-writes what it reads to build/mjolnir/, which git ignores.
+maps, for the Arsenal's Mjolnir armor. Nothing of Halo's is in the repo: this
+writes what it reads to build/arsenal/, which git ignores.
 
 The layouts are OpenCE's (halo/.work/source): model_definitions.h, the
 parts of port/linux/game/tag_schema_models.c, rasterizer_model_types.h and
@@ -14,8 +14,8 @@ A bitmap's pixels_offset is where its pixels are in the (decompressed)
 map: the game adds pixel_data.file_offset to it as it loads it
 (xbox_texture_cache.c), and that is 0 in a map.
 
-Usage: tools/mjolnir/halo_model.py MAP.map [--model characters\\cyborg\\cyborg]
-         [--lod 0] [--out build/mjolnir]
+Usage: tools/arsenal/halo_model.py MAP.map [--model characters\\cyborg\\cyborg]
+         [--lod 0] [--out build/arsenal]
 Writes model.json (nodes, shaders, then per part its vertices and
 triangles) and, per model shader, its colour, glow and reflection mask
 baked as the Xbox draws them (bake()), and its reflection cube map's faces
@@ -410,7 +410,7 @@ def main():
 		help="the object whose change colours colour the model (class:name)")
 	parser.add_argument("--lod", type=int, default=0)
 	parser.add_argument("--size", type=int, default=2048, help="the baked textures' size")
-	parser.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	args = parser.parse_args()
 	out = Path(args.out)
 	out.mkdir(parents=True, exist_ok=True)

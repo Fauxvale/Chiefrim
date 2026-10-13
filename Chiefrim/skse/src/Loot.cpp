@@ -6,8 +6,8 @@ namespace chiefrim::Loot
 {
 	namespace
 	{
-		constexpr std::string_view kPlugin = "ChiefrimMjolnir.esp";
-		// tools/mjolnir/plugin.py's LOOT lists and the form lists of where
+		constexpr std::string_view kPlugin = "ChiefrimArsenal.esp";
+		// tools/arsenal/plugin.py's LOOT lists and the form lists of where
 		// each goes, its chance Chiefrim.ini's ([Loot])
 		struct Placement
 		{

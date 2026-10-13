@@ -9,7 +9,7 @@ namespace chiefrim::Arsenal
 {
 	namespace
 	{
-		constexpr std::string_view kPlugin = "ChiefrimMjolnir.esp";
+		constexpr std::string_view kPlugin = "ChiefrimArsenal.esp";
 
 		enum class Kind
 		{
@@ -20,7 +20,7 @@ namespace chiefrim::Arsenal
 
 		struct Weapon
 		{
-			RE::FormID  localId;  // in kPlugin (tools/mjolnir/weapons.py's WEAPONS has the same)
+			RE::FormID  localId;  // in kPlugin (tools/arsenal/weapons.py's WEAPONS has the same)
 			const char* tag;      // Halo's weap (a grenade's: its eqip)
 			Kind        kind;
 		};
@@ -160,7 +160,7 @@ namespace chiefrim::Arsenal
 			}
 			if (!link.Enabled() || !link.Connected() || !link.PushRaw(CR_MSG_GIVE_WEAPON, &give, sizeof(give))) {
 				logger::info("arsenal: {} equipped while Chief can't take it (Chiefrim {}); unequipped", name, link.Enabled() ? "not linked" : "off");
-				RE::SendHUDMessage::ShowHUDMessage(fmt::format("Master Chief can't take the {} now.", item.form->GetName()).c_str());
+				RE::SendHUDMessage::ShowHUDMessage(fmt::format("You can't ready the {} now.", item.form->GetName()).c_str());
 				auto* objects = RE::BGSDefaultObjectManager::GetSingleton();
 				const bool left = worn->HasType(RE::ExtraDataType::kWornLeft);
 				auto* slot = objects->GetObject<RE::BGSEquipSlot>(left ? RE::DEFAULT_OBJECT::kLeftHandEquip : RE::DEFAULT_OBJECT::kRightHandEquip);
@@ -178,7 +178,7 @@ namespace chiefrim::Arsenal
 			}
 			logger::info("arsenal: {} equipped: to Chief ({}, {}/{} rounds, battery {:.2f})", name, give.weapon.tag,
 				give.weapon.rounds_loaded[0], give.weapon.rounds_total[0], 1.0f - give.weapon.age);
-			RE::SendHUDMessage::ShowHUDMessage(fmt::format("Handed the {} to Master Chief.", item.form->GetName()).c_str());
+			RE::SendHUDMessage::ShowHUDMessage(fmt::format("You take the {} from your pack.", item.form->GetName()).c_str());
 			player->RemoveItem(item.form, 1, RE::ITEM_REMOVE_REASON::kRemove, worn, nullptr);
 		}
 
@@ -339,7 +339,7 @@ namespace chiefrim::Arsenal
 		const char* givenName = given != items.end() ? given->second.form->GetName() : "weapon";
 		if (a_message.reason == CR_RETURNED_LEFTOVER && !weapon.tag[0]) {
 			logger::info("arsenal: Chief's {} took all {} rounds of the one handed over", givenName, a_message.taken);
-			RE::SendHUDMessage::ShowHUDMessage(fmt::format("Master Chief took {} rounds from the {}.", a_message.taken, givenName).c_str());
+			RE::SendHUDMessage::ShowHUDMessage(fmt::format("You salvage {} rounds and discard the empty {}.", a_message.taken, givenName).c_str());
 			return;
 		}
 		const Item* item = ByTag(weapon.tag);
@@ -361,9 +361,9 @@ namespace chiefrim::Arsenal
 			const std::string name = item->form->GetName();
 			logger::info("arsenal: Chief took {} {}; {} back in the inventory", a_message.taken, name, count);
 			RE::SendHUDMessage::ShowHUDMessage((a_message.taken > 0 ?
-				fmt::format("Master Chief took {} {}{}.", a_message.taken, name, a_message.taken == 1 ? "" : "s") :
-				a_message.reason == CR_RETURNED_REFUSED ? fmt::format("Master Chief can't take {}s now.", name) :
-				fmt::format("Master Chief can't carry more {}s.", name)).c_str());
+				fmt::format("You clip {} {}{} to your armor.", a_message.taken, name, a_message.taken == 1 ? "" : "s") :
+				a_message.reason == CR_RETURNED_REFUSED ? fmt::format("You can't ready {}s now.", name) :
+				fmt::format("Your armor has no room for more {}s.", name)).c_str());
 			return;
 		}
 		// placed by the player, named for its rounds, and picked up: the name
@@ -378,17 +378,17 @@ namespace chiefrim::Arsenal
 		switch (a_message.reason) {
 		case CR_RETURNED_DROPPED:
 			logger::info("arsenal: Chief let go of the {}: back in the inventory", name);
-			RE::SendHUDMessage::ShowHUDMessage(fmt::format("Master Chief handed back the {}.", name).c_str());
+			RE::SendHUDMessage::ShowHUDMessage(fmt::format("You stow the {} in your pack.", name).c_str());
 			break;
 		case CR_RETURNED_LEFTOVER:
 			logger::info("arsenal: Chief's {} took {} rounds; the {} is back in the inventory", givenName, a_message.taken, name);
 			RE::SendHUDMessage::ShowHUDMessage((a_message.taken > 0 ?
-				fmt::format("Master Chief took {} rounds; the {} is back in your pack.", a_message.taken, name) :
-				fmt::format("Master Chief's {} is full.", item->form->GetName())).c_str());
+				fmt::format("You salvage {} rounds and stow the {} in your pack.", a_message.taken, name) :
+				fmt::format("Your {} can hold no more rounds.", item->form->GetName())).c_str());
 			break;
 		default:
 			logger::info("arsenal: Chief couldn't take the {}: back in the inventory", name);
-			RE::SendHUDMessage::ShowHUDMessage(fmt::format("Master Chief can't take the {} now.", item->form->GetName()).c_str());
+			RE::SendHUDMessage::ShowHUDMessage(fmt::format("You can't ready the {} now.", item->form->GetName()).c_str());
 			break;
 		}
 	}

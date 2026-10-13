@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Reads and writes Skyrim Special Edition plugins (ESM/ESP, form version
-44), for the Mjolnir armor port: records as their subrecords, groups by
+44), for the Arsenal: records as their subrecords, groups by
 their records' types.
 
 Layout (as UESP's "Skyrim Mod:Mod File Format" gives it): a record is a
@@ -13,7 +13,7 @@ the next, when it is larger). A group is "GRUP", its size (with its 24-byte
 header), its label (a top group's: its records' type), its type (0: top),
 then 8 bytes, then its records and groups.
 
-Usage: tools/mjolnir/esp.py PLUGIN [--type ARMO] [--edid EDITOR_ID]
+Usage: tools/arsenal/esp.py PLUGIN [--type ARMO] [--edid EDITOR_ID]
 """
 import argparse
 import struct

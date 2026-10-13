@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Writes the textures armor.py's NIFs name, as DDS, under
-build/mjolnir/Data/textures/chiefrim/mjolnir/, from what halo_model.py
-baked (build/mjolnir/*.png), for the Mjolnir armor port. Per shader (armor,
+build/arsenal/Data/textures/chiefrim/mjolnir/, from what halo_model.py
+baked (build/arsenal/*.png), for the Arsenal's Mjolnir armor. Per shader (armor,
 visor):
 
   NAME.dds    the baked colour, as Skyrim's diffuse
@@ -21,7 +21,7 @@ They are uncompressed (8 bits a channel, BGRA), so the colours are exactly
 the bake's, with mipmaps (box filtered, in the textures' gamma-encoded
 values, as the bake is).
 
-Usage: tools/mjolnir/textures.py [--dir build/mjolnir] [--mask-size 512]
+Usage: tools/arsenal/textures.py [--dir build/arsenal] [--mask-size 512]
 """
 import argparse
 import json
@@ -172,7 +172,7 @@ def turn_cube(faces):
 
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	parser.add_argument("--mask-size", type=int, default=512, help="the normal and environment masks' size (Halo's multipurpose map's is 512)")
 	args = parser.parse_args()
 	directory = Path(args.dir)
