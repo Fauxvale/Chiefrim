@@ -43,6 +43,12 @@ needs to know where the other is installed.
   made from a disc you own. Halo's maps are extracted from it with the upstream OpenCE release
   (step 4).
 
+**Mod manager**
+
+- A Skyrim mod manager that runs on Linux, such as Mod Organizer 2 (under Proton), set up for
+  your Skyrim. You install SKSE's parts and Chiefrim's files with it (steps 7 and 8), and you
+  start Skyrim through SKSE from it every time you play.
+
 **Path**
 
 - The folder you put Chiefrim in must not have `[`, `]`, `*` or `?` anywhere in its path. CMake
@@ -197,79 +203,50 @@ your own game only: don't share it.
 
 ## 7. Install SKSE and Address Library
 
-If you already play Skyrim with SKSE plugins, you have these; check the versions and skip ahead.
+If you already play Skyrim with SKSE plugins through a mod manager, you have these; check the
+versions and skip to step 8.
 
 1. **SKSE64**: from [skse.silverlock.org](https://skse.silverlock.org), **SKSE 2.2.6**, the
-   build for game version 1.6.1170 and the only one tested. Copy `skse64_loader.exe` and the `skse64_1_6_1170.dll` into
-   Skyrim's folder (the one with `SkyrimSE.exe`), and the archive's `Data` folder into Skyrim's.
-2. **Make Steam start Skyrim through SKSE.** Under Proton, the usual way is to stand the loader
-   in for Skyrim's launcher. In Skyrim's folder, rename `SkyrimSELauncher.exe` to
-   `SkyrimSELauncher.exe.bak`, and copy `skse64_loader.exe` to `SkyrimSELauncher.exe`.
-3. **Address Library for SKSE Plugins**: from
+   build for game version 1.6.1170 and the only one tested. Its loader can't be installed as a
+   mod: copy `skse64_loader.exe` and `skse64_1_6_1170.dll` into Skyrim's folder (the one with
+   `SkyrimSE.exe`). The archive's `Data` folder holds SKSE's scripts; install it through your
+   mod manager.
+2. **Address Library for SKSE Plugins**: from
    [Nexus Mods](https://www.nexusmods.com/skyrimspecialedition/mods/32444), the
-   "All in one (Anniversary Edition)" file. Its `SKSE/Plugins` files go into Skyrim's
-   `Data/SKSE/Plugins`.
+   "All in one (Anniversary Edition)" file. Install it through your mod manager.
+3. **Start Skyrim through SKSE from your mod manager.** Add `skse64_loader.exe`, in Skyrim's
+   folder, as the program your mod manager runs (Mod Organizer 2 usually lists it as **SKSE**
+   by itself). From now on, always start Skyrim that way. Starting it from Steam runs Skyrim
+   without SKSE, so Chiefrim doesn't load.
 
 ## 8. Install Chiefrim's files
 
-Install both zips from `build/dist/`, `ChiefrimPlugin.zip` and `ChiefrimArsenal.zip`, as mods.
+In your mod manager, install both zips from `build/dist/`, `ChiefrimPlugin.zip` and
+`ChiefrimArsenal.zip`, as mods. Enable both, and make sure the plugin `ChiefrimArsenal.esp` is
+enabled in the load order.
 
-**With a mod manager** (Mod Organizer 2, Vortex or similar): install each zip as a mod and
-enable both, including the plugin `ChiefrimArsenal.esp`.
+The two mods should hold `SKSE/Plugins/Chiefrim.dll` and `SKSE/Plugins/Chiefrim.ini`, and
+`ChiefrimArsenal.esp` with `meshes` and `textures` folders beside it. The plugin and the esp are
+both needed: the plugin finds Halo's weapons as items in the esp.
 
-**By hand**:
+## 9. Start Halo
 
-1. Unzip both into Skyrim's `Data` folder. You should then have
-   `Data/SKSE/Plugins/Chiefrim.dll`, `Data/SKSE/Plugins/Chiefrim.ini` and
-   `Data/ChiefrimArsenal.esp`, with `meshes` and `textures` folders beside it.
-2. Enable `ChiefrimArsenal.esp`. Without a mod manager, add this line to Skyrim's
-   `Plugins.txt`:
-
-   ```
-   *ChiefrimArsenal.esp
-   ```
-
-   Proton keeps that file in Skyrim's Wine prefix, inside the Steam library that holds
-   Skyrim:
-   `steamapps/compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition/Plugins.txt`.
-   Create it if it isn't there.
-
-The plugin and the esp are both needed: the plugin finds Halo's weapons as items in the esp.
-
-## 9. Start Halo with Skyrim
-
-`tools/launch_halo.sh` runs Halo while you play. It keeps Halo hidden, restarts it if it crashes,
-and lets Skyrim's hotkeys stop and restart it.
-
-**Let Steam start it** (recommended). In Steam, open Skyrim's **Properties**, then **General**,
-and set **Launch Options** to the script's full path followed by `--steam %command%`. For example,
-if you cloned to `/home/you/Games/Chiefrim-Project`:
-
-```
-"/home/you/Games/Chiefrim-Project/Chiefrim/tools/launch_halo.sh" --steam %command%
-```
-
-Halo then starts with Skyrim and stops when Skyrim exits. Also under **Properties**, in
-**Compatibility**, force **Proton Experimental**.
-
-This is tested with Steam installed from your distribution. With the Flatpak Steam, the launch
-options run inside Flatpak's sandbox, which may not have Halo's 32-bit libraries; if Halo doesn't
-start that way, start it yourself instead.
-
-**Or start it yourself**, before or after Skyrim (for example when a mod manager launches the
-game):
+Chiefrim can't start Halo by itself yet, so each time you play, start it from a terminal,
+before or after Skyrim:
 
 ```
 tools/launch_halo.sh
 ```
 
-Leave it running while you play; Ctrl+C stops it. Skyrim links to Halo whenever both are up.
+It keeps Halo hidden, restarts it if it crashes, and lets Skyrim's hotkeys stop and restart it.
+Leave the terminal open while you play; Skyrim links to Halo whenever both are up. When you're
+done, Ctrl+C stops it.
 
 ## 10. Play
 
-Start Skyrim from Steam (or your mod manager) and load a save. Once linked, you're Master Chief:
-you see his arms, his weapon and Halo's HUD in first person, and Skyrim's NPCs take Halo's
-weapons' damage.
+With Halo running, start Skyrim through SKSE from your mod manager (step 7) and load a save.
+Once linked, you're Master Chief: you see his arms, his weapon and Halo's HUD in first person,
+and Skyrim's NPCs take Halo's weapons' damage.
 
 | Key | Does |
 |---|---|
@@ -299,11 +276,12 @@ IDs, then `player.additem <ID> 1`).
 ## If something goes wrong
 
 **Nothing of Halo shows in game.**
-- Is Halo running? With Steam's launch options, its output is in `build/halo-data/halo.out`.
-  Started by hand, its terminal shows it.
+- Is Halo running? Its terminal shows its output, which is also kept in
+  `build/halo-data/halo.out`.
 - Did the plugin load? SKSE writes `Chiefrim.log` in Skyrim's Wine prefix, in
   `drive_c/users/steamuser/Documents/My Games/Skyrim Special Edition/SKSE/`. If it isn't there,
-  SKSE isn't starting (step 7) or the DLL isn't in `Data/SKSE/Plugins`.
+  SKSE isn't starting (start Skyrim through SKSE from your mod manager, step 7) or the
+  plugin's mod isn't enabled (step 8).
 - After updating, rebuild and install **both** Halo and the plugin. The plugin refuses a Halo
   built from a different version of Chiefrim.
 
@@ -329,14 +307,12 @@ tools/package_skse.sh
 tools/arsenal/build.sh
 ```
 
-Then reinstall `ChiefrimPlugin.zip` and `ChiefrimArsenal.zip` (step 8). Your Halo maps and the
-downloaded tools are kept.
+Then reinstall `ChiefrimPlugin.zip` and `ChiefrimArsenal.zip` in your mod manager (step 8).
+Your Halo maps and the downloaded tools are kept.
 
 ## Uninstalling
 
-- Remove Chiefrim's files from `Data` (or the two mods from your mod manager), and the
-  `ChiefrimArsenal.esp` line from `Plugins.txt`.
-- Clear Skyrim's launch options in Steam.
+- Remove Chiefrim's two mods from your mod manager.
 - Delete the `Chiefrim-Project` folder. That also removes Halo's maps, the build and the
   downloaded tools.
 - A save made with Chiefrim keeps Chief's kit in SKSE's co-save. Without the plugin, Skyrim
