@@ -8,7 +8,7 @@ This document describes how Chiefrim works **today**. It is not a changelog: for
 got this way, see the git history. The previous version of this document, which mixed design and
 history, is kept in [archive/DESIGN-v0.3.md](archive/DESIGN-v0.3.md).
 
-Last revised 2026-10-12 · protocol version 33 · OpenCE pinned at `6399ed9d`.
+Last revised 2026-10-13 · protocol version 33 · OpenCE pinned at `b1ef7f7e`.
 
 ---
 
@@ -614,10 +614,10 @@ In overlay mode, Halo's `render_window` draws two layers onto transparent black:
 
 | Layer | Contains | Composited |
 |---|---|---|
-| **World** | Projectiles, tracers, explosions, particles, grenades, weapons on the ground, bullet holes and other decals | Depth-tested against Skyrim's depth buffer and reprojected onto Skyrim's current camera |
-| **Screen** | Chief's arms and weapon, muzzle flash and smoke attached to the weapon, the HUD, Halo's menus | Over Skyrim's picture, under Skyrim's own HUD and menus |
+| **World** | Projectiles, tracers, explosions, particles, grenades, weapons on the ground, bullet holes and other decals, the lens flares of their lights | Depth-tested against Skyrim's depth buffer and reprojected onto Skyrim's current camera |
+| **Screen** | Chief's arms and weapon, muzzle flash and smoke attached to the weapon, its lights' lens flares (the plasma pistol's overcharge glow), the HUD, Halo's menus | Over Skyrim's picture, under Skyrim's own HUD and menus |
 
-No sky, level geometry, lens flares or Halo fog is drawn. Proxies are never drawn.
+No sky, sun glow, level geometry or Halo fog is drawn. Each lens flare is tested for occlusion in its own layer: a world flare against Halo's world objects (Skyrim's walls hide it only in the compositor's depth test), the weapon's against the weapon, which hides its standby glows as in Halo. Proxies are never drawn, nor the lens flares of what they hold (a plasma pistol's glows).
 
 To make the layers compositable, the port's OpenGL device gets extra render targets
 (`chiefrim_overlay_gl.c`, hooks in `d3d8_gl.c` and `nv2a_psh.c`):

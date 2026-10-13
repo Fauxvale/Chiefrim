@@ -96,6 +96,7 @@ void chiefrim_proxy_area_distance(long object_index, real_point3d const *epicent
 void chiefrim_combat_debug(cr_msg_debug const *message); /* CR_MSG_DEBUG, from Skyrim's console */
 void chiefrim_render_hitboxes(void);                    /* render.c, the overlay's screen layer: "chiefrim shapes" */
 boolean chiefrim_object_unseen(long object_index);     /* render_objects.c: a proxy */
+boolean chiefrim_object_or_holder_unseen(long object_index); /* object_lights.c: a proxy, or held by one */
 void chiefrim_combat_forget(void);                     /* Halo's game state went back */
 void chiefrim_combat_chief_lost(void);                 /* Chief's unit died or went */
 boolean chiefrim_weapon_carried(char const *name);      /* a weapon of the map's Chief may have (debug key, kits) */
