@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Reads and writes Skyrim Special Edition NIFs (Gamebryo 20.2.0.7, user
-version 12, Bethesda version 100), for the Mjolnir armor port: the blocks
+version 12, Bethesda version 100), for the Arsenal: the blocks
 this port needs, field by field, and every other block kept as its bytes.
 What it reads it writes back byte for byte (--check).
 
 Field layouts are nifxml's (niftools' nif.xml) for these versions.
 
-Usage: tools/mjolnir/nif.py FILE.nif [--tree] [--check]
+Usage: tools/arsenal/nif.py FILE.nif [--tree] [--check]
 """
 import argparse
 import struct

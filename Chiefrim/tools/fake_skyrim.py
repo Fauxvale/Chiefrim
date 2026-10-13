@@ -541,7 +541,7 @@ def main():
                             "needler", "assault_rifle", "pistol", "shotgun", "sniper_rifle", "rocket_launcher", "plasma_pistol",
                             "plasma_rifle", "frag_grenade", "plasma_grenade")),
                         help="the weapons and grenades Skyrim has items for, sent on linking as the plugin does (tag paths, "
-                             "comma-separated; _ for a space; empty: none, as without ChiefrimMjolnir.esp)")
+                             "comma-separated; _ for a space; empty: none, as without ChiefrimArsenal.esp)")
     parser.add_argument("--enemy-drops", default="0.33,0.2,0.1,0",
                         help="with the arsenal (protocol 32): a person's proxy's gun chance, 1 grenade's, 2 grenades', "
                              "and 1 if creatures drop (as Chiefrim.ini's [Loot])")

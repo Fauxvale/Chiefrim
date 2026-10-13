@@ -4,7 +4,7 @@
 namespace chiefrim::Loot
 {
 	// Halo's weapons as Skyrim's loot (docs §11.2, the loot rework): the
-	// leveled lists ChiefrimMjolnir.esp has of them (tools/mjolnir/
+	// leveled lists ChiefrimArsenal.esp has of them (tools/arsenal/
 	// plugin.py) go into the treasure chests its form lists name, an ordinary
 	// one's and a boss chest's, and merchants' (a weapon; grenades), at
 	// Chiefrim.ini's chances ([Loot]). (What an

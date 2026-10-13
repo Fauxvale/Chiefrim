@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Builds the model halo_model.py wrote (build/mjolnir/model.json), or
+"""Builds the model halo_model.py wrote (build/arsenal/model.json), or
 fit.py's fitted to Skyrim's skeleton (fitted.json), in Blender, with its
 skeleton and skin weights, and renders it from the front, the side and the
 back, so the port can be checked without opening Blender.
 
-Usage: blender -b --factory-startup -P tools/mjolnir/blender_preview.py -- [--dir build/mjolnir]
+Usage: blender -b --factory-startup -P tools/arsenal/blender_preview.py -- [--dir build/arsenal]
          [--fitted | --nif FILE... | --ground FILE...] [--pieces] [--pose] [--bones] [--blend]
   --fitted  the model fitted to Skyrim's skeleton (preview_fitted_*.png)
   --nif FILE...  the NIFs armor.py wrote, read back, worn together on
@@ -65,7 +65,7 @@ SKIN = (0.8, 0.6, 0.5)
 
 def nif_model(directory, paths, pieces):
 	"""The NIFs' skinned shapes as one model, as fitted.json gives one: its
-	nodes Skyrim's skeleton's (build/mjolnir/skyrim/skeleton.nif, fit.py's
+	nodes Skyrim's skeleton's (build/arsenal/skyrim/skeleton.nif, fit.py's
 	copy), its vertices the NIFs' own, weighted to their bones by name.
 	Chief's textures are the PNGs halo_model.py baked them from."""
 	skeleton = Nif(directory / "skyrim" / "skeleton.nif")
@@ -365,7 +365,7 @@ def render(directory, obj, armature, show_bones, prefix, front, above=False):
 def main():
 	argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	parser.add_argument("--bones", action="store_true")
 	parser.add_argument("--blend", action="store_true")
 	parser.add_argument("--pose", choices=["bend", *WORLD_POSES])

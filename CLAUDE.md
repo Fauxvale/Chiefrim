@@ -18,7 +18,7 @@ Run from `Chiefrim/`:
 | Rebuild Halo from the current `halo/.work` without resetting it | `tools/setup_halo.py --keep` |
 | Write hook edits in `halo/.work` back to the patch | `tools/save_halo_patch.sh` |
 | Build the SKSE plugin → `build/skse/Chiefrim.dll` | `tools/setup_skse.sh` |
-| Package the plugin and `Chiefrim.ini` → `build/dist/Chiefrim-<version>.zip` | `tools/package_skse.sh` |
+| Package the plugin and `Chiefrim.ini` → `build/dist/ChiefrimPlugin.zip` | `tools/package_skse.sh` |
 | Protocol layout test (i386, x86-64, both Windows targets) | `tools/test_protocol.sh` |
 | Collision BSP builder test (needs a built `halo/.work`) | `tools/test_bsp.sh` (`SELF_TEST=1` for Halo's own queries) |
 | License check (also runs before every build) | `tools/check_licenses.py` |
@@ -40,7 +40,7 @@ The project path must not contain `[` or `]`, because CMake's `file(GLOB)` treat
   Edit Chiefrim code in `halo/src/`, not in `.work/source/chiefrim/` (setup overwrites the copies). Edit hooks in `halo/.work`, then run `save_halo_patch.sh`. Chiefrim mode only runs when `CHIEFRIM=1`; without it, every `chiefrim_*` function does nothing.
 - **A frame**: Skyrim moves the player and publishes position, input, nearby actors, hit shapes and streamed collision. Halo places and aims Chief and runs its own game logic. When Skyrim starts rendering, it publishes its camera. Halo draws through that camera into two transparent layers (world, then screen: arms, weapon and HUD) and publishes them with depth. The plugin composites them onto Skyrim's picture at Present (DESIGN.md §1.3, §12).
 - **Coordinates and units**: Skyrim units vs Halo world units, with the world origin re-centred per world context (DESIGN.md §4). FOVs crossing the link use Skyrim's convention: horizontal, at 4:3.
-- **Mjolnir armor** (`tools/mjolnir/`): builds an esp, meshes and textures from the user's own Halo map. The plugin needs `ChiefrimMjolnir.esp`, because Halo's weapons are items in it.
+- **The Arsenal** (`tools/arsenal/`): builds Chief's Mjolnir armor and Halo's weapons and grenades as Skyrim items (an esp, meshes and textures) from the user's own Halo map. The plugin needs `ChiefrimArsenal.esp`, because Halo's weapons are items in it.
 
 ## Constraints
 

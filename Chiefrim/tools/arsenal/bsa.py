@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Reads files out of the user's own Skyrim Special Edition archives (BSA
-version 105), for the Mjolnir armor port. Nothing is written but what is
+version 105), for the Arsenal. Nothing is written but what is
 asked for, to where it is asked.
 
 Layout (as UESP's "Skyrim Mod:Archive File Format" gives it): a 36-byte
@@ -11,7 +11,7 @@ ending in a 0. A file's size has bit 30 set when its compression is the
 opposite of the archive's; a compressed file is its original size, then an
 LZ4 frame.
 
-Usage: tools/mjolnir/bsa.py ARCHIVE.bsa [--list PATTERN] [--extract PATH --out FILE]
+Usage: tools/arsenal/bsa.py ARCHIVE.bsa [--list PATTERN] [--extract PATH --out FILE]
 """
 import argparse
 import fnmatch

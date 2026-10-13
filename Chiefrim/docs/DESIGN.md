@@ -89,7 +89,7 @@ combat, interiors and load doors, persistence, and loot.
 | Overlay | Two layers, depth-tested and reprojected onto Skyrim's camera; under Skyrim's HUD (§12) |
 | Lighting and grade | Skyrim's light, shadows, fog and grade applied to Halo's pixels (§12.3, §12.4) |
 | Hand-off to Skyrim | Furniture, beds, mounts, swimming, beast forms, scenes, death (§13) |
-| Mjolnir armor | Built from the user's own files as a separate mod (§15) |
+| The Arsenal (Mjolnir armor and weapon items) | Built from the user's own files as a separate mod (§15) |
 | Covenant enemies, vehicles | Not started (stretch goals) |
 
 Known problems and limits are in §18.
@@ -106,7 +106,7 @@ Known problems and limits are in §18.
 | Tested with | SSE Display Tweaks (it hooks the swap chain; Chiefrim chains with it). No ENB or shader replacer |
 
 **No game data in the repo.** The repo holds code only. `HaloProjects/`, `References/` and
-`Chiefrim/build/` are git-ignored. Anything built from game assets (the Mjolnir mod) stays in
+`Chiefrim/build/` are git-ignored. Anything built from game assets (the Arsenal) stays in
 `build/` and must not be redistributed.
 
 Build commands:
@@ -115,12 +115,12 @@ Build commands:
 |---|---|---|
 | Halo with Chiefrim's hooks | `tools/setup_halo.py` | `halo/.work/build/linux/halo` |
 | SKSE plugin | `tools/setup_skse.sh` (first run: `--accept-license` for the MSVC CRT/SDK) | `build/skse/Chiefrim.dll` |
-| Plugin as a mod archive | `tools/package_skse.sh` | `build/dist/Chiefrim-<version>.zip` |
-| Mjolnir armor and weapon items | `tools/mjolnir/build.sh HALO_MAP [SKYRIM_DATA_DIR]` | `build/dist/ChiefrimMjolnir-local.zip` |
+| Plugin as a mod archive | `tools/package_skse.sh` | `build/dist/ChiefrimPlugin.zip` |
+| The Arsenal: Mjolnir armor and weapon items | `tools/arsenal/build.sh HALO_MAP [SKYRIM_DATA_DIR]` | `build/dist/ChiefrimArsenal.zip` |
 
 The project path must not contain `[` or `]` (CMake's `file(GLOB)` reads them as a pattern).
 
-The SKSE plugin and `ChiefrimMjolnir.esp` are both needed: the plugin finds Halo's weapons as
+The SKSE plugin and `ChiefrimArsenal.esp` are both needed: the plugin finds Halo's weapons as
 items in that esp (§11). `Chiefrim.ini` goes next to the DLL in `Data/SKSE/Plugins`.
 
 ## 4. Coordinates
@@ -277,8 +277,9 @@ Chiefrim's own Halo code:
 The hooks are in: `main.c`, `game.c`, `players.c`, `player_control.c`, `input_abstraction.c`,
 `hud_messaging.c`, `motion_sensor.c`, `scenario.c`/`.h`, `objects.c`, `object_lights.c`,
 `damage.c`, `collisions.c`, `items.c`, `projectiles.c`, `units.c`, `decals.c`/`.h`, `render.c`,
-`render_cameras.c`, `render_objects.c`, `render_particles.c`, `rasterizer_xbox_screen_effect.c`,
-`rasterizer_xbox_widgets.c`, and the port's `d3d8_gl.c`, `nv2a_psh.c` and `xgpu.h`.
+`render_cameras.c`, `render_objects.c`, `render_particles.c`, `rasterizer_lights.c`,
+`rasterizer_xbox_screen_effect.c`, `rasterizer_xbox_widgets.c`, and the port's `view_fov.c`,
+`d3d8_gl.c`, `nv2a_psh.c` and `xgpu.h`.
 
 ## 7. Movement and the camera
 
@@ -300,15 +301,22 @@ Chief's own movement.
 
 ### 7.1 Field of view
 
-Halo publishes the vertical FOV it renders with, and Skyrim's camera follows it, so zooming
-narrows Skyrim's view as in Halo. `[Camera] fWorldFieldOfView` (default 105°, measured as
-Skyrim's setting is) sets Chief's unzoomed view; zoom keeps Halo's magnification ratios.
-`bUseHaloFov=0` keeps the player's own FOV and disables zoom.
+Chief has two fields of view, both in `[Camera]` and both measured as Skyrim's FOV setting is: the
+horizontal angle of a 4:3 view (vertical = 2·atan(0.75·tan(h/2))). Skyrim sends them in the world
+context.
 
-Chief's arms and weapon have their own field of view, `[Camera] fViewmodelFieldOfView` (default
-80°, measured the same; 0 draws them with the world's). It travels in the world context, and
-Halo's first-person weapon passes use it in place of OpenCE's `display.viewmodel_fov`
-(`port/linux/game/view_fov.c`); zoom doesn't change it.
+- **The world:** `fWorldFieldOfView` (default 105°; 0 keeps Halo's own) is Chief's unzoomed view.
+  A `render_cameras.c` hook scales Halo's projection so the unzoomed view is exactly that angle,
+  and zoom keeps Halo's magnification ratios (`chiefrim_field_of_view_tangent_scale`). Halo
+  publishes the vertical angle it renders with (`player_state`), and each frame the plugin sets
+  Skyrim's camera to it, so zooming narrows Skyrim's view as in Halo (`skse/src/Camera.cpp`).
+  `bUseHaloFov=0` keeps the player's own FOV and disables zoom; Halo still draws at its own, and
+  the compositor maps the world layer onto Skyrim's view (§12.2).
+- **Chief's arms and weapon:** `fViewmodelFieldOfView` (default 80°). The port's first-person
+  weapon projection (`port/linux/game/view_fov.c`, hooked) uses it in place of OpenCE's
+  `display.viewmodel_fov`, so a wide world doesn't stretch the weapon. Zoom doesn't change it.
+  0 leaves it to OpenCE: `display.viewmodel_fov` (`HALO_VIEWMODEL_FOV`) if set, otherwise the
+  world's projection, zoom included.
 
 The third-person view is not available while Chief is linked: Toggle POV and the mouse wheel are
 Chief's melee and weapon switch. (Skyrim's third person still works during a hand-off, §13.)
@@ -530,7 +538,7 @@ only shows above Halo's own speed threshold.
 
 ### 11.1 Halo weapons as Skyrim items
 
-`ChiefrimMjolnir.esp` (built by `tools/mjolnir/build.sh`, §15) defines Halo's weapons and grenades
+`ChiefrimArsenal.esp` (built by `tools/arsenal/build.sh`, §15) defines Halo's weapons and grenades
 as Skyrim weapon items, with world models converted from the user's own Halo map:
 
 | Form (in the esp) | Item |
@@ -554,10 +562,13 @@ show their state in their name: **"Needler (20/60)"** (loaded / spare), **"Plasm
   comes back.
 - If he can't take it (Chiefrim off, no Chief), it comes back whole. While unlinked, an equipped
   Halo item is simply unequipped.
+- Each hand-over shows a notification in Skyrim's voice, as the player taking spare kit from
+  the pack: "You take the Needler from your pack.", "You salvage 40 rounds and discard the empty
+  Assault Rifle.", "You clip 2 Frag Grenades to your armor.", "You can't ready the Pistol now."
 
 **Weapons Chief lets go of come back.** Every weapon Chief drops in Halo (a swap, a third weapon)
 that Skyrim has an item for is sent back with its rounds and deleted from Halo's world; the plugin
-places it at the player, names it and picks it up. Empty weapons Halo deletes as usual. Weapons
+places it at the player, names it and picks it up ("You stow the Needler (20/60) in your pack."). Empty weapons Halo deletes as usual. Weapons
 Skyrim has no item for stay in Halo's world.
 
 ### 11.2 Loot
@@ -655,8 +666,9 @@ file.
 - **Depth test:** Skyrim copies its depth buffer as world rendering ends (before the HUD and
   post-processing). World-layer pixels behind Skyrim's surfaces are dropped, with a little slack
   for decals.
-- **Reprojection:** Halo's frame is usually a frame or two behind. Skyrim keeps its last 64
-  cameras, and the world-layer shader marches each pixel's view ray from the current camera
+- **Reprojection:** Halo's frame is usually a frame or two behind, and may have a different field
+  of view (§7.1). Each frame names its camera and carries Halo's projection; Skyrim keeps its last
+  64 cameras, and the world-layer shader marches each pixel's view ray from the current camera
   through Halo's depth to find what Halo drew there from its older eye. Bullet holes stay on
   walls while turning, walking and strafing. `[Overlay] fWaitMs` (default 0) can additionally make
   Present wait for Halo's frame of this very camera.
@@ -808,11 +820,13 @@ headless gamescope against it and prints both logs.
 Other test tools: `tools/test_protocol.sh` (layout), `tools/test_bsp.sh` (BSP builder),
 `tools/check_licenses.py` (§16).
 
-## 15. The Mjolnir armor
+## 15. The Arsenal
 
-`tools/mjolnir/build.sh HALO_MAP [SKYRIM_DATA_DIR]` turns Chief's model in the user's own Halo
-map into a Skyrim armor set, and builds Halo's weapon items (§11.1), all into
-`ChiefrimMjolnir.esp` and its meshes and textures. Nothing it produces goes in the repo or may be
+The Arsenal is Chief's whole kit as a Skyrim mod: his Mjolnir armor and Halo's weapons and
+grenades. `tools/arsenal/build.sh HALO_MAP [SKYRIM_DATA_DIR]` turns Chief's model in the user's
+own Halo map into a Skyrim armor set, and builds Halo's weapon items (§11.1), all into
+`ChiefrimArsenal.esp` and its meshes and textures (in `build/arsenal/Data/`, and packed as
+`build/dist/ChiefrimArsenal.zip`). Nothing it produces goes in the repo or may be
 redistributed.
 
 | Script | Does |
@@ -823,7 +837,7 @@ redistributed.
 | `ground.py` | Each piece's ground model, with a convex-hull collision on Steel Plate's rigid body |
 | `weapons.py` | Halo's weapons' and grenades' world models as Skyrim ground models with collision |
 | `textures.py` | Uncompressed DDS textures |
-| `plugin.py` | `ChiefrimMjolnir.esp` (via `esp.py`): armors from Skyrim.esm's Daedric set, weapons from the Iron Dagger, the loot lists and container lists |
+| `plugin.py` | `ChiefrimArsenal.esp` (via `esp.py`): armors from Skyrim.esm's Daedric set, weapons from the Iron Dagger, the loot lists and container lists |
 | `bsa.py` | Archive support |
 | `blender_preview.py` | Headless Blender renders of each stage, for checking |
 
@@ -843,7 +857,7 @@ Chiefrim-Project/
                               extern/CommonLibSSE-NG (submodule)
     halo/                     UPSTREAM (the OpenCE pin), patches/, src/ (Chiefrim's Halo code),
                               overrides/, test/ (BSP harness)
-    tools/                    build, launch, test and Mjolnir scripts
+    tools/                    build, launch, test and Arsenal scripts
     art/logo/                 the logo and the Halo font
     licenses.toml             every third-party component and its license
     build/                    (git-ignored) builds, Halo's data root, dumps, dist zips

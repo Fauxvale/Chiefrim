@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Writes the Mjolnir armor's ground models (its world models: what lies
 on the ground when a piece is dropped, and turns in the inventory), one
-per piece, build/mjolnir/Data/meshes/armor/chiefrim/mjolnir/<piece>_go.nif,
+per piece, build/arsenal/Data/meshes/armor/chiefrim/mjolnir/<piece>_go.nif,
 from the pieces armor.py splits Chief into, as Skyrim's Steel Plate
 armor's (Armor\\NordPlate\\*_GO.nif, read from the user's own Skyrim) are
 made: one unskinned shape per shader, and a convex hull a dropped piece
@@ -19,7 +19,7 @@ edge diagonal), less Havok's convex radius, which pads it back out; its
 rigid body is Steel Plate's same piece's (mass, friction, material),
 with the hull's centre and a solid box's inertia.
 
-Usage: tools/mjolnir/ground.py [--skyrim DATA_DIR] [--dir build/mjolnir]
+Usage: tools/arsenal/ground.py [--skyrim DATA_DIR] [--dir build/arsenal]
 """
 import argparse
 import itertools
@@ -224,7 +224,7 @@ def build(piece, fitted, shapes, steel_plate):
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	fitted = json.loads((directory / "fitted.json").read_text())

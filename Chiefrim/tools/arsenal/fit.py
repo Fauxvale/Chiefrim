@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Fits the model halo_model.py wrote (build/mjolnir/model.json) to
-Skyrim's skeleton, read from the user's own Skyrim, for the Mjolnir armor
-port: writes build/mjolnir/fitted.json, the same model in Skyrim's units
+"""Fits the model halo_model.py wrote (build/arsenal/model.json) to
+Skyrim's skeleton, read from the user's own Skyrim, for the Arsenal's
+Mjolnir armor: writes build/arsenal/fitted.json, the same model in Skyrim's units
 and frame, bound to Skyrim's bones at their rest pose.
 
 Each of Halo's nodes gets a transform from its rest pose to the fitted one:
@@ -22,7 +22,7 @@ weights, as a skinned mesh is; the weights then name the Skyrim bones.
 Halo is +x forward, +y left, +z up, in units of 10 feet; Skyrim is +y
 forward, +x right, +z up, 70 units to the metre.
 
-Usage: tools/mjolnir/fit.py [--skyrim DATA_DIR] [--dir build/mjolnir] [--shoulders 1]
+Usage: tools/arsenal/fit.py [--skyrim DATA_DIR] [--dir build/arsenal] [--shoulders 1]
          [--torso 1] [--head T] [--arms T] [--boots B] [--helmet 7.5]
 """
 import argparse
@@ -96,7 +96,7 @@ def skyrim_skeleton(data_dir):
 		nif = Nif(loose)
 	else:
 		path = Path(data_dir) / "Skyrim - Meshes0.bsa"
-		target = Path(__file__).resolve().parents[2] / "build" / "mjolnir" / "skyrim" / "skeleton.nif"
+		target = Path(__file__).resolve().parents[2] / "build" / "arsenal" / "skyrim" / "skeleton.nif"
 		target.parent.mkdir(parents=True, exist_ok=True)
 		target.write_bytes(Archive(path).read(SKELETON))
 		nif = Nif(target)
@@ -257,7 +257,7 @@ def fit(model, bones, shoulders=1.0, torso=1.0, head=1.0, arms=1.0, boots=None, 
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	parser.add_argument("--shoulders", type=float, default=1.0,
 		help="how far the arms are fitted out from Skyrim's shoulders (0) to Chief's (1)")
 	parser.add_argument("--torso", type=float, default=1.0,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Writes the Mjolnir armor's plugin, build/mjolnir/Data/ChiefrimMjolnir.esp:
+"""Writes the Arsenal's plugin, build/arsenal/Data/ChiefrimArsenal.esp:
 an armor (ARMO) and its armor addon (ARMA) per piece, made from the user's
 own Skyrim.esm's Daedric armor's (its races, keywords, sounds, stats: the
 heaviest armor Skyrim has), with Chief's names, armor.py's NIFs and the
@@ -38,7 +38,7 @@ store's: with Skyrim's weapons for sale), as the game loads, at the chances
 Chiefrim.ini gives them. (An enemy Chief fights falls with its Halo proxy's gun and grenades,
 skse/src/Arsenal.cpp.)
 
-Usage: tools/mjolnir/plugin.py [--skyrim DATA_DIR] [--dir build/mjolnir]
+Usage: tools/arsenal/plugin.py [--skyrim DATA_DIR] [--dir build/arsenal]
 """
 import argparse
 import struct
@@ -52,7 +52,7 @@ from fit import DEFAULT_SKYRIM  # noqa: E402
 from nif import Nif  # noqa: E402
 import weapons  # noqa: E402
 
-NAME = "ChiefrimMjolnir.esp"
+NAME = "ChiefrimArsenal.esp"
 FIRST_ID = 0x800
 # biped slots, as BOD2's and BODT's bits (slot 30 is bit 0)
 SLOT = {slot: 1 << (slot - 30) for slot in range(30, 62)}
@@ -242,7 +242,7 @@ def build(skyrim, data_dir):
 	esp.header = Record("TES4", 0, subrecords=[
 		("HEDR", struct.pack("<fiI", 1.71, len(armors) + len(addons) + len(ours), next_id)),
 		("CNAM", zstring("Chiefrim")),
-		("SNAM", zstring("Master Chief's Mjolnir armor and Halo's weapons, ported from Halo CE by Chiefrim's tools.")),
+		("SNAM", zstring("Chiefrim's Arsenal: Master Chief's Mjolnir armor and Halo's weapons, ported from Halo CE.")),
 		("MAST", zstring("Skyrim.esm")),
 		("DATA", struct.pack("<Q", 0)),
 	])
@@ -254,7 +254,7 @@ def build(skyrim, data_dir):
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	args = parser.parse_args()
 	path = Path(args.dir) / "Data" / NAME
 	build(args.skyrim, path.parent).write(path)

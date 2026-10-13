@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Splits the model fit.py fitted to Skyrim's skeleton (build/mjolnir/
+"""Splits the model fit.py fitted to Skyrim's skeleton (build/arsenal/
 fitted.json) into Skyrim's armor pieces, and writes their NIFs under
-build/mjolnir/Data/meshes/armor/chiefrim/mjolnir/, for the Mjolnir armor
-port.
+build/arsenal/Data/meshes/armor/chiefrim/mjolnir/, for the Arsenal's
+Mjolnir armor.
 
 Each of Chief's triangles goes to the piece of the bone weighted most over
 its corners: his helmet (the head, and his visor), his gauntlets (forearms
@@ -26,7 +26,7 @@ addon's partitions only of the slots it covers (and wins): the helmet's
 addon covers the head (30), as Skyrim's full helmets' do, which hides the
 face inside it.
 
-Usage: tools/mjolnir/armor.py [--skyrim DATA_DIR] [--dir build/mjolnir]
+Usage: tools/arsenal/armor.py [--skyrim DATA_DIR] [--dir build/arsenal]
 """
 import argparse
 import copy
@@ -448,7 +448,7 @@ def build(fitted, skeleton, bodies, out):
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	args = parser.parse_args()
 	directory = Path(args.dir)
 	fitted = json.loads((directory / "fitted.json").read_text())

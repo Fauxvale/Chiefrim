@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Writes Halo's weapons as Skyrim items' world models (what lies on the
 ground and turns in the inventory; docs §11.1), from the user's
-own Halo map and Skyrim: per weapon, build/mjolnir/Data/meshes/weapons/
+own Halo map and Skyrim: per weapon, build/arsenal/Data/meshes/weapons/
 chiefrim/<key>.nif and its textures under textures/weapons/chiefrim/<key>/.
 plugin.py makes each a WEAP whose world model this is; equipping one gives
 Chief the Halo weapon (skse/src/Arsenal.cpp).
@@ -35,7 +35,7 @@ Skyrim's Iron Dagger's rigid body (the weapon layer, its material), made
 heavier and duller than a dagger's (BODY): a gun lands and stays, it
 doesn't skitter.
 
-Usage: tools/mjolnir/weapons.py HALO_MAP [--skyrim DATA_DIR] [--dir build/mjolnir]
+Usage: tools/arsenal/weapons.py HALO_MAP [--skyrim DATA_DIR] [--dir build/arsenal]
 """
 import argparse
 import struct
@@ -295,7 +295,7 @@ def main():
 	parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 	parser.add_argument("map")
 	parser.add_argument("--skyrim", default=str(DEFAULT_SKYRIM), help="Skyrim's Data directory")
-	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "mjolnir"))
+	parser.add_argument("--dir", default=str(Path(__file__).resolve().parents[2] / "build" / "arsenal"))
 	parser.add_argument("--size", type=int, default=512, help="the baked textures' size")
 	args = parser.parse_args()
 	directory = Path(args.dir)
